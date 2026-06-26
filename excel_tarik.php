@@ -73,7 +73,8 @@ $globalDendaIstirahatMasuk = $dataDenda['denda_istirahat_masuk'] ?? 0;
 $globalDendaPulang = $dataDenda['denda_pulang'] ?? 0;
 $globalDendaTidakLengkap = $dataDenda['denda_tidak_lengkap'] ?? 0;
 
-$buffer = "";
+$http_host = $_SERVER['HTTP_HOST'] ?? '';
+$is_local = (strpos($http_host, 'localhost') !== false || strpos($http_host, '127.0.0.1') !== false || strpos($http_host, '.test') !== false);
 $Connect = @fsockopen($IP, $port, $errno, $errstr, 0.3);
 
 if ($Connect) {
@@ -87,74 +88,108 @@ if ($Connect) {
 	while ($Response = fgets($Connect, 1024)) {
 		$buffer = $buffer . $Response;
 	}
-} else {
-	// Fallback ke dummy logs
-	$today = $Tanggal;
-	$dummy_buffer = "";
-	$q_emp = $koneksi->query("SELECT no_absen FROM ms_karyawan WHERE status_karyawan = 'Aktif'");
-	while ($row = $q_emp->fetch_assoc()) {
-		$pin = $row['no_absen'];
-		$minute_in = rand(30, 59);
-		$time_in = "07:" . sprintf("%02d", $minute_in) . ":00";
-		if (rand(1, 10) > 8) {
-			$time_in = "08:" . sprintf("%02d", rand(1, 15)) . ":00";
+	
+	// Parse and save to tb_record (for all pulled records)
+	$parsed_data = Parse_Data($buffer, "<GetAttLogResponse>", "</GetAttLogResponse>");
+	$parsed_rows = explode("\r\n", $parsed_data);
+	for ($a = 0; $a < count($parsed_rows); $a++) {
+		$data_raw = Parse_Data($parsed_rows[$a], "<Row>", "</Row>");
+		$PIN = Parse_Data($data_raw, "<PIN>", "</PIN>");
+		$DateTime = Parse_Data($data_raw, "<DateTime>", "</DateTime>");
+		$Verified = Parse_Data($data_raw, "<Verified>", "</Verified>");
+		$Status = Parse_Data($data_raw, "<Status>", "</Status>");
+
+		if ($PIN != '' && $DateTime != '') {
+			// Simpan ke database dengan pencegahan duplikat
+			$check = $koneksi->query("SELECT id_record FROM tb_record WHERE userid = '$PIN' AND detail_waktu = '$DateTime' LIMIT 1");
+			if ($check->num_rows == 0) {
+				$koneksi->query("INSERT INTO tb_record (data,userid,tgl,verifikasi,status,detail_waktu) VALUES ('$data_raw','$PIN','$DateTime','$Verified','$Status','$DateTime')");
+			}
 		}
-		$time_break_out = "12:" . sprintf("%02d", rand(0, 10)) . ":00";
-		$time_break_in = "13:" . sprintf("%02d", rand(0, 5)) . ":00";
-		$time_out = "17:" . sprintf("%02d", rand(0, 30)) . ":00";
-		
-		$dummy_buffer .= "<Row><PIN>{$pin}</PIN><DateTime>{$today} {$time_in}</DateTime><Verified>1</Verified><Status>0</Status></Row>\r\n";
-		$dummy_buffer .= "<Row><PIN>{$pin}</PIN><DateTime>{$today} {$time_break_out}</DateTime><Verified>1</Verified><Status>2</Status></Row>\r\n";
-		$dummy_buffer .= "<Row><PIN>{$pin}</PIN><DateTime>{$today} {$time_break_in}</DateTime><Verified>1</Verified><Status>3</Status></Row>\r\n";
-		$dummy_buffer .= "<Row><PIN>{$pin}</PIN><DateTime>{$today} {$time_out}</DateTime><Verified>1</Verified><Status>1</Status></Row>\r\n";
 	}
-	$buffer = "<GetAttLogResponse>\r\n" . $dummy_buffer . "</GetAttLogResponse>";
+} else {
+	// Check if records exist in tb_record for this date
+	$check_rec = $koneksi->query("SELECT id_record FROM tb_record WHERE tgl = '$Tanggal' LIMIT 1");
+	
+	// If local environment AND no records exist, generate dummy records
+	if ($is_local && $check_rec->num_rows == 0) {
+		$today = $Tanggal;
+		$q_emp = $koneksi->query("SELECT no_absen FROM ms_karyawan WHERE status_karyawan = 'Aktif'");
+		while ($row = $q_emp->fetch_assoc()) {
+			$pin = $row['no_absen'];
+			$minute_in = rand(30, 59);
+			$time_in = "07:" . sprintf("%02d", $minute_in) . ":00";
+			if (rand(1, 10) > 8) {
+				$time_in = "08:" . sprintf("%02d", rand(1, 15)) . ":00";
+			}
+			$time_break_out = "12:" . sprintf("%02d", rand(0, 10)) . ":00";
+			$time_break_in = "13:" . sprintf("%02d", rand(0, 5)) . ":00";
+			$time_out = "17:" . sprintf("%02d", rand(0, 30)) . ":00";
+			
+			$times = [
+				['time' => $time_in, 'status' => 0],
+				['time' => $time_break_out, 'status' => 2],
+				['time' => $time_break_in, 'status' => 3],
+				['time' => $time_out, 'status' => 1]
+			];
+			
+			foreach ($times as $t) {
+				$dt = "$today {$t['time']}";
+				$data_raw = "<Row><PIN>{$pin}</PIN><DateTime>{$dt}</DateTime><Verified>1</Verified><Status>{$t['status']}</Status></Row>";
+				
+				$check = $koneksi->query("SELECT id_record FROM tb_record WHERE userid = '$pin' AND detail_waktu = '$dt' LIMIT 1");
+				if ($check->num_rows == 0) {
+					$koneksi->query("INSERT INTO tb_record (data,userid,tgl,verifikasi,status,detail_waktu) VALUES ('$data_raw','$pin','$today','1','{$t['status']}','$dt')");
+				}
+			}
+		}
+	}
 }
 
-$buffer = Parse_Data($buffer, "<GetAttLogResponse>", "</GetAttLogResponse>");
-$buffer = explode("\r\n", $buffer);
-
+// Query and group data from tb_record for $Tanggal
+$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl = '$Tanggal'");
 $grouped = [];
-for ($a = 0; $a < count($buffer); $a++) {
-	$data_raw = Parse_Data($buffer[$a], "<Row>", "</Row>");
-	$PIN = Parse_Data($data_raw, "<PIN>", "</PIN>");
-	$DateTime = Parse_Data($data_raw, "<DateTime>", "</DateTime>");
-	$Verified = Parse_Data($data_raw, "<Verified>", "</Verified>");
-	$Status = Parse_Data($data_raw, "<Status>", "</Status>");
 
-	if ($PIN != '' && $DateTime != '') {
-		$date = substr($DateTime, 0, 10);
-		if ($date !== $Tanggal) {
-			continue; // Lewati data jika tidak cocok dengan tanggal filter
-		}
-		$time = substr($DateTime, 11, 5);
-		
-		$key = $PIN . '_' . $date;
-		if (!isset($grouped[$key])) {
-			$grouped[$key] = [
-				'pin' => $PIN,
-				'date' => $date,
-				'masuk' => '',
-				'istirahat_keluar' => '',
-				'istirahat_masuk' => '',
-				'pulang' => '',
-				'raw_times' => []
-			];
-		}
-		
-		$grouped[$key]['raw_times'][] = [
-			'time' => $time,
-			'status' => $Status
+while ($row_rec = $db_records->fetch_assoc()) {
+	$PIN = $row_rec['userid'];
+	$DateTime = $row_rec['detail_waktu'];
+	$Verified = $row_rec['verifikasi'];
+	$Status = $row_rec['status'];
+
+	$time = substr($DateTime, 11, 5); // "08:12"
+	$key = $PIN . '_' . $Tanggal;
+	if (!isset($grouped[$key])) {
+		$grouped[$key] = [
+			'pin' => $PIN,
+			'date' => $Tanggal,
+			'masuk' => '',
+			'istirahat_keluar' => '',
+			'istirahat_masuk' => '',
+			'pulang' => '',
+			'raw_times' => []
 		];
+	}
+	
+	$grouped[$key]['raw_times'][] = [
+		'time' => $time,
+		'status' => $Status
+	];
 
-		if ($Status == 0) {
-			if ($grouped[$key]['masuk'] == '' || $time < $grouped[$key]['masuk']) $grouped[$key]['masuk'] = $time;
-		} elseif ($Status == 2) {
-			if ($grouped[$key]['istirahat_keluar'] == '' || $time < $grouped[$key]['istirahat_keluar']) $grouped[$key]['istirahat_keluar'] = $time;
-		} elseif ($Status == 3) {
-			if ($grouped[$key]['istirahat_masuk'] == '' || $time < $grouped[$key]['istirahat_masuk']) $grouped[$key]['istirahat_masuk'] = $time;
-		} elseif ($Status == 1) {
-			if ($grouped[$key]['pulang'] == '' || $time > $grouped[$key]['pulang']) $grouped[$key]['pulang'] = $time;
+	if ($Status == 0) {
+		if ($grouped[$key]['masuk'] == '' || $time < $grouped[$key]['masuk']) {
+			$grouped[$key]['masuk'] = $time;
+		}
+	} elseif ($Status == 2) {
+		if ($grouped[$key]['istirahat_keluar'] == '' || $time < $grouped[$key]['istirahat_keluar']) {
+			$grouped[$key]['istirahat_keluar'] = $time;
+		}
+	} elseif ($Status == 3) {
+		if ($grouped[$key]['istirahat_masuk'] == '' || $time < $grouped[$key]['istirahat_masuk']) {
+			$grouped[$key]['istirahat_masuk'] = $time;
+		}
+	} elseif ($Status == 1) {
+		if ($grouped[$key]['pulang'] == '' || $time > $grouped[$key]['pulang']) {
+			$grouped[$key]['pulang'] = $time;
 		}
 	}
 }
