@@ -1,0 +1,6 @@
+*.zip
+*.stackdump
+.tempmediaStorage/
+.system_generated/
+.agents/
+.gemini/

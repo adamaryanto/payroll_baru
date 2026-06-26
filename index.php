@@ -18,6 +18,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <title>PAYROLL</title>
+    <link rel="shortcut icon" href="images/favicon_round.png" type="image/png">
     <meta content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" name="viewport">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
