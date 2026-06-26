@@ -1,0 +1,16 @@
+<?php
+
+$id = $_GET['id'];
+
+
+$sql =   $koneksi->query("delete from tb_sia where id_sia = '$id' ");
+if ($sql) {
+?>
+    <script type="text/javascript">
+        alert("Data Berhasil Di Hapus");
+        window.location.href = "?page=sakit";
+    </script>
+<?php
+}
+
+?>

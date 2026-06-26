@@ -1,0 +1,205 @@
+/* Tailwind CSS imported via CDN in index.php & login.php */
+
+/* Custom Corporate Color Variables */
+:root {
+    --corporate-navy: #1e3a5f;
+    --corporate-blue: #2563eb;
+    --corporate-light-blue: #eff6ff;
+    --corporate-gray: #f8fafc;
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --border-light: #e2e8f0;
+}
+
+/* Base Overrides for Bootstrap Compatibility */
+body {
+    font-family: 'Inter', sans-serif !important;
+    background-color: var(--corporate-gray) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Modern Card Styles */
+.modern-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    border: 1px solid var(--border-light);
+    overflow: hidden;
+}
+
+.modern-panel-header {
+    background: linear-gradient(135deg, var(--corporate-navy) 0%, var(--corporate-blue) 100%) !important;
+    color: white !important;
+    padding: 16px 20px !important;
+    border-bottom: none !important;
+    border-top-left-radius: 12px !important;
+    border-top-right-radius: 12px !important;
+}
+
+.modern-panel-header h3 {
+    font-size: 1.125rem !important;
+    font-weight: 600 !important;
+    margin: 0 !important;
+}
+
+/* Modern Table Styles */
+.modern-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.modern-table thead th {
+    background-color: var(--corporate-light-blue) !important;
+    color: var(--corporate-navy) !important;
+    font-weight: 600 !important;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    padding: 12px 16px !important;
+    border-bottom: 2px solid var(--border-light) !important;
+    border-top: none !important;
+}
+
+.modern-table tbody td {
+    padding: 12px 16px !important;
+    vertical-align: middle !important;
+    border-top: 1px solid var(--border-light) !important;
+    font-size: 0.875rem;
+}
+
+.modern-table tbody tr:hover td {
+    background-color: #f1f5f9 !important;
+}
+
+.text-right {
+    text-align: right !important;
+}
+
+.currency-cell {
+    font-family: 'Courier New', Courier, monospace;
+    font-weight: 500;
+    text-align: right !important;
+}
+
+/* Modern Buttons */
+.btn-modern {
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+    padding: 8px 16px !important;
+    transition: all 0.2s ease-in-out !important;
+    text-shadow: none !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
+}
+
+.btn-primary.btn-modern {
+    background-color: var(--corporate-blue) !important;
+    border-color: var(--corporate-blue) !important;
+}
+
+.btn-primary.btn-modern:hover {
+    background-color: #1d4ed8 !important;
+    border-color: #1d4ed8 !important;
+    transform: translateY(-1px);
+}
+
+.btn-success.btn-modern {
+    background-color: #10b981 !important;
+    border-color: #10b981 !important;
+}
+
+/* Status Badges */
+.modern-badge {
+    display: inline-block;
+    padding: 0.25em 0.6em;
+    font-size: 75%;
+    font-weight: 600;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: baseline;
+    border-radius: 9999px;
+}
+
+.badge-sakit {
+    background-color: #fef08a;
+    color: #854d0e;
+}
+
+.badge-ijin {
+    background-color: #e0f2fe;
+    color: #0369a1;
+}
+
+.badge-alfa {
+    background-color: #fee2e2;
+    color: #991b1b;
+}
+
+.badge-cuti {
+    background-color: #dcfce3;
+    color: #166534;
+}
+
+/* Dashboard Cards */
+.stat-card {
+    transition: transform 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-4px);
+}
+
+.stat-icon-box {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Login Page Specific */
+.login-bg {
+    background: linear-gradient(135deg, #f6f8fc 0%, #e9f0f9 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 400px;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.login-header {
+    background: var(--corporate-navy);
+    color: white;
+    padding: 32px 24px;
+    text-align: center;
+}
+
+.login-body {
+    padding: 32px 24px;
+}
+
+.modern-input {
+    border-radius: 8px !important;
+    border: 1px solid var(--border-light) !important;
+    padding: 10px 16px !important;
+    height: auto !important;
+    font-size: 0.95rem !important;
+    box-shadow: none !important;
+    transition: all 0.2s !important;
+}
+
+.modern-input:focus {
+    border-color: var(--corporate-blue) !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+}
