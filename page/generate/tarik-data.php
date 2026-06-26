@@ -365,7 +365,31 @@ if ($Key == "") $Key = "";
 								$globalDendaPulang = $dataDenda['denda_pulang'] ?? 0;
 								$globalDendaTidakLengkap = $dataDenda['denda_tidak_lengkap'] ?? 0;
 								$is_local = (strpos($http_host, 'localhost') !== false || strpos($http_host, '127.0.0.1') !== false || strpos($http_host, '.test') !== false);
-								$Connect = @fsockopen($IP, $port, $errno, $errstr, 0.3);
+								
+								// Skip connecting to private IPs on online servers (reduces connection timeout delay)
+								$is_private_target = false;
+								if ($IP === 'localhost' || $IP === '127.0.0.1') {
+									$is_private_target = true;
+								} else {
+									$ip_parts = explode('.', $IP);
+									if (count($ip_parts) === 4) {
+										$first = (int)$ip_parts[0];
+										$second = (int)$ip_parts[1];
+										if ($first === 10 || ($first === 192 && $second === 168) || ($first === 172 && $second >= 16 && $second <= 31)) {
+											$is_private_target = true;
+										}
+									}
+								}
+
+								$should_connect = true;
+								if (!$is_local && $is_private_target) {
+									$should_connect = false;
+								}
+
+								$Connect = false;
+								if ($should_connect) {
+									$Connect = @fsockopen($IP, $port, $errno, $errstr, 0.3);
+								}
 
 								if ($Connect) {
 									$soap_request = "<GetAttLog><ArgComKey xsi:type=\"xsd:integer\">" . $Key . "</ArgComKey><Arg><PIN xsi:type=\"xsd:integer\">All</PIN></Arg></GetAttLog>";
@@ -383,6 +407,15 @@ if ($Key == "") $Key = "";
 									include(__DIR__ . "/parse.php");
 									$parsed_data = Parse_Data($buffer, "<GetAttLogResponse>", "</GetAttLogResponse>");
 									$parsed_rows = explode("\r\n", $parsed_data);
+									
+									// Build lookup map for duplicates
+									$existing_logs = [];
+									$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl = '$Tanggal'");
+									while ($ex_row = $ex_res->fetch_assoc()) {
+										$existing_logs[$ex_row['userid'] . '_' . $ex_row['detail_waktu']] = true;
+									}
+
+									$insert_values = [];
 									for ($a = 0; $a < count($parsed_rows); $a++) {
 										$data_raw = Parse_Data($parsed_rows[$a], "<Row>", "</Row>");
 										$PIN = Parse_Data($data_raw, "<PIN>", "</PIN>");
@@ -391,11 +424,21 @@ if ($Key == "") $Key = "";
 										$Status = Parse_Data($data_raw, "<Status>", "</Status>");
 
 										if ($PIN != '' && $DateTime != '') {
-											// Simpan ke database dengan pencegahan duplikat
-											$check = $koneksi->query("SELECT id_record FROM tb_record WHERE userid = '$PIN' AND detail_waktu = '$DateTime' LIMIT 1");
-											if ($check->num_rows == 0) {
-												$koneksi->query("INSERT INTO tb_record (data,userid,tgl,verifikasi,status,detail_waktu) VALUES ('$data_raw','$PIN','$DateTime','$Verified','$Status','$DateTime')");
+											$key = $PIN . '_' . $DateTime;
+											if (!isset($existing_logs[$key])) {
+												$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
+												$date_only = substr($DateTime, 0, 10);
+												$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
+												$existing_logs[$key] = true;
 											}
+										}
+									}
+									
+									if (!empty($insert_values)) {
+										$chunks = array_chunk($insert_values, 100);
+										foreach ($chunks as $chunk) {
+											$sql = "INSERT INTO tb_record (data,userid,tgl,verifikasi,status,detail_waktu) VALUES " . implode(", ", $chunk);
+											$koneksi->query($sql);
 										}
 									}
 								} else {
@@ -407,6 +450,15 @@ if ($Key == "") $Key = "";
 									// If local environment AND no records exist, generate dummy records
 									if ($is_local && $check_rec->num_rows == 0) {
 										$today = $Tanggal;
+										
+										// Fetch all existing logs for this date into memory
+										$existing_logs = [];
+										$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl = '$today'");
+										while ($ex_row = $ex_res->fetch_assoc()) {
+											$existing_logs[$ex_row['userid'] . '_' . $ex_row['detail_waktu']] = true;
+										}
+
+										$insert_values = [];
 										$q_emp = $koneksi->query("SELECT no_absen FROM ms_karyawan WHERE status_karyawan = 'Aktif'");
 										while ($row = $q_emp->fetch_assoc()) {
 											$pin = $row['no_absen'];
@@ -429,12 +481,21 @@ if ($Key == "") $Key = "";
 											
 											foreach ($times as $t) {
 												$dt = "$today {$t['time']}";
-												$data_raw = "<PIN>{$pin}</PIN><DateTime>{$dt}</DateTime><Verified>1</Verified><Status>{$t['status']}</Status>";
-												
-												$check = $koneksi->query("SELECT id_record FROM tb_record WHERE userid = '$pin' AND detail_waktu = '$dt' LIMIT 1");
-												if ($check->num_rows == 0) {
-													$koneksi->query("INSERT INTO tb_record (data,userid,tgl,verifikasi,status,detail_waktu) VALUES ('$data_raw','$pin','$today','1','{$t['status']}','$dt')");
+												$key = $pin . '_' . $dt;
+												if (!isset($existing_logs[$key])) {
+													$data_raw = "<PIN>{$pin}</PIN><DateTime>{$dt}</DateTime><Verified>1</Verified><Status>{$t['status']}</Status>";
+													$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
+													$insert_values[] = "('$data_esc','$pin','$today','1','{$t['status']}','$dt')";
+													$existing_logs[$key] = true;
 												}
+											}
+										}
+										
+										if (!empty($insert_values)) {
+											$chunks = array_chunk($insert_values, 100);
+											foreach ($chunks as $chunk) {
+												$sql = "INSERT INTO tb_record (data,userid,tgl,verifikasi,status,detail_waktu) VALUES " . implode(", ", $chunk);
+												$koneksi->query($sql);
 											}
 										}
 									}
