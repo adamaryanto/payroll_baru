@@ -316,7 +316,7 @@ if ($Key == "") $Key = "";
 						</div>
 						<div class="col-md-3 col-sm-12 mb-3 mb-md-0">
 							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">Tanggal Absensi:</label>
-							<input type="date" name="tanggal" value="<?php echo $Tanggal; ?>" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
+							<input type="date" name="tanggal" value="<?php echo $Tanggal; ?>" onchange="this.form.submit()" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
 						</div>
 						<div class="col-md-3 col-sm-12">
 							<button type="submit" class="btn btn-primary font-bold px-4 h-[42px] d-inline-flex align-items-center w-full justify-center shadow-sm">
