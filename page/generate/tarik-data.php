@@ -32,8 +32,9 @@ if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
 		}
 	}
 	
-	// Redirect untuk mencegah resubmission form saat refresh
-	header("Location: ?page=generate&aksi=tarik&ip=" . urlencode($IP) . "&key=" . urlencode($Key) . "&tanggal_awal=" . urlencode($TanggalAwal) . "&tanggal_akhir=" . urlencode($TanggalAkhir) . "&delete_success=" . $count);
+	// Redirect menggunakan JavaScript untuk mencegah error "headers already sent" yang menyebabkan halaman kosong
+	$redirect_url = "?page=generate&aksi=tarik&ip=" . urlencode($IP) . "&key=" . urlencode($Key) . "&tanggal_awal=" . urlencode($TanggalAwal) . "&tanggal_akhir=" . urlencode($TanggalAkhir) . "&delete_success=" . $count;
+	echo "<script>window.location.href = '$redirect_url';</script>";
 	exit;
 }
 
