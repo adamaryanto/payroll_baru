@@ -1,6 +1,24 @@
 <?php
 
 set_time_limit(0); // unlimited
+
+// Proses hapus terpilih jika form disubmit
+$delete_success_msg = "";
+if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
+	$count = 0;
+	foreach ($_POST['selected_logs'] as $log_key) {
+		$parts = explode('|', $log_key);
+		if (count($parts) == 2) {
+			$pin_esc = mysqli_real_escape_string($koneksi, $parts[0]);
+			$date_esc = mysqli_real_escape_string($koneksi, $parts[1]);
+			if ($koneksi->query("DELETE FROM tb_record WHERE userid = '$pin_esc' AND tgl = '$date_esc'")) {
+				$count++;
+			}
+		}
+	}
+	$delete_success_msg = "$count data absensi karyawan berhasil dihapus.";
+}
+
 $tampil = $koneksi->query("SELECT * from tb_mesin");
 $data = $tampil->fetch_assoc();
 $idmesin = $data['id_mesin'] ?? '';
@@ -12,7 +30,8 @@ $port = $data['port'] ?? '';
 
 $IP = $_GET['ip'] ?? $ipmesin;
 $Key = $_GET['key'] ?? "0";
-$Tanggal = $_GET['tanggal'] ?? date('Y-m-d');
+$TanggalAwal = $_GET['tanggal_awal'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
+$TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 if ($IP == "") $IP = "192.168.110.201";
 if ($Key == "") $Key = "";
 ?>
@@ -20,6 +39,7 @@ if ($Key == "") $Key = "";
 
 <head>
 	<title>Contoh Koneksi Mesin Absensi Mengunakan SOAP Web Service</title>
+	<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 	<style>
 		/* Prevent cell wrapping and enable horizontal scroll */
 		.table-modern th,
@@ -296,9 +316,13 @@ if ($Key == "") $Key = "";
 			</form>
 
 			<div class="p-0">
+				<form id="form-tarik-data" method="POST" action="">
 				<div class="table-responsive px-3 py-4">
 					<?php if ($IP != "") : ?>
 						<div class="download-btn-container d-flex justify-content-end mb-3 flex-wrap">
+							<button type="button" id="btn-hapus-terpilih" class="btn btn-danger font-semibold text-white d-inline-flex align-items-center mr-2 shadow-sm download-btn">
+								<i class="fas fa-trash-alt mr-2"></i> Hapus Terpilih
+							</button>
 							<a href="excel_tarik.php?ip=<?= htmlspecialchars($IP) ?>&key=<?= htmlspecialchars($Key) ?>&tanggal_awal=<?= htmlspecialchars($TanggalAwal) ?>&tanggal_akhir=<?= htmlspecialchars($TanggalAkhir) ?>" target="_blank" class="btn btn-success font-semibold text-white d-inline-flex align-items-center mr-2 shadow-sm download-btn">
 								<i class="fas fa-file-excel mr-2"></i> Download Excel
 							</a>
@@ -309,6 +333,9 @@ if ($Key == "") $Key = "";
 						<table class="w-full text-left border-collapse table-modern" id="dataTables-example">
 							<thead class="bg-gray-50 border-b border-gray-200">
 								<tr>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center w-[40px]">
+										<input type="checkbox" id="select-all" class="rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
+									</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">No</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Tanggal</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Nama Karyawan</th>
@@ -562,6 +589,9 @@ if ($Key == "") $Key = "";
 									if ($upah_bersih < 0) $upah_bersih = 0;
 								?>
 									<tr class="hover:bg-gray-50 transition-colors">
+										<td class="py-2 px-2 text-center align-middle">
+											<input type="checkbox" name="selected_logs[]" value="<?= htmlspecialchars($PIN . '|' . $date) ?>" class="log-checkbox rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
+										</td>
 										<td data-label="No" class="py-2 px-2 text-[15px] text-center text-gray-500"><?php echo $no++; ?></td>
 										<td data-label="Tanggal" class="py-2 px-2 text-[15px] text-gray-700"><?php echo date('d-m-Y', strtotime($date)); ?></td>
 										<td data-label="Nama Karyawan" class="py-2 px-2 text-[15px]">
@@ -609,16 +639,31 @@ if ($Key == "") $Key = "";
 						</table>
 					<?php endif; ?>
 				</div>
+				</form>
 			</div>
 		</div>
 	</div>
 
 	<script>
 		$(document).ready(function() {
+			// SweetAlert Success Message
+			<?php if (!empty($delete_success_msg)) : ?>
+			Swal.fire({
+				title: 'Berhasil!',
+				text: '<?= htmlspecialchars($delete_success_msg) ?>',
+				icon: 'success',
+				confirmButtonColor: '#3b82f6'
+			});
+			<?php endif; ?>
+
 			$('#dataTables-example').DataTable({
 				pageLength: 25,
 				autoWidth: false,
 				responsive: false,
+				columnDefs: [
+					{ orderable: false, targets: 0 }
+				],
+				order: [[1, 'asc']],
 				lengthMenu: [
 					[10, 25, 50, -1],
 					[10, 25, 50, "Semua"]
@@ -638,6 +683,66 @@ if ($Key == "") $Key = "";
 			// Dihapus style .css('float') bawaan agar tidak bentrok dengan flexbox pada mobile
 			$('.dataTables_filter').addClass('mb-3');
 			$('.dataTables_length').addClass('mb-3');
+
+			// Select All checkbox logic
+			$('#select-all').on('click', function() {
+				var rows = $('#dataTables-example').DataTable().rows({ 'search': 'applied' }).nodes();
+				$('input[type="checkbox"].log-checkbox', rows).prop('checked', this.checked);
+			});
+
+			// Checkbox change handler to sync select-all state
+			$('#dataTables-example').on('change', '.log-checkbox', function() {
+				if (!this.checked) {
+					var el = $('#select-all').get(0);
+					if (el && el.checked && ('indeterminate' in el)) {
+						el.indeterminate = true;
+					}
+				}
+			});
+
+			// Submit bulk delete
+			$('#btn-hapus-terpilih').on('click', function(e) {
+				e.preventDefault();
+				
+				var table = $('#dataTables-example').DataTable();
+				var checkedData = [];
+				table.$('.log-checkbox:checked').each(function() {
+					checkedData.push($(this).val());
+				});
+				
+				if (checkedData.length === 0) {
+					Swal.fire({
+						title: 'Peringatan',
+						text: 'Pilih minimal satu data yang ingin dihapus.',
+						icon: 'warning',
+						confirmButtonColor: '#3b82f6'
+					});
+					return;
+				}
+				
+				Swal.fire({
+					title: 'Apakah Anda yakin?',
+					text: checkedData.length + ' data absensi terpilih akan dihapus permanen!',
+					icon: 'warning',
+					showCancelButton: true,
+					confirmButtonColor: '#ef4444',
+					cancelButtonColor: '#6b7280',
+					confirmButtonText: 'Ya, Hapus!',
+					cancelButtonText: 'Batal'
+				}).then((result) => {
+					if (result.isConfirmed) {
+						var $form = $('#form-tarik-data');
+						$form.find('.appended-log-checkbox').remove();
+						
+						checkedData.forEach(function(val) {
+							$form.append('<input type="hidden" class="appended-log-checkbox" name="selected_logs[]" value="' + val + '" />');
+						});
+						
+						$form.append('<input type="hidden" class="appended-log-checkbox" name="hapus_pilih" value="1" />');
+						$form.submit();
+					}
+				});
+			});
 		});
 	</script>
 </body>
