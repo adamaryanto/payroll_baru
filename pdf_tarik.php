@@ -310,9 +310,9 @@ unset($row);
                     <th width="12%">Bagian</th>
                     <th width="10%" class="text-center">Shift</th>
                     <th width="7%" class="text-center">Jam Masuk</th>
-                    <th width="7%" class="text-center">Jam Pulang</th>
                     <th width="7%" class="text-center">Absen Masuk</th>
                     <th width="9%" class="text-center">Absen Istirahat</th>
+                    <th width="7%" class="text-center">Jam Pulang</th>
                     <th width="7%" class="text-center">Absen Pulang</th>
                     <th width="10%" class="text-right">Upah Pokok</th>
                     <th class="text-center" width="20%">Denda/Potongan</th>
@@ -385,9 +385,9 @@ unset($row);
                         <td><?php echo htmlspecialchars($bagian); ?></td>
                         <td class="text-center"><?php echo $shift_desc; ?></td>
                         <td class="text-center"><?php echo $s_masuk; ?></td>
-                        <td class="text-center"><?php echo $s_keluar; ?></td>
                         <td class="text-center"><?php echo !empty($masuk) ? $masuk : '-'; ?></td>
                         <td class="text-center"><?php echo $rehat_text; ?></td>
+                        <td class="text-center"><?php echo $s_keluar; ?></td>
                         <td class="text-center"><?php echo !empty($pulang) ? $pulang : '-'; ?></td>
                         <td class="text-right"><?php echo rupiah($upah); ?></td>
                         <td>

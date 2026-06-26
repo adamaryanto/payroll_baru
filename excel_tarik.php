@@ -287,9 +287,9 @@ ksort($grouped_by_dept);
                 <th style='background:#e5e7eb;'>GOLONGAN</th>
                 <th style='background:#e5e7eb;'>POSISI</th>
                 <th style='background:#e5e7eb;'>JAM MASUK</th>
-                <th style='background:#e5e7eb;'>JAM PULANG</th>
                 <th style='background:#e5e7eb;'>ABSEN MASUK</th>
                 <th style='background:#e5e7eb;'>ABSEN ISTIRAHAT</th>
+                <th style='background:#e5e7eb;'>JAM PULANG</th>
                 <th style='background:#e5e7eb;'>ABSEN PULANG</th>
                 <th style='background:#e5e7eb;'>HASIL KERJA</th>
                 <th style='background:#e5e7eb;'>UPAH (Rp)</th>
@@ -355,9 +355,9 @@ ksort($grouped_by_dept);
                     <td align='center'>{$label_gol}</td>
                     <td>{$posisi}</td>
                     <td align='center'>{$j_masuk}</td>
-                    <td align='center'>{$j_keluar}</td>
                     <td align='center'>" . (!empty($masuk) ? $masuk : '') . "</td>
                     <td align='center'>" . (!empty($istirahat_masuk) ? $istirahat_masuk : '') . "</td>
+                    <td align='center'>{$j_keluar}</td>
                     <td align='center'>" . (!empty($pulang) ? $pulang : '') . "</td>
                     <td align='center'></td>
                     <td align='right' style='mso-number-format:\"\#\,\#\#0\.00\";'>Rp " . number_format($upah, 2, '.', ',') . "</td>

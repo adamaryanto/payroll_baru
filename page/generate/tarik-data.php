@@ -21,6 +21,16 @@ if ($Key == "") $Key = "";
 <head>
 	<title>Contoh Koneksi Mesin Absensi Mengunakan SOAP Web Service</title>
 	<style>
+		/* Prevent cell wrapping and enable horizontal scroll */
+		.table-modern th,
+		.table-modern td {
+			white-space: nowrap !important;
+		}
+		.table-responsive {
+			overflow-x: auto !important;
+			-webkit-overflow-scrolling: touch !important;
+		}
+
 		/* 1. Reset wrapper agar tidak menggunakan float bawaan DataTables */
 		.dataTables_wrapper {
 			display: block !important;
@@ -156,54 +166,7 @@ if ($Key == "") $Key = "";
 				flex-wrap: wrap;
 			}
 
-			.table-modern thead {
-				display: none !important;
-			}
 
-			.table-modern tbody tr {
-				display: block;
-				margin-bottom: 1.5rem;
-				/* Jarak antar kotak dilebarkan */
-				border: 1px solid #e2e8f0;
-				border-radius: 12px;
-				padding: 16px;
-				/* Jarak padding ke dalam kotak dilebarkan */
-				box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
-				background-color: #fff;
-			}
-
-			.table-modern tbody td {
-				display: flex;
-				flex-direction: column;
-				/* Label di atas, data di bawah (stacking) */
-				align-items: flex-start;
-				padding: 10px 0 !important;
-				/* Jarak atas-bawah per baris dilebarkan */
-				border: none !important;
-				border-bottom: 1px dashed #e2e8f0 !important;
-			}
-
-			.table-modern tbody td:first-child {
-				padding-top: 0 !important;
-			}
-
-			.table-modern tbody td:last-child {
-				border-bottom: none !important;
-				padding-bottom: 0 !important;
-			}
-
-			.table-modern tbody td:before {
-				content: attr(data-label);
-				font-weight: 700;
-				color: #64748b;
-				text-transform: uppercase;
-				font-size: 11px;
-				letter-spacing: 0.5px;
-				margin-bottom: 6px;
-				/* Memberi jarak ke datanya */
-				display: block;
-				width: 100%;
-			}
 
 			/* Mobile layout for download buttons */
 			.download-btn-container {
@@ -347,9 +310,9 @@ if ($Key == "") $Key = "";
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Bagian</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Shift</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Masuk</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Pulang</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Masuk</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Istirahat</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Pulang</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Pulang</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah Pokok</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center" style="min-width: 150px;">Potongan/Denda</th>
@@ -600,9 +563,9 @@ if ($Key == "") $Key = "";
 										<td data-label="Bagian" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($bagian); ?></td>
 										<td data-label="Shift Terdeteksi" class="py-2 px-2 text-[15px] text-center"><?php echo $shift_text; ?></td>
 										<td data-label="Jam Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_masuk); ?></td>
-										<td data-label="Jam Pulang" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_keluar); ?></td>
 										<td data-label="Absen Masuk" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($masuk) ? htmlspecialchars($masuk) : '-'; ?></td>
 										<td data-label="Absen Istirahat" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($rehat_text); ?></td>
+										<td data-label="Jam Pulang" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_keluar); ?></td>
 										<td data-label="Absen Pulang" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($pulang) ? htmlspecialchars($pulang) : '-'; ?></td>
 										<td data-label="Upah Pokok" class="py-2 px-2 text-[15px] text-right text-gray-600 font-semibold"><?php echo rupiah($upah); ?></td>
 										<td data-label="Potongan/Denda" class="py-2 px-2 text-center text-[12px]">
