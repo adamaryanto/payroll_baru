@@ -9,7 +9,8 @@ $port = $data['port'] ?? '';
 
 $IP = $_GET['ip'] ?? $ipmesin;
 $Key = $_GET['key'] ?? "0";
-$Tanggal = $_GET['tanggal'] ?? date('Y-m-d');
+$TanggalAwal = $_GET['tanggal_awal'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
+$TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 if ($IP == "") $IP = "192.168.110.201";
 if ($Key == "") $Key = "";
 
@@ -122,7 +123,7 @@ if ($Connect) {
 	
 	// Build lookup map for duplicates
 	$existing_logs = [];
-	$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl = '$Tanggal'");
+	$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
 	while ($ex_row = $ex_res->fetch_assoc()) {
 		$existing_logs[$ex_row['userid'] . '_' . $ex_row['detail_waktu']] = true;
 	}
@@ -136,12 +137,14 @@ if ($Connect) {
 		$Status = Parse_Data($data_raw, "<Status>", "</Status>");
 
 		if ($PIN != '' && $DateTime != '') {
-			$key = $PIN . '_' . $DateTime;
-			if (!isset($existing_logs[$key])) {
-				$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
-				$date_only = substr($DateTime, 0, 10);
-				$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
-				$existing_logs[$key] = true;
+			$date_only = substr($DateTime, 0, 10);
+			if ($date_only >= $TanggalAwal && $date_only <= $TanggalAkhir) {
+				$key = $PIN . '_' . $DateTime;
+				if (!isset($existing_logs[$key])) {
+					$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
+					$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
+					$existing_logs[$key] = true;
+				}
 			}
 		}
 	}
@@ -155,8 +158,8 @@ if ($Connect) {
 	}
 }
 
-// Query and group data from tb_record for $Tanggal
-$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl = '$Tanggal'");
+// Query and group data from tb_record for Date Range
+$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' ORDER BY tgl ASC, id_record ASC");
 $grouped = [];
 
 while ($row_rec = $db_records->fetch_assoc()) {
@@ -164,13 +167,14 @@ while ($row_rec = $db_records->fetch_assoc()) {
 	$DateTime = $row_rec['detail_waktu'];
 	$Verified = $row_rec['verifikasi'];
 	$Status = $row_rec['status'];
+	$rec_tgl = $row_rec['tgl'];
 
 	$time = substr($DateTime, 11, 5); // "08:12"
-	$key = $PIN . '_' . $Tanggal;
+	$key = $PIN . '_' . $rec_tgl;
 	if (!isset($grouped[$key])) {
 		$grouped[$key] = [
 			'pin' => $PIN,
-			'date' => $Tanggal,
+			'date' => $rec_tgl,
 			'masuk' => '',
 			'istirahat_keluar' => '',
 			'istirahat_masuk' => '',
@@ -268,7 +272,7 @@ unset($row);
             var element = document.getElementById('content-to-pdf');
             var opt = {
                 margin:       10,
-                filename:     'Laporan_Log_Absensi_' + '<?= htmlspecialchars($Tanggal) ?>' + '.pdf',
+                filename:     'Laporan_Log_Absensi_' + '<?= htmlspecialchars($TanggalAwal) ?>_to_<?= htmlspecialchars($TanggalAkhir) ?>' + '.pdf',
                 image:        { type: 'jpeg', quality: 0.98 },
                 html2canvas:  { scale: 2, useCORS: true },
                 jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
@@ -297,7 +301,7 @@ unset($row);
     <div id="content-to-pdf">
         <div class="header">
             <h2>LAPORAN LOG ABSENSI MASUK / PULANG</h2>
-            <p>Tanggal Absensi: <?php echo date('d-m-Y', strtotime($Tanggal)); ?> | Unduh: <?php echo date('d-m-Y H:i'); ?></p>
+            <p>Tanggal Absensi: <?php echo date('d-m-Y', strtotime($TanggalAwal)) . ' s/d ' . date('d-m-Y', strtotime($TanggalAkhir)); ?> | Unduh: <?php echo date('d-m-Y H:i'); ?></p>
         </div>
 
         <table>

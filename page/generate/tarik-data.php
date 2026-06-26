@@ -259,7 +259,8 @@ if ($Key == "") $Key = "";
 			//$Key= $HTTP_GET_VARS[""];
 			$IP = $_GET['ip'] ?? $ipmesin;
 			$Key = $_GET['key'] ?? "0";
-			$Tanggal = $_GET['tanggal'] ?? date('Y-m-d');
+			$TanggalAwal = $_GET['tanggal_awal'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
+			$TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 			if ($IP == "") $IP = "192.168.110.201";
 			if ($Key == "") $Key = "";
 			?>
@@ -269,21 +270,25 @@ if ($Key == "") $Key = "";
 				<input type="hidden" name="aksi" value="tarik" />
 				<div class="p-4 md:p-5 bg-gray-50 border-b border-gray-100">
 					<div class="row items-end">
-						<div class="col-md-4 col-sm-12 mb-3 mb-md-0">
+						<div class="col-md-3 col-sm-12 mb-3 mb-md-0">
 							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">IP Address:</label>
 							<input type="text" name="ip" value="<?php echo $IP; ?>" placeholder="Contoh: 192.168.1.1" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
 						</div>
-						<div class="col-md-2 col-sm-12 mb-3 mb-md-0">
+						<div class="col-md-1 col-sm-12 mb-3 mb-md-0">
 							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">Comm Key:</label>
 							<input type="text" name="key" value="<?php echo $Key; ?>" placeholder="0" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
 						</div>
 						<div class="col-md-3 col-sm-12 mb-3 mb-md-0">
-							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">Tanggal Absensi:</label>
-							<input type="date" name="tanggal" value="<?php echo $Tanggal; ?>" onchange="this.form.submit()" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
+							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">Tanggal Awal:</label>
+							<input type="date" name="tanggal_awal" value="<?php echo $TanggalAwal; ?>" onchange="this.form.submit()" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
 						</div>
-						<div class="col-md-3 col-sm-12">
-							<button type="submit" class="btn btn-primary font-bold px-4 h-[42px] d-inline-flex align-items-center w-full justify-center shadow-sm">
-								<i class="fas fa-cloud-download-alt mr-2"></i> TARIK DATA SEKARANG
+						<div class="col-md-3 col-sm-12 mb-3 mb-md-0">
+							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">Tanggal Akhir:</label>
+							<input type="date" name="tanggal_akhir" value="<?php echo $TanggalAkhir; ?>" onchange="this.form.submit()" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
+						</div>
+						<div class="col-md-2 col-sm-12">
+							<button type="submit" class="btn btn-primary font-bold px-2 h-[42px] d-inline-flex align-items-center w-full justify-center shadow-sm">
+								<i class="fas fa-cloud-download-alt mr-2"></i> TARIK DATA
 							</button>
 						</div>
 					</div>
@@ -294,10 +299,10 @@ if ($Key == "") $Key = "";
 				<div class="table-responsive px-3 py-4">
 					<?php if ($IP != "") : ?>
 						<div class="download-btn-container d-flex justify-content-end mb-3 flex-wrap">
-							<a href="excel_tarik.php?ip=<?= htmlspecialchars($IP) ?>&key=<?= htmlspecialchars($Key) ?>&tanggal=<?= htmlspecialchars($Tanggal) ?>" target="_blank" class="btn btn-success font-semibold text-white d-inline-flex align-items-center mr-2 shadow-sm download-btn">
+							<a href="excel_tarik.php?ip=<?= htmlspecialchars($IP) ?>&key=<?= htmlspecialchars($Key) ?>&tanggal_awal=<?= htmlspecialchars($TanggalAwal) ?>&tanggal_akhir=<?= htmlspecialchars($TanggalAkhir) ?>" target="_blank" class="btn btn-success font-semibold text-white d-inline-flex align-items-center mr-2 shadow-sm download-btn">
 								<i class="fas fa-file-excel mr-2"></i> Download Excel
 							</a>
-							<a href="pdf_tarik.php?ip=<?= htmlspecialchars($IP) ?>&key=<?= htmlspecialchars($Key) ?>&tanggal=<?= htmlspecialchars($Tanggal) ?>" target="_blank" class="btn btn-danger font-semibold text-white d-inline-flex align-items-center shadow-sm download-btn">
+							<a href="pdf_tarik.php?ip=<?= htmlspecialchars($IP) ?>&key=<?= htmlspecialchars($Key) ?>&tanggal_awal=<?= htmlspecialchars($TanggalAwal) ?>&tanggal_akhir=<?= htmlspecialchars($TanggalAkhir) ?>" target="_blank" class="btn btn-danger font-semibold text-white d-inline-flex align-items-center shadow-sm download-btn">
 								<i class="fas fa-file-pdf mr-2"></i> Download PDF
 							</a>
 						</div>
@@ -375,7 +380,7 @@ if ($Key == "") $Key = "";
 									
 									// Build lookup map for duplicates
 									$existing_logs = [];
-									$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl = '$Tanggal'");
+									$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
 									while ($ex_row = $ex_res->fetch_assoc()) {
 										$existing_logs[$ex_row['userid'] . '_' . $ex_row['detail_waktu']] = true;
 									}
@@ -389,12 +394,14 @@ if ($Key == "") $Key = "";
 										$Status = Parse_Data($data_raw, "<Status>", "</Status>");
 
 										if ($PIN != '' && $DateTime != '') {
-											$key = $PIN . '_' . $DateTime;
-											if (!isset($existing_logs[$key])) {
-												$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
-												$date_only = substr($DateTime, 0, 10);
-												$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
-												$existing_logs[$key] = true;
+											$date_only = substr($DateTime, 0, 10);
+											if ($date_only >= $TanggalAwal && $date_only <= $TanggalAkhir) {
+												$key = $PIN . '_' . $DateTime;
+												if (!isset($existing_logs[$key])) {
+													$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
+													$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
+													$existing_logs[$key] = true;
+												}
 											}
 										}
 									}
@@ -410,8 +417,8 @@ if ($Key == "") $Key = "";
 									echo "<p class='text-center py-4 text-red-500 font-bold'>Koneksi Gagal ke Mesin!</p>";
 								}
 
-								// Query and group data from tb_record for $Tanggal
-								$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl = '$Tanggal'");
+								// Query and group data from tb_record for Date Range
+								$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' ORDER BY tgl ASC, id_record ASC");
 								$grouped = [];
 
 								while ($row_rec = $db_records->fetch_assoc()) {
@@ -419,13 +426,14 @@ if ($Key == "") $Key = "";
 									$DateTime = $row_rec['detail_waktu'];
 									$Verified = $row_rec['verifikasi'];
 									$Status = $row_rec['status'];
+									$rec_tgl = $row_rec['tgl'];
 
 									$time = substr($DateTime, 11, 5); // "08:12"
-									$key = $PIN . '_' . $Tanggal;
+									$key = $PIN . '_' . $rec_tgl;
 									if (!isset($grouped[$key])) {
 										$grouped[$key] = [
 											'pin' => $PIN,
-											'date' => $Tanggal,
+											'date' => $rec_tgl,
 											'masuk' => '',
 											'istirahat_keluar' => '',
 											'istirahat_masuk' => '',

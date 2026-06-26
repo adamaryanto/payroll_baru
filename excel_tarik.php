@@ -9,12 +9,13 @@ $port = $data['port'] ?? '';
 
 $IP = $_GET['ip'] ?? $ipmesin;
 $Key = $_GET['key'] ?? "0";
-$Tanggal = $_GET['tanggal'] ?? date('Y-m-d');
+$TanggalAwal = $_GET['tanggal_awal'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
+$TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 if ($IP == "") $IP = "192.168.110.201";
 if ($Key == "") $Key = "";
 
 header("Content-type: application/vnd.ms-excel");
-header("Content-Disposition: attachment; filename=Log_Tarik_Data_" . $Tanggal . ".xls");
+header("Content-Disposition: attachment; filename=Log_Tarik_Data_" . $TanggalAwal . "_to_" . $TanggalAkhir . ".xls");
 echo "<meta charset='UTF-8'>";
 
 if (!function_exists('get_closest_shift')) {
@@ -119,7 +120,7 @@ if ($Connect) {
 	
 	// Build lookup map for duplicates
 	$existing_logs = [];
-	$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl = '$Tanggal'");
+	$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
 	while ($ex_row = $ex_res->fetch_assoc()) {
 		$existing_logs[$ex_row['userid'] . '_' . $ex_row['detail_waktu']] = true;
 	}
@@ -133,12 +134,14 @@ if ($Connect) {
 		$Status = Parse_Data($data_raw, "<Status>", "</Status>");
 
 		if ($PIN != '' && $DateTime != '') {
-			$key = $PIN . '_' . $DateTime;
-			if (!isset($existing_logs[$key])) {
-				$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
-				$date_only = substr($DateTime, 0, 10);
-				$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
-				$existing_logs[$key] = true;
+			$date_only = substr($DateTime, 0, 10);
+			if ($date_only >= $TanggalAwal && $date_only <= $TanggalAkhir) {
+				$key = $PIN . '_' . $DateTime;
+				if (!isset($existing_logs[$key])) {
+					$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
+					$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
+					$existing_logs[$key] = true;
+				}
 			}
 		}
 	}
@@ -152,8 +155,8 @@ if ($Connect) {
 	}
 }
 
-// Query and group data from tb_record for $Tanggal
-$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl = '$Tanggal'");
+// Query and group data from tb_record for Date Range
+$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' ORDER BY tgl ASC, id_record ASC");
 $grouped = [];
 
 while ($row_rec = $db_records->fetch_assoc()) {
@@ -161,13 +164,14 @@ while ($row_rec = $db_records->fetch_assoc()) {
 	$DateTime = $row_rec['detail_waktu'];
 	$Verified = $row_rec['verifikasi'];
 	$Status = $row_rec['status'];
+	$rec_tgl = $row_rec['tgl'];
 
 	$time = substr($DateTime, 11, 5); // "08:12"
-	$key = $PIN . '_' . $Tanggal;
+	$key = $PIN . '_' . $rec_tgl;
 	if (!isset($grouped[$key])) {
 		$grouped[$key] = [
 			'pin' => $PIN,
-			'date' => $Tanggal,
+			'date' => $rec_tgl,
 			'masuk' => '',
 			'istirahat_keluar' => '',
 			'istirahat_masuk' => '',
@@ -249,21 +253,21 @@ ksort($grouped_by_dept);
 
 <table border="0">
     <tr>
-        <th colspan="15" style="text-align:center; font-size:20px; font-weight:bold;">LAPORAN REALISASI UPAH</th>
+        <th colspan="16" style="text-align:center; font-size:20px; font-weight:bold;">LAPORAN REALISASI UPAH</th>
     </tr>
     <tr>
-        <th colspan="15" style="text-align:center; font-size:16px;">
-            Tanggal Realisasi: <?php echo date('d/m/Y', strtotime($Tanggal)); ?>
+        <th colspan="16" style="text-align:center; font-size:16px;">
+            Tanggal Realisasi: <?php echo date('d/m/Y', strtotime($TanggalAwal)) . ' s/d ' . date('d/m/Y', strtotime($TanggalAkhir)); ?>
         </th>
     </tr>
     <tr>
-        <td colspan="15" style="text-align:center; color:red; font-weight:bold; padding-top:10px;">JIKALAU NAMA YANG TERTERA DIABSEN TELAT MAKA AKAN DIPOTONG RP 25.000</td>
+        <td colspan="16" style="text-align:center; color:red; font-weight:bold; padding-top:10px;">JIKALAU NAMA YANG TERTERA DIABSEN TELAT MAKA AKAN DIPOTONG RP 25.000</td>
     </tr>
     <tr>
-        <td colspan="15" style="text-align:center;">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td>
+        <td colspan="16" style="text-align:center;">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td>
     </tr>
     <tr>
-        <td colspan="15" style="height:15px;"></td>
+        <td colspan="16" style="height:15px;"></td>
     </tr>
 </table>
 
@@ -275,13 +279,14 @@ ksort($grouped_by_dept);
         
         foreach ($grouped_by_dept as $dept_id => $dept) {
             echo "<tr>
-                    <td colspan='15' align='center' style='background-color:#1e3a8a; color:white; font-weight:bold;'>
+                    <td colspan='16' align='center' style='background-color:#1e3a8a; color:white; font-weight:bold;'>
                         " . strtoupper($dept['nama_departmen']) . "
                     </td>
                   </tr>";
 
             echo "<tr>
                 <th style='background:#e5e7eb;'>No</th>
+                <th style='background:#e5e7eb;'>TANGGAL</th>
                 <th style='background:#e5e7eb;'>NAMA SESUAI KTP</th>
                 <th style='background:#e5e7eb;'>OS/DHK</th>
                 <th style='background:#e5e7eb;'>GOLONGAN</th>
@@ -350,6 +355,7 @@ ksort($grouped_by_dept);
 
                 echo "<tr>
                     <td align='center'>$no</td>
+                    <td align='center'>" . date('d/m/Y', strtotime($date)) . "</td>
                     <td>" . strtoupper($nama_karyawan) . "</td>
                     <td align='center'>{$label_os}</td>
                     <td align='center'>{$label_gol}</td>
@@ -369,7 +375,7 @@ ksort($grouped_by_dept);
             }
         }
         // GRAND TOTAL UPAH
-        echo "<tr><td colspan='15' style='background:#203764; color:white; font-weight:bold; text-align:right; padding:10px;'>GRAND TOTAL UPAH ($grand_karyawan Karyawan) | Rp " . number_format($grand_total, 2, '.', ',') . "</td></tr>";
+        echo "<tr><td colspan='16' style='background:#203764; color:white; font-weight:bold; text-align:right; padding:10px;'>GRAND TOTAL UPAH ($grand_karyawan Karyawan) | Rp " . number_format($grand_total, 2, '.', ',') . "</td></tr>";
         ?>
     </tbody>
 </table>
