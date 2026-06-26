@@ -2,23 +2,6 @@
 
 set_time_limit(0); // unlimited
 
-// Proses hapus terpilih jika form disubmit
-$delete_success_msg = "";
-if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
-	$count = 0;
-	foreach ($_POST['selected_logs'] as $log_key) {
-		$parts = explode('|', $log_key);
-		if (count($parts) == 2) {
-			$pin_esc = mysqli_real_escape_string($koneksi, $parts[0]);
-			$date_esc = mysqli_real_escape_string($koneksi, $parts[1]);
-			if ($koneksi->query("DELETE FROM tb_record WHERE userid = '$pin_esc' AND tgl = '$date_esc'")) {
-				$count++;
-			}
-		}
-	}
-	$delete_success_msg = "$count data absensi karyawan berhasil dihapus.";
-}
-
 $tampil = $koneksi->query("SELECT * from tb_mesin");
 $data = $tampil->fetch_assoc();
 $idmesin = $data['id_mesin'] ?? '';
@@ -34,6 +17,31 @@ $TanggalAwal = $_GET['tanggal_awal'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 $TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 if ($IP == "") $IP = "192.168.110.201";
 if ($Key == "") $Key = "";
+
+// Proses hapus terpilih jika form disubmit
+if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
+	$count = 0;
+	foreach ($_POST['selected_logs'] as $log_key) {
+		$parts = explode('|', $log_key);
+		if (count($parts) == 2) {
+			$pin_esc = mysqli_real_escape_string($koneksi, $parts[0]);
+			$date_esc = mysqli_real_escape_string($koneksi, $parts[1]);
+			if ($koneksi->query("DELETE FROM tb_record WHERE userid = '$pin_esc' AND tgl = '$date_esc'")) {
+				$count++;
+			}
+		}
+	}
+	
+	// Redirect untuk mencegah resubmission form saat refresh
+	header("Location: ?page=generate&aksi=tarik&ip=" . urlencode($IP) . "&key=" . urlencode($Key) . "&tanggal_awal=" . urlencode($TanggalAwal) . "&tanggal_akhir=" . urlencode($TanggalAkhir) . "&delete_success=" . $count);
+	exit;
+}
+
+$delete_success_msg = "";
+if (isset($_GET['delete_success'])) {
+	$count = intval($_GET['delete_success']);
+	$delete_success_msg = "$count data absensi karyawan berhasil dihapus.";
+}
 ?>
 <html>
 
