@@ -309,9 +309,9 @@ unset($row);
                     <th>Nama Karyawan</th>
                     <th width="12%">Bagian</th>
                     <th width="12%" class="text-center">Shift</th>
-                    <th width="8%" class="text-center">Masuk</th>
-                    <th width="10%" class="text-center">Rehat</th>
-                    <th width="8%" class="text-center">Pulang</th>
+                    <th width="8%" class="text-center">Absen Masuk</th>
+                    <th width="10%" class="text-center">Absen Istirahat</th>
+                    <th width="8%" class="text-center">Absen Pulang</th>
                     <th width="10%" class="text-right">Upah Pokok</th>
                     <th class="text-center" width="20%">Denda/Potongan</th>
                     <th width="10%" class="text-right">Upah Bersih</th>
@@ -388,19 +388,19 @@ unset($row);
                             <?php if ($total_potongan > 0) : ?>
                                 <div class="text-center">
                                     <?php if ($p_telat > 0) : ?>
-                                        <span class="badge badge-danger">Telat: -<?= number_format($p_telat, 0, ',', '.') ?></span>
+                                        <span class="badge badge-danger">Terlambat: -<?= number_format($p_telat, 0, ',', '.') ?></span>
                                     <?php endif; ?>
                                     <?php if ($p_ist_awal > 0) : ?>
-                                        <span class="badge badge-warning">Ist. Awal: -<?= number_format($p_ist_awal, 0, ',', '.') ?></span>
+                                        <span class="badge badge-warning">Istirahat Awal: -<?= number_format($p_ist_awal, 0, ',', '.') ?></span>
                                     <?php endif; ?>
                                     <?php if ($p_ist_telat > 0) : ?>
-                                        <span class="badge badge-warning">Ist. Telat: -<?= number_format($p_ist_telat, 0, ',', '.') ?></span>
+                                        <span class="badge badge-warning">Istirahat Telat: -<?= number_format($p_ist_telat, 0, ',', '.') ?></span>
                                     <?php endif; ?>
                                     <?php if ($p_pulang > 0) : ?>
-                                        <span class="badge badge-danger">P. Awal: -<?= number_format($p_pulang, 0, ',', '.') ?></span>
+                                        <span class="badge badge-danger">Pulang Awal: -<?= number_format($p_pulang, 0, ',', '.') ?></span>
                                     <?php endif; ?>
                                     <?php if ($p_tidak_lengkap > 0) : ?>
-                                        <span class="badge badge-danger">Log Absen: -<?= number_format($p_tidak_lengkap, 0, ',', '.') ?></span>
+                                        <span class="badge badge-danger">Absen Tidak Lengkap: -<?= number_format($p_tidak_lengkap, 0, ',', '.') ?></span>
                                     <?php endif; ?>
                                 </div>
                                 <div class="text-center text-bold" style="color:#b91c1c; font-size:9px; margin-top:2px;">Total: -<?= number_format($total_potongan, 0, ',', '.') ?></div>

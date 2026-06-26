@@ -346,9 +346,9 @@ if ($Key == "") $Key = "";
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Nama Karyawan</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Bagian</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Shift</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Masuk</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Rehat</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Pulang</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Masuk</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Istirahat</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Pulang</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah Pokok</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center" style="min-width: 150px;">Potongan/Denda</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah Bersih</th>
@@ -530,7 +530,7 @@ if ($Key == "") $Key = "";
 									$shift = get_closest_shift($koneksi, $masuk);
 									$shift_text = '-';
 									if ($shift) {
-										$shift_text = '<a href="?page=jadwal&aksi=ubah&id=' . $shift['id_jadwal'] . '" class="text-blue-600 font-semibold hover:underline">' . $shift['keterangan'] . '</a>';
+										$shift_text = '<span class="text-gray-900 font-semibold">' . $shift['keterangan'] . '</span>';
 									}
 
 									// Format Jam Rehat
@@ -593,27 +593,27 @@ if ($Key == "") $Key = "";
 										</td>
 										<td data-label="Bagian" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($bagian); ?></td>
 										<td data-label="Shift Terdeteksi" class="py-2 px-2 text-[15px] text-center"><?php echo $shift_text; ?></td>
-										<td data-label="Jam Masuk" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($masuk) ? htmlspecialchars($masuk) : '-'; ?></td>
-										<td data-label="Jam Rehat" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($rehat_text); ?></td>
-										<td data-label="Jam Pulang" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($pulang) ? htmlspecialchars($pulang) : '-'; ?></td>
+										<td data-label="Absen Masuk" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($masuk) ? htmlspecialchars($masuk) : '-'; ?></td>
+										<td data-label="Absen Istirahat" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($rehat_text); ?></td>
+										<td data-label="Absen Pulang" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($pulang) ? htmlspecialchars($pulang) : '-'; ?></td>
 										<td data-label="Upah Pokok" class="py-2 px-2 text-[15px] text-right text-gray-600 font-semibold"><?php echo rupiah($upah); ?></td>
 										<td data-label="Potongan/Denda" class="py-2 px-2 text-center text-[12px]">
 											<?php if ($total_potongan > 0) : ?>
 												<div class="flex flex-wrap gap-1 justify-center max-w-[180px] mx-auto">
 													<?php if ($p_telat > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded">Telat: -<?= number_format($p_telat, 0, ',', '.') ?></span>
+														<span class="inline-block px-1.5 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded">Terlambat: -<?= number_format($p_telat, 0, ',', '.') ?></span>
 													<?php endif; ?>
 													<?php if ($p_ist_awal > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded">Ist. Awal: -<?= number_format($p_ist_awal, 0, ',', '.') ?></span>
+														<span class="inline-block px-1.5 py-0.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded">Istirahat Awal: -<?= number_format($p_ist_awal, 0, ',', '.') ?></span>
 													<?php endif; ?>
 													<?php if ($p_ist_telat > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-orange-50 text-orange-600 text-[10px] font-bold rounded">Ist. Telat: -<?= number_format($p_ist_telat, 0, ',', '.') ?></span>
+														<span class="inline-block px-1.5 py-0.5 bg-orange-50 text-orange-600 text-[10px] font-bold rounded">Istirahat Telat: -<?= number_format($p_ist_telat, 0, ',', '.') ?></span>
 													<?php endif; ?>
 													<?php if ($p_pulang > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded">P. Awal: -<?= number_format($p_pulang, 0, ',', '.') ?></span>
+														<span class="inline-block px-1.5 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded">Pulang Awal: -<?= number_format($p_pulang, 0, ',', '.') ?></span>
 													<?php endif; ?>
 													<?php if ($p_tidak_lengkap > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-bold rounded">Log Absen: -<?= number_format($p_tidak_lengkap, 0, ',', '.') ?></span>
+														<span class="inline-block px-1.5 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-bold rounded">Absen Tidak Lengkap: -<?= number_format($p_tidak_lengkap, 0, ',', '.') ?></span>
 													<?php endif; ?>
 												</div>
 												<div class="text-[11px] text-red-600 font-bold mt-1">Total: -<?= number_format($total_potongan, 0, ',', '.') ?></div>

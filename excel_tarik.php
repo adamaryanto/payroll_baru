@@ -287,9 +287,9 @@ ksort($grouped_by_dept);
                 <th style='background:#e5e7eb;'>GOLONGAN</th>
                 <th style='background:#e5e7eb;'>POSISI</th>
                 <th style='background:#e5e7eb;'>JAM KERJA</th>
-                <th style='background:#e5e7eb;'>JAM MASUK</th>
-                <th style='background:#e5e7eb;'>ISTIRAHAT MASUK</th>
-                <th style='background:#e5e7eb;'>JAM PULANG</th>
+                <th style='background:#e5e7eb;'>ABSEN MASUK</th>
+                <th style='background:#e5e7eb;'>ABSEN ISTIRAHAT</th>
+                <th style='background:#e5e7eb;'>ABSEN PULANG</th>
                 <th style='background:#e5e7eb;'>HASIL KERJA</th>
                 <th style='background:#e5e7eb;'>UPAH (Rp)</th>
                 <th style='background:#e5e7eb;'>POTONGAN (Rp)</th>
