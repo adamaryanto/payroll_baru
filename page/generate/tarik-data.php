@@ -663,6 +663,12 @@ if (isset($_GET['delete_success'])) {
 				icon: 'success',
 				confirmButtonColor: '#3b82f6'
 			});
+			// Bersihkan parameter delete_success dari URL agar tidak muncul lagi saat refresh
+			if (window.history.replaceState) {
+				var url = new URL(window.location.href);
+				url.searchParams.delete('delete_success');
+				window.history.replaceState({ path: url.href }, '', url.href);
+			}
 			<?php endif; ?>
 
 			$('#dataTables-example').DataTable({
