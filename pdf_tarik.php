@@ -138,7 +138,7 @@ if ($Connect) {
 			
 			foreach ($times as $t) {
 				$dt = "$today {$t['time']}";
-				$data_raw = "<Row><PIN>{$pin}</PIN><DateTime>{$dt}</DateTime><Verified>1</Verified><Status>{$t['status']}</Status></Row>";
+				$data_raw = "<PIN>{$pin}</PIN><DateTime>{$dt}</DateTime><Verified>1</Verified><Status>{$t['status']}</Status>";
 				
 				$check = $koneksi->query("SELECT id_record FROM tb_record WHERE userid = '$pin' AND detail_waktu = '$dt' LIMIT 1");
 				if ($check->num_rows == 0) {
