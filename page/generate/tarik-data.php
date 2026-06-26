@@ -33,7 +33,7 @@ if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
 	}
 	
 	// Simpan ke session flash untuk mencegah resubmission form dan URL kotor saat refresh
-	$_SESSION['delete_success'] = $count;
+	$_SESSION['delete_success'] = true;
 	
 	$redirect_url = "?page=generate&aksi=tarik&ip=" . urlencode($IP) . "&key=" . urlencode($Key) . "&tanggal_awal=" . urlencode($TanggalAwal) . "&tanggal_akhir=" . urlencode($TanggalAkhir);
 	echo "<script>window.location.href = '$redirect_url';</script>";
@@ -42,8 +42,7 @@ if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
 
 $delete_success_msg = "";
 if (isset($_SESSION['delete_success'])) {
-	$count = intval($_SESSION['delete_success']);
-	$delete_success_msg = "$count data absensi karyawan berhasil dihapus.";
+	$delete_success_msg = "Data absensi karyawan berhasil dihapus.";
 	unset($_SESSION['delete_success']); // Hapus langsung dari session agar tidak muncul lagi saat refresh
 }
 ?>
