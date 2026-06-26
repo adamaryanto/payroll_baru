@@ -153,53 +153,6 @@ if ($Connect) {
 			$koneksi->query($sql);
 		}
 	}
-} else {
-	// Check if records exist in tb_record for this date
-	$check_rec = $koneksi->query("SELECT id_record FROM tb_record WHERE tgl = '$Tanggal' LIMIT 1");
-	
-	// If local environment AND no records exist, generate dummy records
-	if ($is_local && $check_rec->num_rows == 0) {
-		$today = $Tanggal;
-		
-		// Fetch all existing logs for this date into memory
-		$existing_logs = [];
-		$ex_res = $koneksi->query("SELECT userid, detail_waktu FROM tb_record WHERE tgl = '$today'");
-		while ($ex_row = $ex_res->fetch_assoc()) {
-			$existing_logs[$ex_row['userid'] . '_' . $ex_row['detail_waktu']] = true;
-		}
-
-		$insert_values = [];
-		$q_emp = $koneksi->query("SELECT no_absen FROM ms_karyawan WHERE status_karyawan = 'Aktif'");
-		while ($row = $q_emp->fetch_assoc()) {
-			$pin = $row['no_absen'];
-			$minute_in = rand(30, 59);
-			$time_in = "07:" . sprintf("%02d", $minute_in) . ":00";
-			if (rand(1, 10) > 8) {
-				$time_in = "08:" . sprintf("%02d", rand(1, 15)) . ":00";
-			}
-			$time_break_out = "12:" . sprintf("%02d", rand(0, 10)) . ":00";
-			$time_break_in = "13:" . sprintf("%02d", rand(0, 5)) . ":00";
-			$time_out = "17:" . sprintf("%02d", rand(0, 30)) . ":00";
-			
-			$times = [
-				['time' => $time_in, 'status' => 0],
-				['time' => $time_break_out, 'status' => 2],
-				['time' => $time_break_in, 'status' => 3],
-				['time' => $time_out, 'status' => 1]
-			];
-			
-			foreach ($times as $t) {
-				$dt = "$today {$t['time']}";
-				$key = $pin . '_' . $dt;
-				if (!isset($existing_logs[$key])) {
-					$data_raw = "<PIN>{$pin}</PIN><DateTime>{$dt}</DateTime><Verified>1</Verified><Status>{$t['status']}</Status>";
-					$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
-					$insert_values[] = "('$data_esc','$pin','$today','1','{$t['status']}','$dt')";
-					$existing_logs[$key] = true;
-				}
-			}
-		}
-	}
 }
 
 // Query and group data from tb_record for $Tanggal
