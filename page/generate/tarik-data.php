@@ -32,16 +32,19 @@ if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
 		}
 	}
 	
-	// Redirect menggunakan JavaScript untuk mencegah error "headers already sent" yang menyebabkan halaman kosong
-	$redirect_url = "?page=generate&aksi=tarik&ip=" . urlencode($IP) . "&key=" . urlencode($Key) . "&tanggal_awal=" . urlencode($TanggalAwal) . "&tanggal_akhir=" . urlencode($TanggalAkhir) . "&delete_success=" . $count;
+	// Simpan ke session flash untuk mencegah resubmission form dan URL kotor saat refresh
+	$_SESSION['delete_success'] = $count;
+	
+	$redirect_url = "?page=generate&aksi=tarik&ip=" . urlencode($IP) . "&key=" . urlencode($Key) . "&tanggal_awal=" . urlencode($TanggalAwal) . "&tanggal_akhir=" . urlencode($TanggalAkhir);
 	echo "<script>window.location.href = '$redirect_url';</script>";
 	exit;
 }
 
 $delete_success_msg = "";
-if (isset($_GET['delete_success'])) {
-	$count = intval($_GET['delete_success']);
+if (isset($_SESSION['delete_success'])) {
+	$count = intval($_SESSION['delete_success']);
 	$delete_success_msg = "$count data absensi karyawan berhasil dihapus.";
+	unset($_SESSION['delete_success']); // Hapus langsung dari session agar tidak muncul lagi saat refresh
 }
 ?>
 <html>
@@ -663,12 +666,6 @@ if (isset($_GET['delete_success'])) {
 				icon: 'success',
 				confirmButtonColor: '#3b82f6'
 			});
-			// Bersihkan parameter delete_success dari URL agar tidak muncul lagi saat refresh
-			if (window.history.replaceState) {
-				var url = new URL(window.location.href);
-				url.searchParams.delete('delete_success');
-				window.history.replaceState({ path: url.href }, '', url.href);
-			}
 			<?php endif; ?>
 
 			$('#dataTables-example').DataTable({
