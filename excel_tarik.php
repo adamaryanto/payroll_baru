@@ -249,21 +249,21 @@ ksort($grouped_by_dept);
 
 <table border="0">
     <tr>
-        <th colspan="14" style="text-align:center; font-size:20px; font-weight:bold;">LAPORAN REALISASI UPAH</th>
+        <th colspan="15" style="text-align:center; font-size:20px; font-weight:bold;">LAPORAN REALISASI UPAH</th>
     </tr>
     <tr>
-        <th colspan="14" style="text-align:center; font-size:16px;">
+        <th colspan="15" style="text-align:center; font-size:16px;">
             Tanggal Realisasi: <?php echo date('d/m/Y', strtotime($Tanggal)); ?>
         </th>
     </tr>
     <tr>
-        <td colspan="14" style="text-align:center; color:red; font-weight:bold; padding-top:10px;">JIKALAU NAMA YANG TERTERA DIABSEN TELAT MAKA AKAN DIPOTONG RP 25.000</td>
+        <td colspan="15" style="text-align:center; color:red; font-weight:bold; padding-top:10px;">JIKALAU NAMA YANG TERTERA DIABSEN TELAT MAKA AKAN DIPOTONG RP 25.000</td>
     </tr>
     <tr>
-        <td colspan="14" style="text-align:center;">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td>
+        <td colspan="15" style="text-align:center;">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td>
     </tr>
     <tr>
-        <td colspan="14" style="height:15px;"></td>
+        <td colspan="15" style="height:15px;"></td>
     </tr>
 </table>
 
@@ -275,7 +275,7 @@ ksort($grouped_by_dept);
         
         foreach ($grouped_by_dept as $dept_id => $dept) {
             echo "<tr>
-                    <td colspan='14' align='center' style='background-color:#1e3a8a; color:white; font-weight:bold;'>
+                    <td colspan='15' align='center' style='background-color:#1e3a8a; color:white; font-weight:bold;'>
                         " . strtoupper($dept['nama_departmen']) . "
                     </td>
                   </tr>";
@@ -286,7 +286,8 @@ ksort($grouped_by_dept);
                 <th style='background:#e5e7eb;'>OS/DHK</th>
                 <th style='background:#e5e7eb;'>GOLONGAN</th>
                 <th style='background:#e5e7eb;'>POSISI</th>
-                <th style='background:#e5e7eb;'>JAM KERJA</th>
+                <th style='background:#e5e7eb;'>JAM MASUK</th>
+                <th style='background:#e5e7eb;'>JAM PULANG</th>
                 <th style='background:#e5e7eb;'>ABSEN MASUK</th>
                 <th style='background:#e5e7eb;'>ABSEN ISTIRAHAT</th>
                 <th style='background:#e5e7eb;'>ABSEN PULANG</th>
@@ -313,7 +314,8 @@ ksort($grouped_by_dept);
                 $upah = $row['upah'];
 
                 $shift = get_closest_shift($koneksi, $masuk);
-                $j_masuk = $shift ? $shift['jam_masuk'] : '-';
+                $j_masuk = $shift && !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
+                $j_keluar = $shift && !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
 
                 // Perhitungan Potongan Otomatis
                 $p_telat = 0; $p_pulang = 0; $p_ist_awal = 0; $p_ist_telat = 0; $p_tidak_lengkap = 0;
@@ -353,6 +355,7 @@ ksort($grouped_by_dept);
                     <td align='center'>{$label_gol}</td>
                     <td>{$posisi}</td>
                     <td align='center'>{$j_masuk}</td>
+                    <td align='center'>{$j_keluar}</td>
                     <td align='center'>" . (!empty($masuk) ? $masuk : '') . "</td>
                     <td align='center'>" . (!empty($istirahat_masuk) ? $istirahat_masuk : '') . "</td>
                     <td align='center'>" . (!empty($pulang) ? $pulang : '') . "</td>
@@ -366,7 +369,7 @@ ksort($grouped_by_dept);
             }
         }
         // GRAND TOTAL UPAH
-        echo "<tr><td colspan='14' style='background:#203764; color:white; font-weight:bold; text-align:right; padding:10px;'>GRAND TOTAL UPAH ($grand_karyawan Karyawan) | Rp " . number_format($grand_total, 2, '.', ',') . "</td></tr>";
+        echo "<tr><td colspan='15' style='background:#203764; color:white; font-weight:bold; text-align:right; padding:10px;'>GRAND TOTAL UPAH ($grand_karyawan Karyawan) | Rp " . number_format($grand_total, 2, '.', ',') . "</td></tr>";
         ?>
     </tbody>
 </table>

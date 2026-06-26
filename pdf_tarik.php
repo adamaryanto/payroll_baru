@@ -308,10 +308,12 @@ unset($row);
                     <th width="8%" class="text-center">No. Absen</th>
                     <th>Nama Karyawan</th>
                     <th width="12%">Bagian</th>
-                    <th width="12%" class="text-center">Shift</th>
-                    <th width="8%" class="text-center">Absen Masuk</th>
-                    <th width="10%" class="text-center">Absen Istirahat</th>
-                    <th width="8%" class="text-center">Absen Pulang</th>
+                    <th width="10%" class="text-center">Shift</th>
+                    <th width="7%" class="text-center">Jam Masuk</th>
+                    <th width="7%" class="text-center">Jam Pulang</th>
+                    <th width="7%" class="text-center">Absen Masuk</th>
+                    <th width="9%" class="text-center">Absen Istirahat</th>
+                    <th width="7%" class="text-center">Absen Pulang</th>
                     <th width="10%" class="text-right">Upah Pokok</th>
                     <th class="text-center" width="20%">Denda/Potongan</th>
                     <th width="10%" class="text-right">Upah Bersih</th>
@@ -339,6 +341,8 @@ unset($row);
 
                     $shift = get_closest_shift($koneksi, $masuk);
                     $shift_desc = $shift ? $shift['keterangan'] : '-';
+                    $s_masuk = $shift && !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
+                    $s_keluar = $shift && !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
 
                     $rehat_text = '-';
                     if (!empty($istirahat_keluar) || !empty($istirahat_masuk)) {
@@ -380,6 +384,8 @@ unset($row);
                         <td class="text-bold"><?php echo htmlspecialchars($nama_karyawan); ?></td>
                         <td><?php echo htmlspecialchars($bagian); ?></td>
                         <td class="text-center"><?php echo $shift_desc; ?></td>
+                        <td class="text-center"><?php echo $s_masuk; ?></td>
+                        <td class="text-center"><?php echo $s_keluar; ?></td>
                         <td class="text-center"><?php echo !empty($masuk) ? $masuk : '-'; ?></td>
                         <td class="text-center"><?php echo $rehat_text; ?></td>
                         <td class="text-center"><?php echo !empty($pulang) ? $pulang : '-'; ?></td>
