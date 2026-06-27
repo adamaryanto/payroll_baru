@@ -253,21 +253,21 @@ ksort($grouped_by_dept);
 
 <table border="0">
     <tr>
-        <th colspan="16" style="text-align:center; font-size:20px; font-weight:bold;">LAPORAN REALISASI UPAH</th>
+        <th colspan="26" style="text-align:center; font-size:20px; font-weight:bold;">LAPORAN REALISASI UPAH</th>
     </tr>
     <tr>
-        <th colspan="16" style="text-align:center; font-size:16px;">
+        <th colspan="26" style="text-align:center; font-size:16px;">
             Tanggal Realisasi: <?php echo date('d/m/Y', strtotime($TanggalAwal)) . ' s/d ' . date('d/m/Y', strtotime($TanggalAkhir)); ?>
         </th>
     </tr>
     <tr>
-        <td colspan="16" style="text-align:center; color:red; font-weight:bold; padding-top:10px;">JIKALAU NAMA YANG TERTERA DIABSEN TELAT MAKA AKAN DIPOTONG RP 25.000</td>
+        <td colspan="26" style="text-align:center; color:red; font-weight:bold; padding-top:10px;">JIKALAU NAMA YANG TERTERA DIABSEN TELAT MAKA AKAN DIPOTONG RP 25.000</td>
     </tr>
     <tr>
-        <td colspan="16" style="text-align:center;">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td>
+        <td colspan="26" style="text-align:center;">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td>
     </tr>
     <tr>
-        <td colspan="16" style="height:15px;"></td>
+        <td colspan="26" style="height:15px;"></td>
     </tr>
 </table>
 
@@ -279,7 +279,7 @@ ksort($grouped_by_dept);
         
         foreach ($grouped_by_dept as $dept_id => $dept) {
             echo "<tr>
-                    <td colspan='16' align='center' style='background-color:#1e3a8a; color:white; font-weight:bold;'>
+                    <td colspan='26' align='center' style='background-color:#1e3a8a; color:white; font-weight:bold;'>
                         " . strtoupper($dept['nama_departmen']) . "
                     </td>
                   </tr>";
@@ -287,20 +287,30 @@ ksort($grouped_by_dept);
             echo "<tr>
                 <th style='background:#e5e7eb;'>No</th>
                 <th style='background:#e5e7eb;'>TANGGAL</th>
+                <th style='background:#e5e7eb;'>NO ABSEN</th>
                 <th style='background:#e5e7eb;'>NAMA SESUAI KTP</th>
+                <th style='background:#e5e7eb;'>DEPARTEMEN</th>
+                <th style='background:#e5e7eb;'>SUB BAGIAN</th>
                 <th style='background:#e5e7eb;'>OS/DHK</th>
                 <th style='background:#e5e7eb;'>GOLONGAN</th>
-                <th style='background:#e5e7eb;'>POSISI</th>
                 <th style='background:#e5e7eb;'>JAM MASUK</th>
-                <th style='background:#e5e7eb;'>ABSEN MASUK</th>
-                <th style='background:#e5e7eb;'>ABSEN ISTIRAHAT</th>
                 <th style='background:#e5e7eb;'>JAM PULANG</th>
+                <th style='background:#e5e7eb;'>ISTIRAHAT KELUAR</th>
+                <th style='background:#e5e7eb;'>ISTIRAHAT MASUK</th>
+                <th style='background:#e5e7eb;'>ABSEN MASUK</th>
                 <th style='background:#e5e7eb;'>ABSEN PULANG</th>
-                <th style='background:#e5e7eb;'>HASIL KERJA</th>
-                <th style='background:#e5e7eb;'>UPAH (Rp)</th>
-                <th style='background:#e5e7eb;'>POTONGAN (Rp)</th>
+                <th style='background:#e5e7eb;'>ABSEN ISTIRAHAT KELUAR</th>
+                <th style='background:#e5e7eb;'>ABSEN ISTIRAHAT MASUK</th>
+                <th style='background:#e5e7eb;'>UPAH POKOK (Rp)</th>
                 <th style='background:#e5e7eb;'>LEMBUR (Rp)</th>
-                <th style='background:#e5e7eb;'>UPAH DIBAYAR (Rp)</th>
+                <th style='background:#e5e7eb;'>POT. TELAT (Rp)</th>
+                <th style='background:#e5e7eb;'>POT. ISTIRAHAT (AWAL) (Rp)</th>
+                <th style='background:#e5e7eb;'>POT. ISTIRAHAT (TELAT) (Rp)</th>
+                <th style='background:#e5e7eb;'>DENDA PULANG (Rp)</th>
+                <th style='background:#e5e7eb;'>DENDA TIDAK ABSEN (Rp)</th>
+                <th style='background:#e5e7eb;'>POT. LAIN (Rp)</th>
+                <th style='background:#e5e7eb;'>UPAH SETELAH POTONGAN (Rp)</th>
+                <th style='background:#e5e7eb;'>HASIL</th>
             </tr>";
 
             $no = 1;
@@ -317,10 +327,19 @@ ksort($grouped_by_dept);
                 $label_gol = $row['label_gol'];
                 $posisi = $row['posisi'];
                 $upah = $row['upah'];
+                $nama_departmen = $row['nama_departmen'];
 
                 $shift = get_closest_shift($koneksi, $masuk);
-                $j_masuk = $shift && !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
-                $j_keluar = $shift && !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
+                $s_masuk = '-';
+                $s_keluar = '-';
+                $s_ist_keluar = '-';
+                $s_ist_masuk = '-';
+                if ($shift) {
+                    $s_masuk = !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
+                    $s_keluar = !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
+                    $s_ist_keluar = !empty($shift['istirahat_keluar']) ? $shift['istirahat_keluar'] : '-';
+                    $s_ist_masuk = !empty($shift['istirahat_masuk']) ? $shift['istirahat_masuk'] : '-';
+                }
 
                 // Perhitungan Potongan Otomatis
                 $p_telat = 0; $p_pulang = 0; $p_ist_awal = 0; $p_ist_telat = 0; $p_tidak_lengkap = 0;
@@ -330,18 +349,18 @@ ksort($grouped_by_dept);
                 $has_ist_keluar = !empty($istirahat_keluar) && $istirahat_keluar != '00:00';
 
                 if ($shift && ($has_masuk || $has_keluar)) {
-                    $s_masuk = $shift['jam_masuk'];
-                    $s_keluar = $shift['jam_keluar'];
-                    $s_ist_masuk = $shift['istirahat_masuk'];
-                    $s_ist_keluar = $shift['istirahat_keluar'];
+                    $s_masuk_time = $shift['jam_masuk'];
+                    $s_keluar_time = $shift['jam_keluar'];
+                    $s_ist_masuk_time = $shift['istirahat_masuk'];
+                    $s_ist_keluar_time = $shift['istirahat_keluar'];
 
-                    if ($has_masuk && is_time_late($masuk, $s_masuk)) $p_telat = $globalDendaMasuk;
-                    if ($has_keluar && is_time_early($pulang, $s_keluar)) $p_pulang = $globalDendaPulang;
-                    if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar)) $p_ist_awal = $globalDendaIstirahatKeluar;
-                    if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk)) $p_ist_telat = $globalDendaIstirahatMasuk;
+                    if ($has_masuk && is_time_late($masuk, $s_masuk_time)) $p_telat = $globalDendaMasuk;
+                    if ($has_keluar && is_time_early($pulang, $s_keluar_time)) $p_pulang = $globalDendaPulang;
+                    if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar_time)) $p_ist_awal = $globalDendaIstirahatKeluar;
+                    if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk_time)) $p_ist_telat = $globalDendaIstirahatMasuk;
 
                     $hasIncompleteMain = ($has_masuk XOR $has_keluar);
-                    $isRestExpected = (!empty($s_ist_keluar) && $s_ist_keluar != '00:00:00');
+                    $isRestExpected = (!empty($s_ist_keluar_time) && $s_ist_keluar_time != '00:00:00');
                     $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
                     if ($hasIncompleteMain || $hasIncompleteBreak) $p_tidak_lengkap = $globalDendaTidakLengkap;
                 }
@@ -353,29 +372,41 @@ ksort($grouped_by_dept);
                 $grand_total += $upah_dibayar;
                 $grand_karyawan++;
 
+                $hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
+
                 echo "<tr>
                     <td align='center'>$no</td>
                     <td align='center'>" . date('d/m/Y', strtotime($date)) . "</td>
+                    <td align='center'>{$PIN}</td>
                     <td>" . strtoupper($nama_karyawan) . "</td>
+                    <td>" . strtoupper($nama_departmen) . "</td>
+                    <td>{$posisi}</td>
                     <td align='center'>{$label_os}</td>
                     <td align='center'>{$label_gol}</td>
-                    <td>{$posisi}</td>
-                    <td align='center'>{$j_masuk}</td>
+                    <td align='center'>{$s_masuk}</td>
+                    <td align='center'>{$s_keluar}</td>
+                    <td align='center'>{$s_ist_keluar}</td>
+                    <td align='center'>{$s_ist_masuk}</td>
                     <td align='center'>" . (!empty($masuk) ? $masuk : '') . "</td>
-                    <td align='center'>" . (!empty($istirahat_masuk) ? $istirahat_masuk : '') . "</td>
-                    <td align='center'>{$j_keluar}</td>
                     <td align='center'>" . (!empty($pulang) ? $pulang : '') . "</td>
-                    <td align='center'></td>
-                    <td align='right' style='mso-number-format:\"\#\,\#\#0\.00\";'>Rp " . number_format($upah, 2, '.', ',') . "</td>
-                    <td align='right' style='mso-number-format:\"\#\,\#\#0\.00\"; color:red;'>" . ($total_potongan > 0 ? "Rp " . number_format($total_potongan, 2, '.', ',') : "-") . "</td>
-                    <td align='right' style='mso-number-format:\"\#\,\#\#0\.00\";'>Rp 0.00</td>
-                    <td align='right' style='font-weight:bold; mso-number-format:\"\#\,\#\#0\.00\";'>Rp " . number_format($upah_dibayar, 2, '.', ',') . "</td>
+                    <td align='center'>" . (!empty($istirahat_keluar) ? $istirahat_keluar : '') . "</td>
+                    <td align='center'>" . (!empty($istirahat_masuk) ? $istirahat_masuk : '') . "</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\";'>Rp " . number_format($upah, 0, ',', '.') . "</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\";'>Rp 0</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\"; color:red;'>" . ($p_telat > 0 ? "Rp " . number_format($p_telat, 0, ',', '.') : "-") . "</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\"; color:red;'>" . ($p_ist_awal > 0 ? "Rp " . number_format($p_ist_awal, 0, ',', '.') : "-") . "</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\"; color:red;'>" . ($p_ist_telat > 0 ? "Rp " . number_format($p_ist_telat, 0, ',', '.') : "-") . "</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\"; color:red;'>" . ($p_pulang > 0 ? "Rp " . number_format($p_pulang, 0, ',', '.') : "-") . "</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\"; color:red;'>" . ($p_tidak_lengkap > 0 ? "Rp " . number_format($p_tidak_lengkap, 0, ',', '.') : "-") . "</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\";'>Rp 0</td>
+                    <td align='right' style='font-weight:bold; mso-number-format:\"\#\,\#\#0\";'>Rp " . number_format($upah_dibayar, 0, ',', '.') . "</td>
+                    <td align='center'>{$hasil_kerja}</td>
                 </tr>";
                 $no++;
             }
         }
         // GRAND TOTAL UPAH
-        echo "<tr><td colspan='16' style='background:#203764; color:white; font-weight:bold; text-align:right; padding:10px;'>GRAND TOTAL UPAH ($grand_karyawan Karyawan) | Rp " . number_format($grand_total, 2, '.', ',') . "</td></tr>";
+        echo "<tr><td colspan='26' style='background:#203764; color:white; font-weight:bold; text-align:right; padding:10px;'>GRAND TOTAL UPAH ($grand_karyawan Karyawan) | Rp " . number_format($grand_total, 0, ',', '.') . "</td></tr>";
         ?>
     </tbody>
 </table>

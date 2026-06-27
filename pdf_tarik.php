@@ -226,19 +226,19 @@ unset($row);
     <title>Laporan Log Absensi</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; font-size: 11px; color: #333; margin: 0; padding: 0; }
-        #content-to-pdf { padding: 20px; }
-        .header { text-align: center; margin-bottom: 25px; }
-        .header h2 { margin: 0; font-size: 16px; font-weight: 700; color: #1e3a8a; }
-        .header p { margin: 5px 0 0 0; color: #666; font-size: 11px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th { background-color: #f3f4f6; color: #374151; font-weight: 700; border: 1px solid #d1d5db; padding: 6px 8px; text-transform: uppercase; font-size: 9px; }
-        td { border: 1px solid #e5e7eb; padding: 6px 8px; vertical-align: middle; }
+        body { font-family: 'Inter', sans-serif; font-size: 8px; color: #333; margin: 0; padding: 0; }
+        #content-to-pdf { padding: 10px; }
+        .header { text-align: center; margin-bottom: 15px; }
+        .header h2 { margin: 0; font-size: 13px; font-weight: 700; color: #1e3a8a; }
+        .header p { margin: 3px 0 0 0; color: #666; font-size: 9px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        th { background-color: #f3f4f6; color: #374151; font-weight: 700; border: 1px solid #d1d5db; padding: 4px 2px; text-transform: uppercase; font-size: 6px; }
+        td { border: 1px solid #e5e7eb; padding: 4px 2px; vertical-align: middle; font-size: 6.5px; }
         tr:nth-child(even) { background-color: #f9fafb; }
         .text-center { text-align: center; }
         .text-right { text-align: right; }
         .text-bold { font-weight: 600; }
-        .badge { display: inline-block; padding: 2px 4px; font-size: 8px; font-weight: 700; border-radius: 3px; margin: 1px; }
+        .badge { display: inline-block; padding: 1px 2px; font-size: 6px; font-weight: 700; border-radius: 2px; margin: 1px; }
         .badge-danger { background-color: #fee2e2; color: #b91c1c; }
         .badge-warning { background-color: #fef3c7; color: #d97706; }
         .badge-info { background-color: #eff6ff; color: #1d4ed8; }
@@ -307,20 +307,32 @@ unset($row);
         <table>
             <thead>
                 <tr>
-                    <th width="3%" class="text-center">No</th>
-                    <th width="8%" class="text-center">Tanggal</th>
-                    <th width="8%" class="text-center">No. Absen</th>
-                    <th>Nama Karyawan</th>
-                    <th width="12%">Bagian</th>
-                    <th width="10%" class="text-center">Shift</th>
-                    <th width="7%" class="text-center">Jam Masuk</th>
-                    <th width="7%" class="text-center">Absen Masuk</th>
-                    <th width="9%" class="text-center">Absen Istirahat</th>
-                    <th width="7%" class="text-center">Jam Pulang</th>
-                    <th width="7%" class="text-center">Absen Pulang</th>
-                    <th width="10%" class="text-right">Upah Pokok</th>
-                    <th class="text-center" width="20%">Denda/Potongan</th>
-                    <th width="10%" class="text-right">Upah Bersih</th>
+                    <th width="2%" class="text-center">No</th>
+                    <th width="6%" class="text-center">Tanggal</th>
+                    <th width="5%" class="text-center">No. Absen</th>
+                    <th width="10%">Nama Karyawan</th>
+                    <th width="8%">Departemen</th>
+                    <th width="8%">Sub Bagian</th>
+                    <th width="5%" class="text-center">OS/DHK</th>
+                    <th width="5%" class="text-center">Golongan</th>
+                    <th width="5%" class="text-center">Jam Masuk</th>
+                    <th width="5%" class="text-center">Jam Pulang</th>
+                    <th width="5%" class="text-center">Ist. Keluar</th>
+                    <th width="5%" class="text-center">Ist. Masuk</th>
+                    <th width="5%" class="text-center">Absen Masuk</th>
+                    <th width="5%" class="text-center">Absen Pulang</th>
+                    <th width="5%" class="text-center">Absen Ist. K</th>
+                    <th width="5%" class="text-center">Absen Ist. M</th>
+                    <th width="7%" class="text-right">Upah Pokok</th>
+                    <th width="5%" class="text-right">Lembur</th>
+                    <th width="5%" class="text-right">Pot. Telat</th>
+                    <th width="5%" class="text-right">Pot. Ist (Awal)</th>
+                    <th width="5%" class="text-right">Pot. Ist (Telat)</th>
+                    <th width="5%" class="text-right">Denda Pulang</th>
+                    <th width="5%" class="text-right">Denda Tdk Absen</th>
+                    <th width="5%" class="text-right">Pot. Lain</th>
+                    <th width="7%" class="text-right">Upah Setelah Pot</th>
+                    <th width="5%" class="text-center">Hasil</th>
                 </tr>
             </thead>
             <tbody>
@@ -334,23 +346,31 @@ unset($row);
                     $istirahat_masuk = $row['istirahat_masuk'];
                     $pulang = $row['pulang'];
 
-                    $empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, d.nama_departmen 
+                    $empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, d.nama_departmen, sd.nama_sub_department, o.OS_DHK as label_os, g.golongan as label_gol 
                                                 FROM ms_karyawan k 
                                                 LEFT JOIN ms_departmen d ON k.id_departmen = d.id_departmen 
+                                                LEFT JOIN ms_sub_department sd ON k.id_sub_department = sd.id_sub_department
+                                                LEFT JOIN ms_os_dhk o ON k.id_os_dhk = o.id_os_dhk
+                                                LEFT JOIN ms_golongan g ON k.id_golongan = g.id_golongan
                                                 WHERE k.no_absen = '$PIN' LIMIT 1");
                     $emp = $empQuery->fetch_assoc();
                     $nama_karyawan = $emp['nama_karyawan'] ?? 'Karyawan Tidak Dikenal';
                     $bagian = $emp['nama_departmen'] ?? '-';
+                    $sub_bagian = $emp['nama_sub_department'] ?? '-';
+                    $os_dhk = $emp['label_os'] ?? 'MHS';
+                    $golongan = $emp['label_gol'] ?? 'Harian';
                     $upah = $emp['upah'] ?? 0;
 
                     $shift = get_closest_shift($koneksi, $masuk);
-                    $shift_desc = $shift ? $shift['keterangan'] : '-';
-                    $s_masuk = $shift && !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
-                    $s_keluar = $shift && !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
-
-                    $rehat_text = '-';
-                    if (!empty($istirahat_keluar) || !empty($istirahat_masuk)) {
-                        $rehat_text = (!empty($istirahat_keluar) ? $istirahat_keluar : '--:--') . ' - ' . (!empty($istirahat_masuk) ? $istirahat_masuk : '--:--');
+                    $s_masuk = '-';
+                    $s_keluar = '-';
+                    $s_ist_keluar = '-';
+                    $s_ist_masuk = '-';
+                    if ($shift) {
+                        $s_masuk = !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
+                        $s_keluar = !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
+                        $s_ist_keluar = !empty($shift['istirahat_keluar']) ? $shift['istirahat_keluar'] : '-';
+                        $s_ist_masuk = !empty($shift['istirahat_masuk']) ? $shift['istirahat_masuk'] : '-';
                     }
 
                     // Perhitungan Potongan Otomatis
@@ -361,18 +381,18 @@ unset($row);
                     $has_ist_keluar = !empty($istirahat_keluar) && $istirahat_keluar != '00:00';
 
                     if ($shift && ($has_masuk || $has_keluar)) {
-                        $s_masuk = $shift['jam_masuk'];
-                        $s_keluar = $shift['jam_keluar'];
-                        $s_ist_masuk = $shift['istirahat_masuk'];
-                        $s_ist_keluar = $shift['istirahat_keluar'];
+                        $s_masuk_time = $shift['jam_masuk'];
+                        $s_keluar_time = $shift['jam_keluar'];
+                        $s_ist_masuk_time = $shift['istirahat_masuk'];
+                        $s_ist_keluar_time = $shift['istirahat_keluar'];
 
-                        if ($has_masuk && is_time_late($masuk, $s_masuk)) $p_telat = $globalDendaMasuk;
-                        if ($has_keluar && is_time_early($pulang, $s_keluar)) $p_pulang = $globalDendaPulang;
-                        if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar)) $p_ist_awal = $globalDendaIstirahatKeluar;
-                        if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk)) $p_ist_telat = $globalDendaIstirahatMasuk;
+                        if ($has_masuk && is_time_late($masuk, $s_masuk_time)) $p_telat = $globalDendaMasuk;
+                        if ($has_keluar && is_time_early($pulang, $s_keluar_time)) $p_pulang = $globalDendaPulang;
+                        if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar_time)) $p_ist_awal = $globalDendaIstirahatKeluar;
+                        if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk_time)) $p_ist_telat = $globalDendaIstirahatMasuk;
 
                         $hasIncompleteMain = ($has_masuk XOR $has_keluar);
-                        $isRestExpected = (!empty($s_ist_keluar) && $s_ist_keluar != '00:00:00');
+                        $isRestExpected = (!empty($s_ist_keluar_time) && $s_ist_keluar_time != '00:00:00');
                         $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
                         if ($hasIncompleteMain || $hasIncompleteBreak) $p_tidak_lengkap = $globalDendaTidakLengkap;
                     }
@@ -380,6 +400,8 @@ unset($row);
                     $total_potongan = $p_telat + $p_pulang + $p_ist_awal + $p_ist_telat + $p_tidak_lengkap;
                     $upah_bersih = $upah - $total_potongan;
                     if ($upah_bersih < 0) $upah_bersih = 0;
+
+                    $hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
                 ?>
                     <tr>
                         <td class="text-center"><?php echo $no++; ?></td>
@@ -387,38 +409,27 @@ unset($row);
                         <td class="text-center"><?php echo $PIN; ?></td>
                         <td class="text-bold"><?php echo htmlspecialchars($nama_karyawan); ?></td>
                         <td><?php echo htmlspecialchars($bagian); ?></td>
-                        <td class="text-center"><?php echo $shift_desc; ?></td>
+                        <td><?php echo htmlspecialchars($sub_bagian); ?></td>
+                        <td class="text-center"><?php echo htmlspecialchars($os_dhk); ?></td>
+                        <td class="text-center"><?php echo htmlspecialchars($golongan); ?></td>
                         <td class="text-center"><?php echo $s_masuk; ?></td>
-                        <td class="text-center"><?php echo !empty($masuk) ? $masuk : '-'; ?></td>
-                        <td class="text-center"><?php echo $rehat_text; ?></td>
                         <td class="text-center"><?php echo $s_keluar; ?></td>
+                        <td class="text-center"><?php echo $s_ist_keluar; ?></td>
+                        <td class="text-center"><?php echo $s_ist_masuk; ?></td>
+                        <td class="text-center"><?php echo !empty($masuk) ? $masuk : '-'; ?></td>
                         <td class="text-center"><?php echo !empty($pulang) ? $pulang : '-'; ?></td>
+                        <td class="text-center"><?php echo !empty($istirahat_keluar) ? $istirahat_keluar : '-'; ?></td>
+                        <td class="text-center"><?php echo !empty($istirahat_masuk) ? $istirahat_masuk : '-'; ?></td>
                         <td class="text-right"><?php echo rupiah($upah); ?></td>
-                        <td>
-                            <?php if ($total_potongan > 0) : ?>
-                                <div class="text-center">
-                                    <?php if ($p_telat > 0) : ?>
-                                        <span class="badge badge-danger">Terlambat: -<?= number_format($p_telat, 0, ',', '.') ?></span>
-                                    <?php endif; ?>
-                                    <?php if ($p_ist_awal > 0) : ?>
-                                        <span class="badge badge-warning">Istirahat Awal: -<?= number_format($p_ist_awal, 0, ',', '.') ?></span>
-                                    <?php endif; ?>
-                                    <?php if ($p_ist_telat > 0) : ?>
-                                        <span class="badge badge-warning">Istirahat Telat: -<?= number_format($p_ist_telat, 0, ',', '.') ?></span>
-                                    <?php endif; ?>
-                                    <?php if ($p_pulang > 0) : ?>
-                                        <span class="badge badge-danger">Pulang Awal: -<?= number_format($p_pulang, 0, ',', '.') ?></span>
-                                    <?php endif; ?>
-                                    <?php if ($p_tidak_lengkap > 0) : ?>
-                                        <span class="badge badge-danger">Absen Tidak Lengkap: -<?= number_format($p_tidak_lengkap, 0, ',', '.') ?></span>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="text-center text-bold" style="color:#b91c1c; font-size:9px; margin-top:2px;">Total: -<?= number_format($total_potongan, 0, ',', '.') ?></div>
-                            <?php else : ?>
-                                <div class="text-center" style="color:#888;">-</div>
-                            <?php endif; ?>
-                        </td>
+                        <td class="text-right"><?php echo rupiah(0); ?></td>
+                        <td class="text-right text-bold" style="color:#b91c1c;"><?php echo $p_telat > 0 ? rupiah($p_telat) : '-'; ?></td>
+                        <td class="text-right text-bold" style="color:#b91c1c;"><?php echo $p_ist_awal > 0 ? rupiah($p_ist_awal) : '-'; ?></td>
+                        <td class="text-right text-bold" style="color:#b91c1c;"><?php echo $p_ist_telat > 0 ? rupiah($p_ist_telat) : '-'; ?></td>
+                        <td class="text-right text-bold" style="color:#b91c1c;"><?php echo $p_pulang > 0 ? rupiah($p_pulang) : '-'; ?></td>
+                        <td class="text-right text-bold" style="color:#b91c1c;"><?php echo $p_tidak_lengkap > 0 ? rupiah($p_tidak_lengkap) : '-'; ?></td>
+                        <td class="text-right"><?php echo rupiah(0); ?></td>
                         <td class="text-right text-bold" style="color:#047857;"><?php echo rupiah($upah_bersih); ?></td>
+                        <td class="text-center text-bold" style="color:<?php echo $hasil_kerja == 'HADIR' ? '#047857' : '#b91c1c'; ?>;"><?php echo $hasil_kerja; ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

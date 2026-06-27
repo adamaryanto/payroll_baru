@@ -349,17 +349,31 @@ if (isset($_SESSION['delete_success'])) {
 									</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">No</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Tanggal</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">No Absen</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Nama Karyawan</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Bagian</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Shift</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Departemen</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Sub Bagian</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">OS/DHK</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Golongan</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Masuk</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Masuk</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Istirahat</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Pulang</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Istirahat Keluar</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Istirahat Masuk</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Masuk</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Pulang</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Istirahat Keluar</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Absen Istirahat Masuk</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah Pokok</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center" style="min-width: 150px;">Potongan/Denda</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah Bersih</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Lembur</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Pot. Telat</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Pot. Istirahat (Awal)</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Pot. Istirahat (Telat)</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Denda Pulang</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Denda Tidak Absen</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Pot. Lain</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah Setelah Potongan</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Hasil</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Aksi</th>
 								</tr>
 							</thead>
 							<tbody class="divide-y divide-gray-100">
@@ -528,31 +542,33 @@ if (isset($_SESSION['delete_success'])) {
 									$istirahat_masuk = $row['istirahat_masuk'];
 									$pulang = $row['pulang'];
 
-									// Cari karyawan di database
-									$empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, d.nama_departmen 
+									// Cari karyawan di database lengkap dengan Departemen, Sub Departemen, OS/DHK, dan Golongan
+									$empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, d.nama_departmen, sd.nama_sub_department, o.OS_DHK as label_os, g.golongan as label_gol 
 																FROM ms_karyawan k 
 																LEFT JOIN ms_departmen d ON k.id_departmen = d.id_departmen 
+																LEFT JOIN ms_sub_department sd ON k.id_sub_department = sd.id_sub_department
+																LEFT JOIN ms_os_dhk o ON k.id_os_dhk = o.id_os_dhk
+																LEFT JOIN ms_golongan g ON k.id_golongan = g.id_golongan
 																WHERE k.no_absen = '$PIN' LIMIT 1");
 									$emp = $empQuery->fetch_assoc();
 									$nama_karyawan = $emp['nama_karyawan'] ?? 'Karyawan Tidak Dikenal';
 									$bagian = $emp['nama_departmen'] ?? '-';
+									$sub_bagian = $emp['nama_sub_department'] ?? '-';
+									$os_dhk = $emp['label_os'] ?? 'MHS';
+									$golongan = $emp['label_gol'] ?? 'Harian';
 									$upah = $emp['upah'] ?? 0;
 
 									// Cari Shift Terdekat
 									$shift = get_closest_shift($koneksi, $masuk);
-									$shift_text = '-';
 									$s_masuk = '-';
 									$s_keluar = '-';
+									$s_ist_keluar = '-';
+									$s_ist_masuk = '-';
 									if ($shift) {
-										$shift_text = '<span class="text-gray-900 font-semibold">' . $shift['keterangan'] . '</span>';
 										$s_masuk = !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
 										$s_keluar = !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
-									}
-
-									// Format Jam Rehat
-									$rehat_text = '-';
-									if (!empty($istirahat_keluar) || !empty($istirahat_masuk)) {
-										$rehat_text = (!empty($istirahat_keluar) ? $istirahat_keluar : '--:--') . ' - ' . (!empty($istirahat_masuk) ? $istirahat_masuk : '--:--');
+										$s_ist_keluar = !empty($shift['istirahat_keluar']) ? $shift['istirahat_keluar'] : '-';
+										$s_ist_masuk = !empty($shift['istirahat_masuk']) ? $shift['istirahat_masuk'] : '-';
 									}
 
 									// Perhitungan Potongan Otomatis
@@ -568,27 +584,27 @@ if (isset($_SESSION['delete_success'])) {
 									$has_ist_keluar = !empty($istirahat_keluar) && $istirahat_keluar != '00:00';
 
 									if ($shift && ($has_masuk || $has_keluar)) {
-										$s_masuk = $shift['jam_masuk'];
-										$s_keluar = $shift['jam_keluar'];
-										$s_ist_masuk = $shift['istirahat_masuk'];
-										$s_ist_keluar = $shift['istirahat_keluar'];
+										$s_masuk_time = $shift['jam_masuk'];
+										$s_keluar_time = $shift['jam_keluar'];
+										$s_ist_masuk_time = $shift['istirahat_masuk'];
+										$s_ist_keluar_time = $shift['istirahat_keluar'];
 
-										if ($has_masuk && is_time_late($masuk, $s_masuk)) {
+										if ($has_masuk && is_time_late($masuk, $s_masuk_time)) {
 											$p_telat = $globalDendaMasuk;
 										}
-										if ($has_keluar && is_time_early($pulang, $s_keluar)) {
+										if ($has_keluar && is_time_early($pulang, $s_keluar_time)) {
 											$p_pulang = $globalDendaPulang;
 										}
-										if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar)) {
+										if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar_time)) {
 											$p_ist_awal = $globalDendaIstirahatKeluar;
 										}
-										if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk)) {
+										if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk_time)) {
 											$p_ist_telat = $globalDendaIstirahatMasuk;
 										}
 
 										// Absen Tidak Lengkap
 										$hasIncompleteMain = ($has_masuk XOR $has_keluar);
-										$isRestExpected = (!empty($s_ist_keluar) && $s_ist_keluar != '00:00:00');
+										$isRestExpected = (!empty($s_ist_keluar_time) && $s_ist_keluar_time != '00:00:00');
 										$hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
 										
 										if ($hasIncompleteMain || $hasIncompleteBreak) {
@@ -599,6 +615,8 @@ if (isset($_SESSION['delete_success'])) {
 									$total_potongan = $p_telat + $p_pulang + $p_ist_awal + $p_ist_telat + $p_tidak_lengkap;
 									$upah_bersih = $upah - $total_potongan;
 									if ($upah_bersih < 0) $upah_bersih = 0;
+
+									$hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
 								?>
 									<tr class="hover:bg-gray-50 transition-colors">
 										<td class="py-2 px-2 text-center align-middle">
@@ -606,46 +624,39 @@ if (isset($_SESSION['delete_success'])) {
 										</td>
 										<td data-label="No" class="py-2 px-2 text-[15px] text-center text-gray-500"><?php echo $no++; ?></td>
 										<td data-label="Tanggal" class="py-2 px-2 text-[15px] text-gray-700"><?php echo date('d-m-Y', strtotime($date)); ?></td>
-										<td data-label="Nama Karyawan" class="py-2 px-2 text-[15px]">
-											<div class="font-bold text-gray-900"><?php echo htmlspecialchars($nama_karyawan); ?></div>
-											<div class="text-xs text-gray-400">ID: <?php echo htmlspecialchars($PIN); ?></div>
-										</td>
-										<td data-label="Bagian" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($bagian); ?></td>
-										<td data-label="Shift Terdeteksi" class="py-2 px-2 text-[15px] text-center"><?php echo $shift_text; ?></td>
+										<td data-label="No Absen" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($PIN); ?></td>
+										<td data-label="Nama Karyawan" class="py-2 px-2 text-[15px] font-bold text-gray-900"><?php echo htmlspecialchars($nama_karyawan); ?></td>
+										<td data-label="Departemen" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($bagian); ?></td>
+										<td data-label="Sub Bagian" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($sub_bagian); ?></td>
+										<td data-label="OS/DHK" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($os_dhk); ?></td>
+										<td data-label="Golongan" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($golongan); ?></td>
 										<td data-label="Jam Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_masuk); ?></td>
-										<td data-label="Absen Masuk" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($masuk) ? htmlspecialchars($masuk) : '-'; ?></td>
-										<td data-label="Absen Istirahat" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($rehat_text); ?></td>
 										<td data-label="Jam Pulang" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_keluar); ?></td>
+										<td data-label="Istirahat Keluar" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_ist_keluar); ?></td>
+										<td data-label="Istirahat Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_ist_masuk); ?></td>
+										<td data-label="Absen Masuk" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($masuk) ? htmlspecialchars($masuk) : '-'; ?></td>
 										<td data-label="Absen Pulang" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($pulang) ? htmlspecialchars($pulang) : '-'; ?></td>
+										<td data-label="Absen Istirahat Keluar" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo !empty($istirahat_keluar) ? htmlspecialchars($istirahat_keluar) : '-'; ?></td>
+										<td data-label="Absen Istirahat Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo !empty($istirahat_masuk) ? htmlspecialchars($istirahat_masuk) : '-'; ?></td>
 										<td data-label="Upah Pokok" class="py-2 px-2 text-[15px] text-right text-gray-600 font-semibold"><?php echo rupiah($upah); ?></td>
-										<td data-label="Potongan/Denda" class="py-2 px-2 text-center text-[12px]">
-											<?php if ($total_potongan > 0) : ?>
-												<div class="flex flex-wrap gap-1 justify-center max-w-[180px] mx-auto">
-													<?php if ($p_telat > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded">Terlambat: -<?= number_format($p_telat, 0, ',', '.') ?></span>
-													<?php endif; ?>
-													<?php if ($p_ist_awal > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-amber-50 text-amber-600 text-[10px] font-bold rounded">Istirahat Awal: -<?= number_format($p_ist_awal, 0, ',', '.') ?></span>
-													<?php endif; ?>
-													<?php if ($p_ist_telat > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-orange-50 text-orange-600 text-[10px] font-bold rounded">Istirahat Telat: -<?= number_format($p_ist_telat, 0, ',', '.') ?></span>
-													<?php endif; ?>
-													<?php if ($p_pulang > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-red-50 text-red-600 text-[10px] font-bold rounded">Pulang Awal: -<?= number_format($p_pulang, 0, ',', '.') ?></span>
-													<?php endif; ?>
-													<?php if ($p_tidak_lengkap > 0) : ?>
-														<span class="inline-block px-1.5 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-bold rounded">Absen Tidak Lengkap: -<?= number_format($p_tidak_lengkap, 0, ',', '.') ?></span>
-													<?php endif; ?>
-												</div>
-												<div class="text-[11px] text-red-600 font-bold mt-1">Total: -<?= number_format($total_potongan, 0, ',', '.') ?></div>
-											<?php else : ?>
-												<span class="text-gray-400">-</span>
-											<?php endif; ?>
+										<td data-label="Lembur" class="py-2 px-2 text-[15px] text-right text-gray-600"><?php echo rupiah(0); ?></td>
+										<td data-label="Pot. Telat" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_telat); ?></td>
+										<td data-label="Pot. Istirahat (Awal)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_ist_awal); ?></td>
+										<td data-label="Pot. Istirahat (Telat)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_ist_telat); ?></td>
+										<td data-label="Denda Pulang" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_pulang); ?></td>
+										<td data-label="Denda Tidak Absen" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_tidak_lengkap); ?></td>
+										<td data-label="Pot. Lain" class="py-2 px-2 text-[15px] text-right text-gray-600"><?php echo rupiah(0); ?></td>
+										<td data-label="Upah Setelah Potongan" class="py-2 px-2 text-[15px] text-right font-bold text-blue-600"><?php echo rupiah($upah_bersih); ?></td>
+										<td data-label="Hasil" class="py-2 px-2 text-[15px] text-center font-bold <?php echo $hasil_kerja == 'HADIR' ? 'text-green-600' : 'text-red-600'; ?>"><?php echo $hasil_kerja; ?></td>
+										<td data-label="Aksi" class="py-2 px-2 text-center align-middle">
+											<button type="button" class="btn btn-xs btn-danger btn-hapus-single shadow-sm" data-log-key="<?= htmlspecialchars($PIN . '|' . $date) ?>" style="border-radius:4px; padding:3px 8px;">
+												<i class="fa fa-trash-alt"></i> Hapus
+											</button>
 										</td>
-										<td data-label="Upah Bersih" class="py-2 px-2 text-[15px] text-right font-bold text-emerald-600"><?php echo rupiah($upah_bersih); ?></td>
 									</tr>
 								<?php
 								endforeach;
+								?>
 								?>
 							</tbody>
 						</table>
@@ -750,6 +761,31 @@ if (isset($_SESSION['delete_success'])) {
 							$form.append('<input type="hidden" class="appended-log-checkbox" name="selected_logs[]" value="' + val + '" />');
 						});
 						
+						$form.append('<input type="hidden" class="appended-log-checkbox" name="hapus_pilih" value="1" />');
+						$form.submit();
+					}
+				});
+			});
+
+			// Submit single delete
+			$('#dataTables-example').on('click', '.btn-hapus-single', function(e) {
+				e.preventDefault();
+				var logKey = $(this).data('log-key');
+				
+				Swal.fire({
+					title: 'Apakah Anda yakin?',
+					text: 'Data absensi karyawan ini akan dihapus permanen!',
+					icon: 'warning',
+					showCancelButton: true,
+					confirmButtonColor: '#ef4444',
+					cancelButtonColor: '#6b7280',
+					confirmButtonText: 'Ya, Hapus!',
+					cancelButtonText: 'Batal'
+				}).then((result) => {
+					if (result.isConfirmed) {
+						var $form = $('#form-tarik-data');
+						$form.find('.appended-log-checkbox').remove();
+						$form.append('<input type="hidden" class="appended-log-checkbox" name="selected_logs[]" value="' + logKey + '" />');
 						$form.append('<input type="hidden" class="appended-log-checkbox" name="hapus_pilih" value="1" />');
 						$form.submit();
 					}
