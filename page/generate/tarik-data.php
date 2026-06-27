@@ -18,33 +18,6 @@ $TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 if ($IP == "") $IP = "192.168.110.201";
 if ($Key == "") $Key = "";
 
-// AJAX handler for updating lembur_jam in Tarik Data
-if (isset($_POST['update_lembur_ajax'])) {
-	$user_role = strtolower($_SESSION['role'] ?? '');
-	$can_edit = ($user_role === 'kepala pabrik' || $user_role === 'admin master' || $user_role === 'owner');
-	if (!$can_edit) {
-		echo json_encode(['success' => false, 'message' => 'Anda tidak memiliki hak akses untuk mengedit lembur.']);
-		exit;
-	}
-
-	$userid = $koneksi->real_escape_string($_POST['userid']);
-	$tgl = $koneksi->real_escape_string($_POST['tgl']);
-	$lembur_jam = (float)$_POST['lembur_jam'];
-	
-	$koneksi->query("CREATE TABLE IF NOT EXISTS tb_record_lembur (
-		userid VARCHAR(50) NOT NULL,
-		tgl DATE NOT NULL,
-		lembur_jam DECIMAL(10,2) DEFAULT 0,
-		PRIMARY KEY (userid, tgl)
-	) ENGINE=InnoDB");
-
-	$koneksi->query("INSERT INTO tb_record_lembur (userid, tgl, lembur_jam) 
-					 VALUES ('$userid', '$tgl', '$lembur_jam') 
-					 ON DUPLICATE KEY UPDATE lembur_jam = '$lembur_jam'");
-	echo json_encode(['success' => true]);
-	exit;
-}
-
 // Proses hapus terpilih jika form disubmit
 if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
 	$count = 0;
