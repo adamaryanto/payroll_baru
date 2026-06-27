@@ -372,6 +372,7 @@ if (isset($_SESSION['delete_success'])) {
 								$globalDendaIstirahatMasuk = $dataDenda['denda_istirahat_masuk'] ?? 0;
 								$globalDendaPulang = $dataDenda['denda_pulang'] ?? 0;
 								$globalDendaTidakLengkap = $dataDenda['denda_tidak_lengkap'] ?? 0;
+								$http_host = $_SERVER['HTTP_HOST'] ?? '';
 								$is_local = (strpos($http_host, 'localhost') !== false || strpos($http_host, '127.0.0.1') !== false || strpos($http_host, '.test') !== false);
 								
 								// Skip connecting to private IPs on online servers (reduces connection timeout delay)
