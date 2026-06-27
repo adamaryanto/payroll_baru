@@ -231,6 +231,10 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
               <?php } ?>
               <?php } ?>
 
+              <li class="nav-item">
+                <a href="?page=rekap_flexi" class="nav-link"><i class="nav-icon fas fa-hourglass-half text-primary"></i><p>Rekap Jam Flexi</p></a>
+              </li>
+
             </ul>
           </nav>
         </div>
@@ -325,6 +329,8 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     elseif ($aksi == "ijin") { include "page/siac/ijin/ijin.php"; } 
                     elseif ($aksi == "alfa") { include "page/siac/alfa/alfa.php"; } 
                     elseif ($aksi == "cuti") { include "page/siac/cuti/cuti.php"; }
+                  } else if ($page == 'rekap_flexi') {
+                    if ($aksi == "") { include "page/rekap_flexi/rekap.php"; }
                   } elseif ($page == "") {
                     include "home.php";
                   } else if ($page == 'realisasi') {

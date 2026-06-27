@@ -1,4 +1,14 @@
 <?php
+// Check and create target columns in ms_karyawan if they don't exist
+$checkWeekly = $koneksi->query("SHOW COLUMNS FROM ms_karyawan LIKE 'target_mingguan'");
+if ($checkWeekly->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN target_mingguan DECIMAL(10,2) DEFAULT 20.00");
+}
+$checkMonthly = $koneksi->query("SHOW COLUMNS FROM ms_karyawan LIKE 'target_bulanan'");
+if ($checkMonthly->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN target_bulanan DECIMAL(10,2) DEFAULT 40.00");
+}
+
 if (isset($_POST['simpan'])) {
     $nama = $koneksi->real_escape_string($_POST['tnama']);
     $noabsen = $koneksi->real_escape_string($_POST['tnoabsen']);
@@ -19,15 +29,19 @@ if (isset($_POST['simpan'])) {
     $tanggalbergabung = isset($_POST['ttanggalbergabung']) && $_POST['ttanggalbergabung'] !== '' ? $koneksi->real_escape_string($_POST['ttanggalbergabung']) : date('Y-m-d');
     $upah = !empty($_POST['tupah']) ? floatval(str_replace(['Rp', '.', ' '], '', $_POST['tupah'])) : 0;
     $jadwal = $koneksi->real_escape_string($_POST['tjadwal']);
+    $target_mingguan = !empty($_POST['ttarget_mingguan']) ? floatval($_POST['ttarget_mingguan']) : 20.00;
+    $target_bulanan = !empty($_POST['ttarget_bulanan']) ? floatval($_POST['ttarget_bulanan']) : 40.00;
 
     $sql = $koneksi->query("INSERT INTO ms_karyawan (
         id_departmen, id_jabatan, no_absen, nama_karyawan, tempat_lahir, tgl_lahir, agama, 
         status_kawin, jenis_kelamin, no_ktp, no_bpjs, alamat_ktp, alamat_tinggal, 
-        status_karyawan, tgl_aktif, id_sub_department, id_os_dhk, id_golongan, id_jadwal, upah
+        status_karyawan, tgl_aktif, id_sub_department, id_os_dhk, id_golongan, id_jadwal, upah,
+        target_mingguan, target_bulanan
     ) VALUES (
         '$departmen', '$jabatan', '$noabsen', '$nama', '$tempatlahir', '$tanggallahir', '$agama',
         '$statuskawin', '$jeniskelamin', '$noktp', '$nobpjs', '$alamatktp', '$alamattinggal',
-        'Aktif', '$tanggalbergabung', '$subdept', '$os', '$golongan', '$jadwal', '$upah'
+        'Aktif', '$tanggalbergabung', '$subdept', '$os', '$golongan', '$jadwal', '$upah',
+        '$target_mingguan', '$target_bulanan'
     )");
 
     if ($sql) {
@@ -208,6 +222,17 @@ if (isset($_POST['simpan'])) {
                                 }
                                 ?>
                             </select>
+                        </div>
+
+                        <div class="form-group grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Target Mingguan (Jam)</label>
+                                <input type="number" step="0.1" name="ttarget_mingguan" value="20.0" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Target Bulanan (Jam)</label>
+                                <input type="number" step="0.1" name="ttarget_bulanan" value="40.0" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
                         </div>
 
                         

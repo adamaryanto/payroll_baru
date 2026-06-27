@@ -1,4 +1,14 @@
 <?php
+// Check and create target columns in ms_karyawan if they don't exist
+$checkWeekly = $koneksi->query("SHOW COLUMNS FROM ms_karyawan LIKE 'target_mingguan'");
+if ($checkWeekly->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN target_mingguan DECIMAL(10,2) DEFAULT 20.00");
+}
+$checkMonthly = $koneksi->query("SHOW COLUMNS FROM ms_karyawan LIKE 'target_bulanan'");
+if ($checkMonthly->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN target_bulanan DECIMAL(10,2) DEFAULT 40.00");
+}
+
 if (isset($_GET['id'])) {
     $idu = $_GET['id'];
     $tampil = $koneksi->query("SELECT * FROM ms_karyawan WHERE id_karyawan = '$idu'");
@@ -26,6 +36,8 @@ if (isset($_GET['id'])) {
     $agama = $data['agama'];
     $statuskawin = $data['status_kawin'];
     $upah = $data['upah'];
+    $target_mingguan = $data['target_mingguan'] ?? 20.00;
+    $target_bulanan = $data['target_bulanan'] ?? 40.00;
 }
 
 if (isset($_POST['update'])) {
@@ -52,6 +64,8 @@ if (isset($_POST['update'])) {
     $tsubdept = $koneksi->real_escape_string($_POST['tsubdept']);
     $tjabatan = $koneksi->real_escape_string($_POST['tjabatan']);
     $tjadwal = $koneksi->real_escape_string($_POST['tjadwal']);
+    $ttarget_mingguan = !empty($_POST['ttarget_mingguan']) ? floatval($_POST['ttarget_mingguan']) : 20.00;
+    $ttarget_bulanan = !empty($_POST['ttarget_bulanan']) ? floatval($_POST['ttarget_bulanan']) : 40.00;
 
     $sql = $koneksi->query("UPDATE ms_karyawan SET 
         id_departmen = '$tdepartmen',
@@ -72,7 +86,9 @@ if (isset($_POST['update'])) {
         id_golongan = '$tgolongan',
         id_jadwal = '$tjadwal',
         status_karyawan = '$tstatuskaryawan',
-        upah = '$tupah'
+        upah = '$tupah',
+        target_mingguan = '$ttarget_mingguan',
+        target_bulanan = '$ttarget_bulanan'
         WHERE id_karyawan = '$tid'
     ");
 
@@ -256,6 +272,17 @@ if (isset($_POST['update'])) {
                                 }
                                 ?>
                             </select>
+                        </div>
+
+                        <div class="form-group grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Target Mingguan (Jam)</label>
+                                <input type="number" step="0.1" name="ttarget_mingguan" value="<?= htmlspecialchars($target_mingguan); ?>" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Target Bulanan (Jam)</label>
+                                <input type="number" step="0.1" name="ttarget_bulanan" value="<?= htmlspecialchars($target_bulanan); ?>" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
                         </div>
 
                         <div class="form-group">
