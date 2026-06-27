@@ -171,18 +171,44 @@ if (isset($_SESSION['delete_success'])) {
        KHUSUS TAMPILAN MOBILE DIPERBAIKI DI SINI
        ========================================= */
 		@media screen and (max-width: 768px) {
+			.container-fluid {
+				padding-left: 0 !important;
+				padding-right: 0 !important;
+			}
+
+			.row {
+				margin-left: 0 !important;
+				margin-right: 0 !important;
+			}
+
+			.col-md-12 {
+				padding-left: 0 !important;
+				padding-right: 0 !important;
+			}
+
 			.table-responsive {
-				padding: 12px !important;
+				border: none !important;
+				overflow-x: visible !important;
+				padding: 0 !important;
+				margin: 0 !important;
+			}
+
+			#dataTables-example_wrapper {
+				padding: 0 10px;
 			}
 
 			#dataTables-example_wrapper .row:first-child {
+				display: flex !important;
 				flex-direction: column !important;
 				align-items: flex-start !important;
 				gap: 15px;
+				margin-bottom: 15px !important;
+				width: 100% !important;
 			}
 
 			.dataTables_filter,
 			.dataTables_length {
+				display: flex !important;
 				width: 100% !important;
 				justify-content: flex-start !important;
 			}
@@ -197,22 +223,88 @@ if (isset($_SESSION['delete_success'])) {
 				flex-wrap: wrap;
 			}
 
+			#dataTables-example {
+				width: 100% !important;
+				margin: 0 !important;
+			}
 
+			/* --- STYLING MODERN CARD KARYAWAN --- */
+			.table-modern tbody tr {
+				display: block;
+				margin: 0 5px 20px 5px;
+				/* Jarak antar card */
+				border: 1px solid #cbd5e1 !important;
+				/* Border card */
+				border-radius: 12px !important;
+				/* Sudut melengkung halus */
+				background: #ffffff;
+				box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+				/* Shadow elegan */
+				overflow: hidden;
+				padding: 0;
+			}
+
+			.table-modern thead {
+				display: none !important;
+			}
+
+			.table-modern tbody td {
+				display: flex;
+				flex-direction: column;
+				align-items: flex-start !important;
+				text-align: left !important;
+				/* Memaksa rata kiri */
+				padding: 12px 16px !important;
+				border: none !important;
+				border-bottom: 1px solid #f1f5f9 !important;
+				/* Garis tipis antar baris di dalam card */
+				width: 100% !important;
+				font-size: 14px;
+				white-space: normal !important;
+			}
+
+			/* OVERRIDE CLASS TEXT-RIGHT AGAR TIDAK NUMPUK DI KANAN PADA MOBILE */
+			.table-modern tbody td.text-right,
+			.table-modern tbody td.text-center {
+				text-align: left !important;
+				align-items: flex-start !important;
+			}
+
+			.table-modern tbody td:before {
+				content: attr(data-label);
+				font-weight: 700;
+				color: #475569;
+				text-transform: uppercase;
+				font-size: 11px;
+				letter-spacing: 0.5px;
+				margin-bottom: 6px;
+				display: block;
+				width: 100%;
+			}
+
+			.table-modern tbody td:last-child {
+				border-bottom: none !important;
+				background-color: #f8fafc;
+				/* Highlight area tombol aksi */
+				padding-top: 16px !important;
+				padding-bottom: 16px !important;
+			}
 
 			/* Mobile layout for download buttons */
 			.download-btn-container {
 				display: flex !important;
+				flex-direction: column !important;
 				width: 100% !important;
 				gap: 8px !important;
 				margin-bottom: 15px !important;
 			}
 			.download-btn-container .download-btn {
-				flex: 1 !important;
+				width: 100% !important;
 				text-align: center !important;
 				justify-content: center !important;
 				margin: 0 !important;
 				padding: 10px 8px !important;
-				font-size: 12px !important;
+				font-size: 14px !important;
 			}
 		}
 	</style>
