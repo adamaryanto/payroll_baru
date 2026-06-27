@@ -1010,9 +1010,9 @@ if (isset($_SESSION['delete_success'])) {
 						$form.find('.appended-log-checkbox').remove();
 						$form.append('<input type="hidden" class="appended-log-checkbox" name="selected_logs[]" value="' + logKey + '" />');
 						$form.append('<input type="hidden" class="appended-log-checkbox" name="hapus_pilih" value="1" />');
-						$form.submit();
 					}
 				});
+			});
 			// Edit Lembur via SweetAlert2 Input
 			$('#dataTables-example').on('click', '.btn-edit-lembur', function(e) {
 				e.preventDefault();
