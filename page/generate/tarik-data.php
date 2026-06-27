@@ -565,7 +565,7 @@ if (isset($_SESSION['delete_success'])) {
 
 								$Connect = false;
 								if ($should_connect) {
-									$Connect = @fsockopen($IP, $port, $errno, $errstr, 0.3);
+									$Connect = @fsockopen($IP, $port, $errno, $errstr, 1.5);
 								}
 
 								if ($Connect) {
@@ -621,7 +621,11 @@ if (isset($_SESSION['delete_success'])) {
 										}
 									}
 								} else {
-									echo "<p class='text-center py-4 text-red-500 font-bold'>Koneksi Gagal ke Mesin!</p>";
+									if ($should_connect) {
+										echo "<div class='alert alert-warning text-center font-bold' style='margin-bottom:15px; border-radius:8px;'><i class='fa fa-exclamation-triangle'></i> Gagal terhubung ke mesin absensi (IP: $IP). Menampilkan data lokal ter-update.</div>";
+									} else {
+										echo "<div class='alert alert-info text-center font-bold' style='margin-bottom:15px; border-radius:8px;'><i class='fa fa-info-circle'></i> Menampilkan database lokal (koneksi mesin dinonaktifkan di luar jaringan lokal).</div>";
+									}
 								}
 
 								// Query and group data from tb_record for Date Range
