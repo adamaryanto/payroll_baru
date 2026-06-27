@@ -203,7 +203,7 @@ if (isset($_SESSION['delete_success'])) {
 			.download-btn-container {
 				display: flex !important;
 				width: 100% !important;
-				justify-content: space-between !important;
+				gap: 8px !important;
 				margin-bottom: 15px !important;
 			}
 			.download-btn-container .download-btn {
@@ -212,10 +212,7 @@ if (isset($_SESSION['delete_success'])) {
 				justify-content: center !important;
 				margin: 0 !important;
 				padding: 10px 8px !important;
-				font-size: 13px !important;
-			}
-			.download-btn-container .download-btn:first-child {
-				margin-right: 8px !important;
+				font-size: 12px !important;
 			}
 		}
 	</style>
