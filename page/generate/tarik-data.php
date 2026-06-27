@@ -18,6 +18,26 @@ $TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 if ($IP == "") $IP = "192.168.110.201";
 if ($Key == "") $Key = "";
 
+// AJAX handler for updating lembur_jam in Tarik Data
+if (isset($_POST['update_lembur_ajax'])) {
+	$userid = $koneksi->real_escape_string($_POST['userid']);
+	$tgl = $koneksi->real_escape_string($_POST['tgl']);
+	$lembur_jam = (float)$_POST['lembur_jam'];
+	
+	$koneksi->query("CREATE TABLE IF NOT EXISTS tb_record_lembur (
+		userid VARCHAR(50) NOT NULL,
+		tgl DATE NOT NULL,
+		lembur_jam DECIMAL(10,2) DEFAULT 0,
+		PRIMARY KEY (userid, tgl)
+	) ENGINE=InnoDB");
+
+	$koneksi->query("INSERT INTO tb_record_lembur (userid, tgl, lembur_jam) 
+					 VALUES ('$userid', '$tgl', '$lembur_jam') 
+					 ON DUPLICATE KEY UPDATE lembur_jam = '$lembur_jam'");
+	echo json_encode(['success' => true]);
+	exit;
+}
+
 // Proses hapus terpilih jika form disubmit
 if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
 	$count = 0;
@@ -476,6 +496,14 @@ if (isset($_SESSION['delete_success'])) {
 							</thead>
 							<tbody class="divide-y divide-gray-100">
 								<?php
+								// Auto-create table tb_record_lembur if it doesn't exist
+								$koneksi->query("CREATE TABLE IF NOT EXISTS tb_record_lembur (
+									userid VARCHAR(50) NOT NULL,
+									tgl DATE NOT NULL,
+									lembur_jam DECIMAL(10,2) DEFAULT 0,
+									PRIMARY KEY (userid, tgl)
+								) ENGINE=InnoDB");
+
 								// Query Pengaturan Denda Global
 								$queryDenda = $koneksi->query("SELECT * FROM tb_denda LIMIT 1");
 								$dataDenda = $queryDenda->fetch_assoc();
@@ -484,6 +512,17 @@ if (isset($_SESSION['delete_success'])) {
 								$globalDendaIstirahatMasuk = $dataDenda['denda_istirahat_masuk'] ?? 0;
 								$globalDendaPulang = $dataDenda['denda_pulang'] ?? 0;
 								$globalDendaTidakLengkap = $dataDenda['denda_tidak_lengkap'] ?? 0;
+								$globalLemburPerJam = $dataDenda['lembur_per_jam'] ?? 0;
+
+								// Load custom lembur hours
+								$custom_lembur = [];
+								$cl_res = $koneksi->query("SELECT * FROM tb_record_lembur WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+								if ($cl_res) {
+									while ($cl_row = $cl_res->fetch_assoc()) {
+										$custom_lembur[$cl_row['userid'] . '_' . $cl_row['tgl']] = (float)$cl_row['lembur_jam'];
+									}
+								}
+
 								$http_host = $_SERVER['HTTP_HOST'] ?? '';
 								$is_local = (strpos($http_host, 'localhost') !== false || strpos($http_host, '127.0.0.1') !== false || strpos($http_host, '.test') !== false);
 								
@@ -662,11 +701,29 @@ if (isset($_SESSION['delete_success'])) {
 									$s_keluar = '-';
 									$s_ist_keluar = '-';
 									$s_ist_masuk = '-';
+									$is_flexible = false;
+									$expected_hours = 7;
+									
 									if ($shift) {
-										$s_masuk = !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
-										$s_keluar = !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
-										$s_ist_keluar = !empty($shift['istirahat_keluar']) ? $shift['istirahat_keluar'] : '-';
-										$s_ist_masuk = !empty($shift['istirahat_masuk']) ? $shift['istirahat_masuk'] : '-';
+										$is_flexible = (strpos(strtoupper($shift['keterangan'] ?? ''), 'FLEXIBLE') !== false);
+										if ($is_flexible) {
+											if (preg_match('/(\d+)\s*JAM/i', $shift['keterangan'], $matches)) {
+												$expected_hours = (int)$matches[1];
+											}
+											$s_masuk = 'Bebas';
+											if (!empty($masuk) && $masuk != '00:00') {
+												$s_keluar = date('H:i', strtotime($masuk) + ($expected_hours * 3600));
+											} else {
+												$s_keluar = 'Masuk + ' . $expected_hours . ' Jam';
+											}
+											$s_ist_keluar = 'Bebas';
+											$s_ist_masuk = 'Bebas';
+										} else {
+											$s_masuk = !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
+											$s_keluar = !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
+											$s_ist_keluar = !empty($shift['istirahat_keluar']) ? $shift['istirahat_keluar'] : '-';
+											$s_ist_masuk = !empty($shift['istirahat_masuk']) ? $shift['istirahat_masuk'] : '-';
+										}
 									}
 
 									// Perhitungan Potongan Otomatis
@@ -682,36 +739,68 @@ if (isset($_SESSION['delete_success'])) {
 									$has_ist_keluar = !empty($istirahat_keluar) && $istirahat_keluar != '00:00';
 
 									if ($shift && ($has_masuk || $has_keluar)) {
-										$s_masuk_time = $shift['jam_masuk'];
-										$s_keluar_time = $shift['jam_keluar'];
-										$s_ist_masuk_time = $shift['istirahat_masuk'];
-										$s_ist_keluar_time = $shift['istirahat_keluar'];
+										if ($is_flexible) {
+											if ($has_masuk && $has_keluar) {
+												$expected_keluar_time = date('H:i', strtotime($masuk) + ($expected_hours * 3600));
+												if (is_time_early($pulang, $expected_keluar_time)) {
+													$p_pulang = $globalDendaPulang;
+												}
+											}
+											if ($has_masuk XOR $has_keluar) {
+												$p_tidak_lengkap = $globalDendaTidakLengkap;
+											}
+										} else {
+											$s_masuk_time = $shift['jam_masuk'];
+											$s_keluar_time = $shift['jam_keluar'];
+											$s_ist_masuk_time = $shift['istirahat_masuk'];
+											$s_ist_keluar_time = $shift['istirahat_keluar'];
 
-										if ($has_masuk && is_time_late($masuk, $s_masuk_time)) {
-											$p_telat = $globalDendaMasuk;
-										}
-										if ($has_keluar && is_time_early($pulang, $s_keluar_time)) {
-											$p_pulang = $globalDendaPulang;
-										}
-										if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar_time)) {
-											$p_ist_awal = $globalDendaIstirahatKeluar;
-										}
-										if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk_time)) {
-											$p_ist_telat = $globalDendaIstirahatMasuk;
-										}
+											if ($has_masuk && is_time_late($masuk, $s_masuk_time)) {
+												$p_telat = $globalDendaMasuk;
+											}
+											if ($has_keluar && is_time_early($pulang, $s_keluar_time)) {
+												$p_pulang = $globalDendaPulang;
+											}
+											if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar_time)) {
+												$p_ist_awal = $globalDendaIstirahatKeluar;
+											}
+											if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk_time)) {
+												$p_ist_telat = $globalDendaIstirahatMasuk;
+											}
 
-										// Absen Tidak Lengkap
-										$hasIncompleteMain = ($has_masuk XOR $has_keluar);
-										$isRestExpected = (!empty($s_ist_keluar_time) && $s_ist_keluar_time != '00:00:00');
-										$hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
-										
-										if ($hasIncompleteMain || $hasIncompleteBreak) {
-											$p_tidak_lengkap = $globalDendaTidakLengkap;
+											// Absen Tidak Lengkap
+											$hasIncompleteMain = ($has_masuk XOR $has_keluar);
+											$isRestExpected = (!empty($s_ist_keluar_time) && $s_ist_keluar_time != '00:00:00');
+											$hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
+											
+											if ($hasIncompleteMain || $hasIncompleteBreak) {
+												$p_tidak_lengkap = $globalDendaTidakLengkap;
+											}
 										}
 									}
 
+									$key_lembur = $PIN . '_' . $date;
+									if (isset($custom_lembur[$key_lembur])) {
+										$final_lembur_jam = $custom_lembur[$key_lembur];
+									} else {
+										// Auto-calculated lembur hours for flexible shift
+										$final_lembur_jam = 0;
+										if ($is_flexible && $has_masuk && $has_keluar) {
+											$work_duration = (strtotime($pulang) - strtotime($masuk));
+											if ($work_duration > 43200) $work_duration -= 86400;
+											elseif ($work_duration < -43200) $work_duration += 86400;
+											
+											$work_hours = $work_duration / 3600;
+											if ($work_hours > $expected_hours) {
+												$final_lembur_jam = round($work_hours - $expected_hours, 1);
+											}
+										}
+									}
+									
+									$lembur_money = $final_lembur_jam * $globalLemburPerJam;
+									
 									$total_potongan = $p_telat + $p_pulang + $p_ist_awal + $p_ist_telat + $p_tidak_lengkap;
-									$upah_bersih = $upah - $total_potongan;
+									$upah_bersih = $upah - $total_potongan + $lembur_money;
 									if ($upah_bersih < 0) $upah_bersih = 0;
 
 									$hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
@@ -742,7 +831,7 @@ if (isset($_SESSION['delete_success'])) {
 										<td data-label="Absen Istirahat Keluar" class="py-2 px-2 text-[15px] text-center text-gray-600 <?= ($is_early_istirahat) ? 'bg-red-custom' : '' ?>"><?php echo !empty($istirahat_keluar) ? htmlspecialchars($istirahat_keluar) : '-'; ?></td>
 										<td data-label="Absen Istirahat Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600 <?= ($is_late_istirahat) ? 'bg-red-custom' : '' ?>"><?php echo !empty($istirahat_masuk) ? htmlspecialchars($istirahat_masuk) : '-'; ?></td>
 										<td data-label="Upah Pokok" class="py-2 px-2 text-[15px] text-right text-gray-600 font-semibold"><?php echo rupiah($upah); ?></td>
-										<td data-label="Lembur" class="py-2 px-2 text-[15px] text-right text-gray-600"><?php echo rupiah(0); ?></td>
+										<td data-label="Lembur" class="py-2 px-2 text-[15px] text-right text-gray-600"><?= rupiah($lembur_money) . ' (' . $final_lembur_jam . ' Jam)' ?></td>
 										<td data-label="Pot. Telat" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_telat > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_telat); ?></td>
 										<td data-label="Pot. Istirahat (Awal)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_ist_awal > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_ist_awal); ?></td>
 										<td data-label="Pot. Istirahat (Telat)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_ist_telat > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_ist_telat); ?></td>
@@ -752,9 +841,14 @@ if (isset($_SESSION['delete_success'])) {
 										<td data-label="Upah Setelah Potongan" class="py-2 px-2 text-[15px] text-right font-bold text-blue-600"><?php echo rupiah($upah_bersih); ?></td>
 										<td data-label="Hasil" class="py-2 px-2 text-[15px] text-center font-bold <?php echo $hasil_kerja == 'HADIR' ? 'text-green-600' : 'text-red-600'; ?>"><?php echo $hasil_kerja; ?></td>
 										<td data-label="Aksi" class="py-2 px-2 text-center align-middle">
-											<button type="button" class="btn btn-xs btn-danger btn-hapus-single shadow-sm" data-log-key="<?= htmlspecialchars($PIN . '|' . $date) ?>" style="border-radius:4px; padding:3px 8px;">
-												<i class="fa fa-trash-alt"></i> Hapus
-											</button>
+											<div class="flex gap-1 justify-center">
+												<button type="button" class="btn btn-xs btn-primary btn-edit-lembur shadow-sm" data-pin="<?= htmlspecialchars($PIN) ?>" data-date="<?= htmlspecialchars($date) ?>" data-nama="<?= htmlspecialchars($nama_karyawan) ?>" data-lembur-jam="<?= $final_lembur_jam ?>" style="border-radius:4px; padding:3px 8px;">
+													<i class="fa fa-clock"></i> Lembur
+												</button>
+												<button type="button" class="btn btn-xs btn-danger btn-hapus-single shadow-sm" data-log-key="<?= htmlspecialchars($PIN . '|' . $date) ?>" style="border-radius:4px; padding:3px 8px;">
+													<i class="fa fa-trash-alt"></i> Hapus
+												</button>
+											</div>
 										</td>
 									</tr>
 								<?php
@@ -891,6 +985,53 @@ if (isset($_SESSION['delete_success'])) {
 						$form.append('<input type="hidden" class="appended-log-checkbox" name="selected_logs[]" value="' + logKey + '" />');
 						$form.append('<input type="hidden" class="appended-log-checkbox" name="hapus_pilih" value="1" />');
 						$form.submit();
+					}
+				});
+			// Edit Lembur via SweetAlert2 Input
+			$('#dataTables-example').on('click', '.btn-edit-lembur', function(e) {
+				e.preventDefault();
+				var pin = $(this).data('pin');
+				var date = $(this).data('date');
+				var nama = $(this).data('nama');
+				var currentVal = $(this).data('lembur-jam');
+
+				Swal.fire({
+					title: 'Atur Jam Lembur',
+					html: 'Masukkan jumlah jam lembur untuk <b>' + nama + '</b> pada tanggal ' + date + ':',
+					input: 'number',
+					inputAttributes: {
+						min: 0,
+						step: 0.1
+					},
+					inputValue: currentVal,
+					showCancelButton: true,
+					confirmButtonColor: '#3b82f6',
+					cancelButtonColor: '#6b7280',
+					confirmButtonText: 'Simpan',
+					cancelButtonText: 'Batal',
+					inputValidator: (value) => {
+						if (!value && value !== '0') {
+							return 'Anda harus memasukkan angka jam lembur!';
+						}
+					}
+				}).then((result) => {
+					if (result.isConfirmed) {
+						$.post('', {
+							update_lembur_ajax: 1,
+							userid: pin,
+							tgl: date,
+							lembur_jam: result.value
+						}, function(response) {
+							Swal.fire({
+								icon: 'success',
+								title: 'Berhasil',
+								text: 'Data lemburan berhasil diperbarui.',
+								timer: 1500,
+								showConfirmButton: false
+							}).then(() => {
+								location.reload();
+							});
+						}, 'json');
 					}
 				});
 			});

@@ -73,6 +73,16 @@ $globalDendaIstirahatKeluar = $dataDenda['denda_istirahat_keluar'] ?? 0;
 $globalDendaIstirahatMasuk = $dataDenda['denda_istirahat_masuk'] ?? 0;
 $globalDendaPulang = $dataDenda['denda_pulang'] ?? 0;
 $globalDendaTidakLengkap = $dataDenda['denda_tidak_lengkap'] ?? 0;
+$globalLemburPerJam = $dataDenda['lembur_per_jam'] ?? 0;
+
+// Load custom lembur hours
+$custom_lembur = [];
+$cl_res = $koneksi->query("SELECT * FROM tb_record_lembur WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+if ($cl_res) {
+    while ($cl_row = $cl_res->fetch_assoc()) {
+        $custom_lembur[$cl_row['userid'] . '_' . $cl_row['tgl']] = (float)$cl_row['lembur_jam'];
+    }
+}
 
 $http_host = $_SERVER['HTTP_HOST'] ?? '';
 $is_local = (strpos($http_host, 'localhost') !== false || strpos($http_host, '127.0.0.1') !== false || strpos($http_host, '.test') !== false);
@@ -334,11 +344,29 @@ ksort($grouped_by_dept);
                 $s_keluar = '-';
                 $s_ist_keluar = '-';
                 $s_ist_masuk = '-';
+                $is_flexible = false;
+                $expected_hours = 7;
+                
                 if ($shift) {
-                    $s_masuk = !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
-                    $s_keluar = !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
-                    $s_ist_keluar = !empty($shift['istirahat_keluar']) ? $shift['istirahat_keluar'] : '-';
-                    $s_ist_masuk = !empty($shift['istirahat_masuk']) ? $shift['istirahat_masuk'] : '-';
+                    $is_flexible = (strpos(strtoupper($shift['keterangan'] ?? ''), 'FLEXIBLE') !== false);
+                    if ($is_flexible) {
+                        if (preg_match('/(\d+)\s*JAM/i', $shift['keterangan'], $matches)) {
+                            $expected_hours = (int)$matches[1];
+                        }
+                        $s_masuk = 'Bebas';
+                        if (!empty($masuk) && $masuk != '00:00') {
+                            $s_keluar = date('H:i', strtotime($masuk) + ($expected_hours * 3600));
+                        } else {
+                            $s_keluar = 'Masuk + ' . $expected_hours . ' Jam';
+                        }
+                        $s_ist_keluar = 'Bebas';
+                        $s_ist_masuk = 'Bebas';
+                    } else {
+                        $s_masuk = !empty($shift['jam_masuk']) ? $shift['jam_masuk'] : '-';
+                        $s_keluar = !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
+                        $s_ist_keluar = !empty($shift['istirahat_keluar']) ? $shift['istirahat_keluar'] : '-';
+                        $s_ist_masuk = !empty($shift['istirahat_masuk']) ? $shift['istirahat_masuk'] : '-';
+                    }
                 }
 
                 // Perhitungan Potongan Otomatis
@@ -349,24 +377,54 @@ ksort($grouped_by_dept);
                 $has_ist_keluar = !empty($istirahat_keluar) && $istirahat_keluar != '00:00';
 
                 if ($shift && ($has_masuk || $has_keluar)) {
-                    $s_masuk_time = $shift['jam_masuk'];
-                    $s_keluar_time = $shift['jam_keluar'];
-                    $s_ist_masuk_time = $shift['istirahat_masuk'];
-                    $s_ist_keluar_time = $shift['istirahat_keluar'];
+                    if ($is_flexible) {
+                        if ($has_masuk && $has_keluar) {
+                            $expected_keluar_time = date('H:i', strtotime($masuk) + ($expected_hours * 3600));
+                            if (is_time_early($pulang, $expected_keluar_time)) {
+                                $p_pulang = $globalDendaPulang;
+                            }
+                        }
+                        if ($has_masuk XOR $has_keluar) {
+                            $p_tidak_lengkap = $globalDendaTidakLengkap;
+                        }
+                    } else {
+                        $s_masuk_time = $shift['jam_masuk'];
+                        $s_keluar_time = $shift['jam_keluar'];
+                        $s_ist_masuk_time = $shift['istirahat_masuk'];
+                        $s_ist_keluar_time = $shift['istirahat_keluar'];
 
-                    if ($has_masuk && is_time_late($masuk, $s_masuk_time)) $p_telat = $globalDendaMasuk;
-                    if ($has_keluar && is_time_early($pulang, $s_keluar_time)) $p_pulang = $globalDendaPulang;
-                    if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar_time)) $p_ist_awal = $globalDendaIstirahatKeluar;
-                    if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk_time)) $p_ist_telat = $globalDendaIstirahatMasuk;
+                        if ($has_masuk && is_time_late($masuk, $s_masuk_time)) $p_telat = $globalDendaMasuk;
+                        if ($has_keluar && is_time_early($pulang, $s_keluar_time)) $p_pulang = $globalDendaPulang;
+                        if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar_time)) $p_ist_awal = $globalDendaIstirahatKeluar;
+                        if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk_time)) $p_ist_telat = $globalDendaIstirahatMasuk;
 
-                    $hasIncompleteMain = ($has_masuk XOR $has_keluar);
-                    $isRestExpected = (!empty($s_ist_keluar_time) && $s_ist_keluar_time != '00:00:00');
-                    $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
-                    if ($hasIncompleteMain || $hasIncompleteBreak) $p_tidak_lengkap = $globalDendaTidakLengkap;
+                        $hasIncompleteMain = ($has_masuk XOR $has_keluar);
+                        $isRestExpected = (!empty($s_ist_keluar_time) && $s_ist_keluar_time != '00:00:00');
+                        $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
+                        if ($hasIncompleteMain || $hasIncompleteBreak) $p_tidak_lengkap = $globalDendaTidakLengkap;
+                    }
                 }
 
+                $key_lembur = $PIN . '_' . $date;
+                if (isset($custom_lembur[$key_lembur])) {
+                    $final_lembur_jam = $custom_lembur[$key_lembur];
+                } else {
+                    $final_lembur_jam = 0;
+                    if ($is_flexible && $has_masuk && $has_keluar) {
+                        $work_duration = (strtotime($pulang) - strtotime($masuk));
+                        if ($work_duration > 43200) $work_duration -= 86400;
+                        elseif ($work_duration < -43200) $work_duration += 86400;
+                        
+                        $work_hours = $work_duration / 3600;
+                        if ($work_hours > $expected_hours) {
+                            $final_lembur_jam = round($work_hours - $expected_hours, 1);
+                        }
+                    }
+                }
+                $lembur_money = $final_lembur_jam * $globalLemburPerJam;
+
                 $total_potongan = $p_telat + $p_pulang + $p_ist_awal + $p_ist_telat + $p_tidak_lengkap;
-                $upah_dibayar = $upah - $total_potongan;
+                $upah_dibayar = $upah - $total_potongan + $lembur_money;
                 if ($upah_dibayar < 0) $upah_dibayar = 0;
 
                 $grand_total += $upah_dibayar;
@@ -392,7 +450,7 @@ ksort($grouped_by_dept);
                     <td align='center'>" . (!empty($istirahat_keluar) ? $istirahat_keluar : '') . "</td>
                     <td align='center'>" . (!empty($istirahat_masuk) ? $istirahat_masuk : '') . "</td>
                     <td align='right' style='mso-number-format:\"\#\,\#\#0\";'>Rp " . number_format($upah, 0, ',', '.') . "</td>
-                    <td align='right' style='mso-number-format:\"\#\,\#\#0\";'>Rp 0</td>
+                    <td align='right' style='mso-number-format:\"\#\,\#\#0\";'>" . ($lembur_money > 0 ? "Rp " . number_format($lembur_money, 0, ',', '.') . " (" . $final_lembur_jam . " Jam)" : "Rp 0") . "</td>
                     <td align='right' style='mso-number-format:\"\#\,\#\#0\"; color:red;'>" . ($p_telat > 0 ? "Rp " . number_format($p_telat, 0, ',', '.') : "-") . "</td>
                     <td align='right' style='mso-number-format:\"\#\,\#\#0\"; color:red;'>" . ($p_ist_awal > 0 ? "Rp " . number_format($p_ist_awal, 0, ',', '.') : "-") . "</td>
                     <td align='right' style='mso-number-format:\"\#\,\#\#0\"; color:red;'>" . ($p_ist_telat > 0 ? "Rp " . number_format($p_ist_telat, 0, ',', '.') : "-") . "</td>

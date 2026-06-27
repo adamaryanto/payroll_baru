@@ -132,15 +132,34 @@ if (isset($_GET['id'])) {
     $has_ist_masuk = !empty($jamIstirahatMasukRealisasi) && $jamIstirahatMasukRealisasi != '00:00:00';
     $has_ist_keluar = !empty($jamIstirahatKeluarRealisasi) && $jamIstirahatKeluarRealisasi != '00:00:00';
 
+    $is_flexible = (strpos(strtoupper($datadetail['shift'] ?? ''), 'FLEXIBLE') !== false);
+    $expected_hours = 7;
+    if ($is_flexible && preg_match('/(\d+)\s*JAM/i', $datadetail['shift'], $matches)) {
+        $expected_hours = (int)$matches[1];
+    }
+
     $isTotalMissing = (!$has_masuk && !$has_keluar);
     $hasIncompleteMain = ($has_masuk XOR $has_keluar);
-    $isRestExpected = (!empty($datadetail['shift_istirahat_keluar']));
-    $hasIncompleteBreak = ($isRestExpected && ($has_ist_keluar XOR $has_ist_masuk));
     
-    $isLate = ($has_masuk && !empty($datadetail['shift_masuk']) && is_time_late($jamMasukRealisasi, $datadetail['shift_masuk']));
-    $isEarlyOut = ($has_keluar && !empty($datadetail['shift_keluar']) && is_time_early($jamKeluarRealisasi, $datadetail['shift_keluar'])); 
-    $isLateBreak = ($has_ist_masuk && !empty($datadetail['shift_istirahat_masuk']) && is_time_late($jamIstirahatMasukRealisasi, $datadetail['shift_istirahat_masuk']));
-    $isEarlyBreak = ($has_ist_keluar && !empty($datadetail['shift_istirahat_keluar']) && is_time_early($jamIstirahatKeluarRealisasi, $datadetail['shift_istirahat_keluar']));
+    if ($is_flexible) {
+        $isLate = false;
+        $isLateBreak = false;
+        $isEarlyBreak = false;
+        $isEarlyOut = false;
+        if ($has_masuk && $has_keluar) {
+            $expected_keluar_time = date('H:i:s', strtotime($jamMasukRealisasi) + ($expected_hours * 3600));
+            $isEarlyOut = is_time_early($jamKeluarRealisasi, $expected_keluar_time);
+        }
+        $hasIncompleteBreak = false;
+    } else {
+        $isRestExpected = (!empty($datadetail['shift_istirahat_keluar']));
+        $hasIncompleteBreak = ($isRestExpected && ($has_ist_keluar XOR $has_ist_masuk));
+        
+        $isLate = ($has_masuk && !empty($datadetail['shift_masuk']) && is_time_late($jamMasukRealisasi, $datadetail['shift_masuk']));
+        $isEarlyOut = ($has_keluar && !empty($datadetail['shift_keluar']) && is_time_early($jamKeluarRealisasi, $datadetail['shift_keluar'])); 
+        $isLateBreak = ($has_ist_masuk && !empty($datadetail['shift_istirahat_masuk']) && is_time_late($jamIstirahatMasukRealisasi, $datadetail['shift_istirahat_masuk']));
+        $isEarlyBreak = ($has_ist_keluar && !empty($datadetail['shift_istirahat_keluar']) && is_time_early($jamIstirahatKeluarRealisasi, $datadetail['shift_istirahat_keluar']));
+    }
 
     // Logic denda: Kalkulasi otomatis berdasarkan jam hadir/jadwal
     $hasilpotonganpulang = ($isEarlyOut && !$isTotalMissing) ? $globalDendaPulang : 0;
@@ -174,8 +193,21 @@ if (isset($_GET['id'])) {
     // Wage zeroed for TOTAL MISSING after sync
     if ($attendanceStatus == 'TIDAK HADIR') {
         $upahPokokTampil = 0;
-        $tlembur = 0;
     }
+
+    // Logika Lembur Otomatis jika flexible
+    $lembur_jam_val = isset($datadetail['lembur_jam']) ? (float)$datadetail['lembur_jam'] : 0;
+    if ($lembur_jam_val == 0 && $is_flexible && $has_masuk && $has_keluar) {
+        $work_duration = (strtotime($jamKeluarRealisasi) - strtotime($jamMasukRealisasi));
+        if ($work_duration > 43200) $work_duration -= 86400;
+        elseif ($work_duration < -43200) $work_duration += 86400;
+        
+        $work_hours = $work_duration / 3600;
+        if ($work_hours > $expected_hours) {
+            $lembur_jam_val = round($work_hours - $expected_hours, 1);
+        }
+    }
+    $lemburPokokTampil = ($lembur_jam_val > 0) ? ($lembur_jam_val * $globalLemburPerJam) : (float)($datadetail['lembur'] ?? 0);
 
     // Additional Safeguard for Draft (Status 0): Force zero penalties
     if ($datadetail['status_realisasi_detail'] == 0) {
@@ -322,10 +354,17 @@ if (!function_exists('rupiah')) {
 
                 <div class="row">
                     <div class="form-group col-md-2"> <label>POT. LAINNYA</label> <input type="number" name="tpotlainnya" value="<?= $datadetail['r_potongan_lainnya'] ?>" class="form-control" required> </div>
-                    <div class="form-group col-md-2"> <label>LEMBUR</label> <input type="number" name="tlembur" value="<?= $datadetail['lembur'] ?>" class="form-control" required> </div>
+                    <div class="form-group col-md-2"> 
+                        <label>LEMBUR (JAM) <span class="text-indigo-600 font-bold">@<?= rupiah($globalLemburPerJam) ?>/Jam</span></label> 
+                        <input type="number" step="0.1" name="tlembur_jam" value="<?= $lembur_jam_val ?>" class="form-control"> 
+                    </div>
+                    <div class="form-group col-md-2"> 
+                        <label>TOTAL UPAH LEMBUR (Rp)</label> 
+                        <input type="number" name="tlembur" value="<?= $lemburPokokTampil ?>" class="form-control" readonly style="background: #f9fafb;"> 
+                    </div>
                     <div class="form-group col-md-2"> 
                         <label>TOTAL UPAH AKHIR</label> 
-                        <?php $totalAkhir = $upahPokokTampil + $datadetail['lembur'] - $hasilpotongantelat - $hasilpotonganistirahatkeluar - $hasilpotonganistirahatmasuk - $datadetail['r_potongan_lainnya'] - $hasilpotonganpulang - $hasilpotongantidaklengkap; ?>
+                        <?php $totalAkhir = $upahPokokTampil + $lemburPokokTampil - $hasilpotongantelat - $hasilpotonganistirahatkeluar - $hasilpotonganistirahatmasuk - $datadetail['r_potongan_lainnya'] - $hasilpotonganpulang - $hasilpotongantidaklengkap; ?>
                         <input type="text" value="<?= rupiah($totalAkhir) ?>" class="form-control font-bold text-blue-600" readonly style="background: #eff6ff;"> 
                     </div>
                 </div>
@@ -507,20 +546,22 @@ $(document).ready(function() {
                 masuk: '".$j['jam_masuk']."',
                 keluar: '".$j['jam_keluar']."',
                 ist_masuk: '".$j['istirahat_masuk']."',
-                ist_keluar: '".$j['istirahat_keluar']."'
+                ist_keluar: '".$j['istirahat_keluar']."',
+                keterangan: '".$j['keterangan']."'
             },";
         }
         ?>
     };
 
     const dendaGlobal = {
-        masuk: <?= (int)($gd_masuk ?? 0) ?>,
-        istAwal: <?= (int)($gd_istirahat_awal ?? 0) ?>,
-        istTelat: <?= (int)($gd_istirahat_telat ?? 0) ?>,
-        pulang: <?= (int)($gd_pulang ?? 0) ?>,
-        tidakLengkap: <?= (int)($gd_tidak_lengkap ?? 0) ?>
+        masuk: <?= (int)($globalDendaMasuk ?? 0) ?>,
+        istAwal: <?= (int)($globalDendaIstirahatKeluar ?? 0) ?>,
+        istTelat: <?= (int)($globalDendaIstirahatMasuk ?? 0) ?>,
+        pulang: <?= (int)($globalDendaPulang ?? 0) ?>,
+        tidakLengkap: <?= (int)($globalDendaTidakLengkap ?? 0) ?>
     };
 
+    const lemburPerJam = <?= (int)($globalLemburPerJam ?? 0) ?>;
     const upahMaster = <?= (int)($datadetail['upah_master'] ?? 0) ?>;
 
     function timeToSeconds(time) {
@@ -535,7 +576,10 @@ $(document).ready(function() {
         const jamKeluar = $('[name="tjamkeluar"]').val();
         const istMasuk = $('[name="tistirahatmasuk"]').val();
         const istKeluar = $('[name="tistirahatkeluar"]').val();
-        const lembur = parseInt($('[name="tlembur"]').val()) || 0;
+        const lemburJam = parseFloat($('[name="tlembur_jam"]').val()) || 0;
+        const lembur = Math.round(lemburJam * lemburPerJam);
+        $('[name="tlembur"]').val(lembur);
+
         const potLain = parseInt($('[name="tpotlainnya"]').val()) || 0;
         const recordStatus = <?= $datadetail['status_realisasi_detail'] ?>;
 
@@ -546,6 +590,13 @@ $(document).ready(function() {
         let finalUpahPokok = (currentRUpah > 0) ? currentRUpah : upahMaster;
 
         const shift = shiftData[shiftId];
+        const isFlexible = (shift && shift.keterangan.toUpperCase().indexOf('FLEXIBLE') !== -1);
+        let expectedHours = 7;
+        if (isFlexible) {
+            let match = shift.keterangan.match(/(\d+)\s*JAM/i);
+            expectedHours = match ? parseInt(match[1]) : 7;
+        }
+
         const hasMasuk = (jamMasuk && jamMasuk !== '00:00:00');
         const hasKeluar = (jamKeluar && jamKeluar !== '00:00:00');
         const hasIstMasuk = (istMasuk && istMasuk !== '00:00:00');
@@ -576,6 +627,39 @@ $(document).ready(function() {
             } else {
                 // Manual input in draft - show what will happen
                 if (shift) {
+                    if (isFlexible) {
+                        if (hasMasuk && hasKeluar) {
+                            let expectedKeluarSecs = timeToSeconds(jamMasuk) + (expectedHours * 3600);
+                            if (expectedKeluarSecs > 86400) expectedKeluarSecs -= 86400;
+                            if (timeToSeconds(jamKeluar) < expectedKeluarSecs) pPulang = dendaGlobal.pulang;
+                        }
+                        if (hasMasuk !== hasKeluar) pTidakLengkap = dendaGlobal.tidakLengkap;
+                    } else {
+                        if (hasMasuk && shift.masuk !== '00:00:00' && timeToSeconds(jamMasuk) > timeToSeconds(shift.masuk)) pTelat = dendaGlobal.masuk;
+                        if (hasKeluar && shift.keluar !== '00:00:00' && timeToSeconds(jamKeluar) < timeToSeconds(shift.keluar)) pPulang = dendaGlobal.pulang;
+                        if (hasIstKeluar && shift.ist_keluar !== '00:00:00' && timeToSeconds(istKeluar) < timeToSeconds(shift.ist_keluar)) pIstAwal = dendaGlobal.istAwal;
+                        if (hasIstMasuk && shift.ist_masuk !== '00:00:00' && timeToSeconds(istMasuk) > timeToSeconds(shift.ist_masuk)) pIstTelat = dendaGlobal.istTelat;
+                        const hasIncompleteMain = (!hasMasuk || !hasKeluar);
+                        const isRestExpected = (shift.ist_keluar !== '00:00:00');
+                        const hasIncompleteBreak = (isRestExpected && (!hasIstMasuk || !hasIstKeluar));
+                        if (hasIncompleteMain || hasIncompleteBreak) pTidakLengkap = dendaGlobal.tidakLengkap;
+                    }
+                }
+            }
+        } else if (attStatus !== 'HADIR') { // This means TIDAK HADIR after sync
+            finalUpahPokok = 0;
+            pTelat = 0; pPulang = 0; pIstAwal = 0; pIstTelat = 0; pTidakLengkap = 0;
+        } else {
+            // Normal calculation for HADIR (Status > 0)
+            if (shift) {
+                if (isFlexible) {
+                    if (hasMasuk && hasKeluar) {
+                        let expectedKeluarSecs = timeToSeconds(jamMasuk) + (expectedHours * 3600);
+                        if (expectedKeluarSecs > 86400) expectedKeluarSecs -= 86400;
+                        if (timeToSeconds(jamKeluar) < expectedKeluarSecs) pPulang = dendaGlobal.pulang;
+                    }
+                    if (hasMasuk !== hasKeluar) pTidakLengkap = dendaGlobal.tidakLengkap;
+                } else {
                     if (hasMasuk && shift.masuk !== '00:00:00' && timeToSeconds(jamMasuk) > timeToSeconds(shift.masuk)) pTelat = dendaGlobal.masuk;
                     if (hasKeluar && shift.keluar !== '00:00:00' && timeToSeconds(jamKeluar) < timeToSeconds(shift.keluar)) pPulang = dendaGlobal.pulang;
                     if (hasIstKeluar && shift.ist_keluar !== '00:00:00' && timeToSeconds(istKeluar) < timeToSeconds(shift.ist_keluar)) pIstAwal = dendaGlobal.istAwal;
@@ -585,21 +669,6 @@ $(document).ready(function() {
                     const hasIncompleteBreak = (isRestExpected && (!hasIstMasuk || !hasIstKeluar));
                     if (hasIncompleteMain || hasIncompleteBreak) pTidakLengkap = dendaGlobal.tidakLengkap;
                 }
-            }
-        } else if (attStatus !== 'HADIR') { // This means TIDAK HADIR after sync
-            finalUpahPokok = 0;
-            pTelat = 0; pPulang = 0; pIstAwal = 0; pIstTelat = 0; pTidakLengkap = 0;
-        } else {
-            // Normal calculation for HADIR (Status > 0)
-            if (shift) {
-                if (hasMasuk && shift.masuk !== '00:00:00' && timeToSeconds(jamMasuk) > timeToSeconds(shift.masuk)) pTelat = dendaGlobal.masuk;
-                if (hasKeluar && shift.keluar !== '00:00:00' && timeToSeconds(jamKeluar) < timeToSeconds(shift.keluar)) pPulang = dendaGlobal.pulang;
-                if (hasIstKeluar && shift.ist_keluar !== '00:00:00' && timeToSeconds(istKeluar) < timeToSeconds(shift.ist_keluar)) pIstAwal = dendaGlobal.istAwal;
-                if (hasIstMasuk && shift.ist_masuk !== '00:00:00' && timeToSeconds(istMasuk) > timeToSeconds(shift.ist_masuk)) pIstTelat = dendaGlobal.istTelat;
-                const hasIncompleteMain = (!hasMasuk || !hasKeluar);
-                const isRestExpected = (shift.ist_keluar !== '00:00:00');
-                const hasIncompleteBreak = (isRestExpected && (!hasIstMasuk || !hasIstKeluar));
-                if (hasIncompleteMain || hasIncompleteBreak) pTidakLengkap = dendaGlobal.tidakLengkap;
             }
         }
 
@@ -618,6 +687,35 @@ $(document).ready(function() {
         $('[style*="background: #eff6ff"]').val(totalFmt);
     }
 
-    $('[name="tshift"], [name="tjammasuk"], [name="tjamkeluar"], [name="tistirahatmasuk"], [name="tistirahatkeluar"], [name="tlembur"], [name="tpotlainnya"]').on('change input', calculate);
+    // Auto-calculate lembur jam when scan times change for flexible shift
+    $('[name="tjammasuk"], [name="tjamkeluar"]').on('change input', function() {
+        const shiftId = $('[name="tshift"]').val();
+        const shift = shiftData[shiftId];
+        const isFlexible = (shift && shift.keterangan.toUpperCase().indexOf('FLEXIBLE') !== -1);
+        if (isFlexible) {
+            let match = shift.keterangan.match(/(\d+)\s*JAM/i);
+            let expectedHours = match ? parseInt(match[1]) : 7;
+            const jamMasuk = $('[name="tjammasuk"]').val();
+            const jamKeluar = $('[name="tjamkeluar"]').val();
+            if (jamMasuk && jamKeluar && jamMasuk !== '00:00:00' && jamKeluar !== '00:00:00') {
+                let masukSecs = timeToSeconds(jamMasuk);
+                let keluarSecs = timeToSeconds(jamKeluar);
+                let workSecs = keluarSecs - masukSecs;
+                if (workSecs > 43200) workSecs -= 86400;
+                else if (workSecs < -43200) workSecs += 86400;
+                
+                let workHours = workSecs / 3600;
+                if (workHours > expectedHours) {
+                    $('[name="tlembur_jam"]').val(Math.round((workHours - expectedHours) * 10) / 10);
+                } else {
+                    $('[name="tlembur_jam"]').val(0);
+                }
+            }
+        }
+    });
+
+    $('[name="tshift"], [name="tjammasuk"], [name="tjamkeluar"], [name="tistirahatmasuk"], [name="tistirahatkeluar"], [name="tlembur_jam"], [name="tpotlainnya"]').on('change input', calculate);
 });
 </script>
+</body>
+</html>
