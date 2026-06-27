@@ -160,6 +160,15 @@ if (isset($_SESSION['delete_success'])) {
 			cursor: not-allowed !important;
 		}
 
+		.bg-red-custom {
+			background-color: #e74c3c !important;
+			color: #fff !important;
+		}
+		.bg-yellow-custom {
+			background-color: #f1c40f !important;
+			color: #000 !important;
+		}
+
 		/* --- STYLING INFO --- */
 		.dataTables_wrapper .dataTables_info {
 			padding-top: 20px !important;
@@ -706,6 +715,11 @@ if (isset($_SESSION['delete_success'])) {
 									if ($upah_bersih < 0) $upah_bersih = 0;
 
 									$hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
+
+									$is_late_masuk = ($p_telat > 0);
+									$is_early_pulang = ($p_pulang > 0);
+									$is_early_istirahat = ($p_ist_awal > 0);
+									$is_late_istirahat = ($p_ist_telat > 0);
 								?>
 									<tr class="hover:bg-gray-50 transition-colors">
 										<td class="py-2 px-2 text-center align-middle">
@@ -723,17 +737,17 @@ if (isset($_SESSION['delete_success'])) {
 										<td data-label="Jam Pulang" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_keluar); ?></td>
 										<td data-label="Istirahat Keluar" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_ist_keluar); ?></td>
 										<td data-label="Istirahat Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_ist_masuk); ?></td>
-										<td data-label="Absen Masuk" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($masuk) ? htmlspecialchars($masuk) : '-'; ?></td>
-										<td data-label="Absen Pulang" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900"><?php echo !empty($pulang) ? htmlspecialchars($pulang) : '-'; ?></td>
-										<td data-label="Absen Istirahat Keluar" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo !empty($istirahat_keluar) ? htmlspecialchars($istirahat_keluar) : '-'; ?></td>
-										<td data-label="Absen Istirahat Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo !empty($istirahat_masuk) ? htmlspecialchars($istirahat_masuk) : '-'; ?></td>
+										<td data-label="Absen Masuk" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900 <?= ($is_late_masuk) ? 'bg-red-custom' : '' ?>"><?php echo !empty($masuk) ? htmlspecialchars($masuk) : '-'; ?></td>
+										<td data-label="Absen Pulang" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900 <?= ($is_early_pulang) ? 'bg-red-custom' : '' ?>"><?php echo !empty($pulang) ? htmlspecialchars($pulang) : '-'; ?></td>
+										<td data-label="Absen Istirahat Keluar" class="py-2 px-2 text-[15px] text-center text-gray-600 <?= ($is_early_istirahat) ? 'bg-red-custom' : '' ?>"><?php echo !empty($istirahat_keluar) ? htmlspecialchars($istirahat_keluar) : '-'; ?></td>
+										<td data-label="Absen Istirahat Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600 <?= ($is_late_istirahat) ? 'bg-red-custom' : '' ?>"><?php echo !empty($istirahat_masuk) ? htmlspecialchars($istirahat_masuk) : '-'; ?></td>
 										<td data-label="Upah Pokok" class="py-2 px-2 text-[15px] text-right text-gray-600 font-semibold"><?php echo rupiah($upah); ?></td>
 										<td data-label="Lembur" class="py-2 px-2 text-[15px] text-right text-gray-600"><?php echo rupiah(0); ?></td>
-										<td data-label="Pot. Telat" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_telat); ?></td>
-										<td data-label="Pot. Istirahat (Awal)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_ist_awal); ?></td>
-										<td data-label="Pot. Istirahat (Telat)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_ist_telat); ?></td>
-										<td data-label="Denda Pulang" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_pulang); ?></td>
-										<td data-label="Denda Tidak Absen" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold"><?php echo rupiah($p_tidak_lengkap); ?></td>
+										<td data-label="Pot. Telat" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_telat > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_telat); ?></td>
+										<td data-label="Pot. Istirahat (Awal)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_ist_awal > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_ist_awal); ?></td>
+										<td data-label="Pot. Istirahat (Telat)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_ist_telat > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_ist_telat); ?></td>
+										<td data-label="Denda Pulang" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_pulang > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_pulang); ?></td>
+										<td data-label="Denda Tidak Absen" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_tidak_lengkap > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_tidak_lengkap); ?></td>
 										<td data-label="Pot. Lain" class="py-2 px-2 text-[15px] text-right text-gray-600"><?php echo rupiah(0); ?></td>
 										<td data-label="Upah Setelah Potongan" class="py-2 px-2 text-[15px] text-right font-bold text-blue-600"><?php echo rupiah($upah_bersih); ?></td>
 										<td data-label="Hasil" class="py-2 px-2 text-[15px] text-center font-bold <?php echo $hasil_kerja == 'HADIR' ? 'text-green-600' : 'text-red-600'; ?>"><?php echo $hasil_kerja; ?></td>
