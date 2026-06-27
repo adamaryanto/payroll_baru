@@ -51,6 +51,7 @@ if (isset($_POST['update'])) {
     $tdepartmen = $koneksi->real_escape_string($_POST['tdepartmen']);
     $tsubdept = $koneksi->real_escape_string($_POST['tsubdept']);
     $tjabatan = $koneksi->real_escape_string($_POST['tjabatan']);
+    $tjadwal = $koneksi->real_escape_string($_POST['tjadwal']);
 
     $sql = $koneksi->query("UPDATE ms_karyawan SET 
         id_departmen = '$tdepartmen',
@@ -69,6 +70,7 @@ if (isset($_POST['update'])) {
         tgl_aktif = '$ttanggalbergabung',
         id_os_dhk = '$tos',
         id_golongan = '$tgolongan',
+        id_jadwal = '$tjadwal',
         status_karyawan = '$tstatuskaryawan',
         upah = '$tupah'
         WHERE id_karyawan = '$tid'
@@ -240,6 +242,20 @@ if (isset($_POST['update'])) {
                                     ?>
                                 </select>
                             </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Shift / Jadwal <span class="text-red-500">*</span></label>
+                            <select name="tjadwal" required class="w-full select2 px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                                <option value="">- Pilih Shift -</option>
+                                <?php
+                                $q_shift = $koneksi->query("SELECT * FROM tb_jadwal");
+                                while($d = $q_shift->fetch_assoc()) {
+                                    $sel = ($d['id_jadwal'] == $idjadwal) ? 'selected' : '';
+                                    echo "<option value='".$d['id_jadwal']."' $sel>".$d['keterangan']." (".$d['jam_masuk']." - ".$d['jam_keluar'].")</option>";
+                                }
+                                ?>
+                            </select>
                         </div>
 
                         <div class="form-group">

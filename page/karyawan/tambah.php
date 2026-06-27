@@ -18,6 +18,7 @@ if (isset($_POST['simpan'])) {
     $alamattinggal = isset($_POST['talamattinggal']) ? $koneksi->real_escape_string($_POST['talamattinggal']) : '';
     $tanggalbergabung = isset($_POST['ttanggalbergabung']) && $_POST['ttanggalbergabung'] !== '' ? $koneksi->real_escape_string($_POST['ttanggalbergabung']) : date('Y-m-d');
     $upah = !empty($_POST['tupah']) ? floatval(str_replace(['Rp', '.', ' '], '', $_POST['tupah'])) : 0;
+    $jadwal = $koneksi->real_escape_string($_POST['tjadwal']);
 
     $sql = $koneksi->query("INSERT INTO ms_karyawan (
         id_departmen, id_jabatan, no_absen, nama_karyawan, tempat_lahir, tgl_lahir, agama, 
@@ -26,7 +27,7 @@ if (isset($_POST['simpan'])) {
     ) VALUES (
         '$departmen', '$jabatan', '$noabsen', '$nama', '$tempatlahir', '$tanggallahir', '$agama',
         '$statuskawin', '$jeniskelamin', '$noktp', '$nobpjs', '$alamatktp', '$alamattinggal',
-        'Aktif', '$tanggalbergabung', '$subdept', '$os', '$golongan', '0', '$upah'
+        'Aktif', '$tanggalbergabung', '$subdept', '$os', '$golongan', '$jadwal', '$upah'
     )");
 
     if ($sql) {
@@ -194,6 +195,19 @@ if (isset($_POST['simpan'])) {
                                     ?>
                                 </select>
                             </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Shift / Jadwal <span class="text-red-500">*</span></label>
+                            <select name="tjadwal" required class="w-full select2 px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                                <option value="">- Pilih Shift -</option>
+                                <?php
+                                $q_shift = $koneksi->query("SELECT * FROM tb_jadwal");
+                                while($d = $q_shift->fetch_assoc()) {
+                                    echo "<option value='".$d['id_jadwal']."'>".$d['keterangan']." (".$d['jam_masuk']." - ".$d['jam_keluar'].")</option>";
+                                }
+                                ?>
+                            </select>
                         </div>
 
                         
