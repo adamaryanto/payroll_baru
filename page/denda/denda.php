@@ -1,9 +1,4 @@
-// Auto-create column 'lembur_per_jam' if it doesn't exist
-$checkColumn = $koneksi->query("SHOW COLUMNS FROM tb_denda LIKE 'lembur_per_jam'");
-if ($checkColumn->num_rows == 0) {
-    $koneksi->query("ALTER TABLE tb_denda ADD COLUMN lembur_per_jam INT DEFAULT 0");
-}
-
+<?php
 // Mengambil data denda saat ini
 $tampil = $koneksi->query("SELECT * FROM tb_denda LIMIT 1");
 $data = $tampil->fetch_assoc();
@@ -12,7 +7,6 @@ $dendaistirahatkeluar = $data['denda_istirahat_keluar'] ?? '';
 $dendaistirahatmasuk = $data['denda_istirahat_masuk'] ?? '';
 $dendapulang = $data['denda_pulang'] ?? '';
 $dendatidaklengkap = $data['denda_tidak_lengkap'] ?? '';
-$lemburperjam = $data['lembur_per_jam'] ?? 0;
 
 // Memproses saat tombol simpan ditekan (Dipindah ke atas agar lebih rapi)
 if (isset($_POST['simpan'])) {
@@ -21,7 +15,6 @@ if (isset($_POST['simpan'])) {
     $tdendaistirahatmasuk = $_POST['tdendaistirahatmasuk'] ?? '';
     $tdendapulang = $_POST['tdendapulang'] ?? '';
     $tdendatidaklengkap = $_POST['tdendatidaklengkap'] ?? '';
-    $tlemburperjam = $_POST['tlemburperjam'] ?? 0;
     
     // Proses Update ke Database
     $sql = $koneksi->query("UPDATE tb_denda SET 
@@ -29,8 +22,7 @@ if (isset($_POST['simpan'])) {
         denda_istirahat_keluar = '$tdendaistirahatkeluar',
         denda_istirahat_masuk = '$tdendaistirahatmasuk',
         denda_pulang = '$tdendapulang',
-        denda_tidak_lengkap = '$tdendatidaklengkap',
-        lembur_per_jam = '$tlemburperjam'
+        denda_tidak_lengkap = '$tdendatidaklengkap'
     ");
     
     if ($sql) {
@@ -151,19 +143,6 @@ if (isset($_POST['simpan'])) {
                                 <span class="text-gray-400 font-bold">Rp</span>
                             </div>
                             <input placeholder="0" autocomplete="off" type="number" name="tdendatidaklengkap" value="<?= htmlspecialchars($dendatidaklengkap) ?>" required 
-                                   class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out font-medium"/>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">
-                            Tarif Lembur / Jam <span class="text-rose-500">*</span>
-                        </label>
-                        <div class="relative">
-                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <span class="text-gray-400 font-bold">Rp</span>
-                            </div>
-                            <input placeholder="0" autocomplete="off" type="number" name="tlemburperjam" value="<?= htmlspecialchars($lemburperjam) ?>" required 
                                    class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out font-medium"/>
                         </div>
                     </div>

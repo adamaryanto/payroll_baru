@@ -151,6 +151,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                   <?php } ?>
                   <li class="nav-item"><a href="?page=jadwal" class="nav-link"><i class="far fa-clock nav-icon"></i><p>Jadwal</p></a></li>
                   <li class="nav-item"><a href="?page=denda" class="nav-link"><i class="fas fa-exclamation-triangle nav-icon"></i><p>Denda</p></a></li>
+                  <li class="nav-item"><a href="?page=lembur" class="nav-link"><i class="fas fa-business-time nav-icon"></i><p>Lembur</p></a></li>
                   <li class="nav-item"><a href="?page=boneless&aksi=master" class="nav-link"><i class="fas fa-car nav-icon"></i><p>Biaya Mobil Bonless</p></a></li>
                 </ul>
               </li>
@@ -269,6 +270,8 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     elseif ($aksi == "cari") { include "page/siac/ijin/karyawan.php"; }
                   } else if ($page == 'denda') {
                     if ($aksi == "") { include "page/denda/denda.php"; }
+                  } else if ($page == 'lembur') {
+                    if ($aksi == "") { include "page/lembur/lembur.php"; }
                   } else if ($page == 'mesin') {
                     if ($aksi == "") { include "page/mesin/mesin.php"; }
                   } else if ($page == 'generate') {

@@ -68,7 +68,18 @@ if (!function_exists('rupiah')) {
 	}
 }
 
-// Query Pengaturan Denda Global
+// Query Pengaturan Lembur & Denda Global
+$koneksi->query("CREATE TABLE IF NOT EXISTS tb_lembur (
+    id_lembur INT AUTO_INCREMENT PRIMARY KEY,
+    lembur_per_jam INT DEFAULT 0
+) ENGINE=InnoDB");
+$checkLembur = $koneksi->query("SELECT * FROM tb_lembur LIMIT 1");
+if ($checkLembur->num_rows == 0) {
+    $koneksi->query("INSERT INTO tb_lembur (id_lembur, lembur_per_jam) VALUES (1, 0)");
+}
+$dataLembur = $koneksi->query("SELECT * FROM tb_lembur LIMIT 1")->fetch_assoc();
+$globalLemburPerJam = $dataLembur['lembur_per_jam'] ?? 0;
+
 $queryDenda = $koneksi->query("SELECT * FROM tb_denda LIMIT 1");
 $dataDenda = $queryDenda->fetch_assoc();
 $globalDendaMasuk = $dataDenda['denda_masuk'] ?? 0;
@@ -76,7 +87,6 @@ $globalDendaIstirahatKeluar = $dataDenda['denda_istirahat_keluar'] ?? 0;
 $globalDendaIstirahatMasuk = $dataDenda['denda_istirahat_masuk'] ?? 0;
 $globalDendaPulang = $dataDenda['denda_pulang'] ?? 0;
 $globalDendaTidakLengkap = $dataDenda['denda_tidak_lengkap'] ?? 0;
-$globalLemburPerJam = $dataDenda['lembur_per_jam'] ?? 0;
 
 // Load custom lembur hours
 $custom_lembur = [];
