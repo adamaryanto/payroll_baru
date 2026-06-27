@@ -1,4 +1,10 @@
 <?php
+// Auto-create lembur_jam column if not exists
+$checkLemburJamCol = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'lembur_jam'");
+if ($checkLemburJamCol->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN lembur_jam DECIMAL(10,2) DEFAULT 0.00");
+}
+
 // Helpers for cross-midnight time comparisons
 if (!function_exists('is_time_late')) {
     function is_time_late($actual, $expected) {
@@ -418,6 +424,7 @@ if (isset($_POST['simpan'])) {
     $tistirahatkeluar = $_POST['tistirahatkeluar'] ?? '';
     $hasilkerjanya = mysqli_real_escape_string($koneksi, $_POST['thasilkerja'] ?? '');
     $tlembur = (float)($_POST['tlembur'] ?? 0);
+    $tlembur_jam = (float)($_POST['tlembur_jam'] ?? 0);
     // Logika Kehadiran & Upah Otomatis (Fix untuk Input Parsial)
     $is_total_missing_post = (empty($tjammasuk) || $tjammasuk == '00:00' || $tjammasuk == '00:00:00') &&
                              (empty($tjamkeluar) || $tjamkeluar == '00:00' || $tjamkeluar == '00:00:00');
@@ -516,6 +523,7 @@ if (isset($_POST['simpan'])) {
         status_realisasi_detail = 1,
         hasil_kerja = '$hasilkerjanya',
         lembur = '$tlembur',
+        lembur_jam = '$tlembur_jam',
         r_status = '$tstatus_hadir'
         WHERE id_realisasi_detail = '$id'");
 
