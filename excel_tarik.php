@@ -242,7 +242,8 @@ foreach ($grouped as $key => $row) {
 	$empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, k.id_departmen, d.nama_departmen,
 									   k.id_os_dhk, o.OS_DHK as label_os,
 									   k.id_golongan, g.golongan as label_gol,
-									   k.id_sub_department, s.nama_sub_department as posisi
+									   k.id_sub_department, s.nama_sub_department as posisi,
+									   k.id_jadwal
 								FROM ms_karyawan k 
 								LEFT JOIN ms_departmen d ON k.id_departmen = d.id_departmen 
 								LEFT JOIN ms_os_dhk o ON k.id_os_dhk = o.id_os_dhk
@@ -258,6 +259,7 @@ foreach ($grouped as $key => $row) {
 	$row['label_gol'] = $emp['label_gol'] ?? '-';
 	$row['posisi'] = $emp['posisi'] ?? '-';
 	$row['upah'] = $emp['upah'] ?? 0;
+	$row['id_jadwal'] = $emp['id_jadwal'] ?? 0;
 	
 	$dept_id = $row['id_departmen'];
 	if (!isset($grouped_by_dept[$dept_id])) {
@@ -349,7 +351,22 @@ ksort($grouped_by_dept);
                 $upah = $row['upah'];
                 $nama_departmen = $row['nama_departmen'];
 
-                $shift = get_closest_shift($koneksi, $masuk);
+                // Cari Shift Terdekat atau gunakan shift terdaftar jika Flexible
+                $assigned_shift = null;
+                if (!empty($row['id_jadwal'])) {
+                    $q_ass = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '{$row['id_jadwal']}'");
+                    if ($q_ass && $q_ass->num_rows > 0) {
+                        $assigned_shift = $q_ass->fetch_assoc();
+                    }
+                }
+                
+                $is_assigned_flexible = ($assigned_shift && strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXIBLE') !== false);
+                
+                if ($is_assigned_flexible) {
+                    $shift = $assigned_shift;
+                } else {
+                    $shift = get_closest_shift($koneksi, $masuk);
+                }
                 $s_masuk = '-';
                 $s_keluar = '-';
                 $s_ist_keluar = '-';

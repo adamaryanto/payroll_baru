@@ -701,7 +701,7 @@ if (isset($_SESSION['delete_success'])) {
 									$pulang = $row['pulang'];
 
 									// Cari karyawan di database lengkap dengan Departemen, Sub Departemen, OS/DHK, dan Golongan
-									$empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, d.nama_departmen, sd.nama_sub_department, o.OS_DHK as label_os, g.golongan as label_gol 
+									$empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, k.id_jadwal, d.nama_departmen, sd.nama_sub_department, o.OS_DHK as label_os, g.golongan as label_gol 
 																FROM ms_karyawan k 
 																LEFT JOIN ms_departmen d ON k.id_departmen = d.id_departmen 
 																LEFT JOIN ms_sub_department sd ON k.id_sub_department = sd.id_sub_department
@@ -716,8 +716,22 @@ if (isset($_SESSION['delete_success'])) {
 									$golongan = $emp['label_gol'] ?? 'Harian';
 									$upah = $emp['upah'] ?? 0;
 
-									// Cari Shift Terdekat
-									$shift = get_closest_shift($koneksi, $masuk);
+									// Cari Shift Terdekat atau gunakan shift terdaftar jika Flexible
+									$assigned_shift = null;
+									if (!empty($emp['id_jadwal'])) {
+										$q_ass = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '{$emp['id_jadwal']}'");
+										if ($q_ass && $q_ass->num_rows > 0) {
+											$assigned_shift = $q_ass->fetch_assoc();
+										}
+									}
+									
+									$is_assigned_flexible = ($assigned_shift && strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXIBLE') !== false);
+									
+									if ($is_assigned_flexible) {
+										$shift = $assigned_shift;
+									} else {
+										$shift = get_closest_shift($koneksi, $masuk);
+									}
 									$s_masuk = '-';
 									$s_keluar = '-';
 									$s_ist_keluar = '-';
