@@ -20,6 +20,13 @@ if ($Key == "") $Key = "";
 
 // AJAX handler for updating lembur_jam in Tarik Data
 if (isset($_POST['update_lembur_ajax'])) {
+	$user_role = strtolower($_SESSION['role'] ?? '');
+	$can_edit = ($user_role === 'kepala pabrik' || $user_role === 'adminmaster' || $user_role === 'owner');
+	if (!$can_edit) {
+		echo json_encode(['success' => false, 'message' => 'Anda tidak memiliki hak akses untuk mengedit lembur.']);
+		exit;
+	}
+
 	$userid = $koneksi->real_escape_string($_POST['userid']);
 	$tgl = $koneksi->real_escape_string($_POST['tgl']);
 	$lembur_jam = (float)$_POST['lembur_jam'];
@@ -842,9 +849,15 @@ if (isset($_SESSION['delete_success'])) {
 										<td data-label="Hasil" class="py-2 px-2 text-[15px] text-center font-bold <?php echo $hasil_kerja == 'HADIR' ? 'text-green-600' : 'text-red-600'; ?>"><?php echo $hasil_kerja; ?></td>
 										<td data-label="Aksi" class="py-2 px-2 text-center align-middle">
 											<div class="flex gap-1 justify-center">
+												<?php 
+												$user_role = strtolower($_SESSION['role'] ?? '');
+												$can_edit = ($user_role === 'kepala pabrik' || $user_role === 'adminmaster' || $user_role === 'owner');
+												if ($can_edit): 
+												?>
 												<button type="button" class="btn btn-xs btn-primary btn-edit-lembur shadow-sm" data-pin="<?= htmlspecialchars($PIN) ?>" data-date="<?= htmlspecialchars($date) ?>" data-nama="<?= htmlspecialchars($nama_karyawan) ?>" data-lembur-jam="<?= $final_lembur_jam ?>" style="border-radius:4px; padding:3px 8px;">
 													<i class="fa fa-clock"></i> Lembur
 												</button>
+												<?php endif; ?>
 												<button type="button" class="btn btn-xs btn-danger btn-hapus-single shadow-sm" data-log-key="<?= htmlspecialchars($PIN . '|' . $date) ?>" style="border-radius:4px; padding:3px 8px;">
 													<i class="fa fa-trash-alt"></i> Hapus
 												</button>
@@ -853,7 +866,6 @@ if (isset($_SESSION['delete_success'])) {
 									</tr>
 								<?php
 								endforeach;
-								?>
 								?>
 							</tbody>
 						</table>
