@@ -10,10 +10,10 @@ if(isset($_GET['id'])){
 
 if(isset($_POST['simpan'])) {
     $keterangan = $_POST['tketerangan'];
-    $jammasuk   = $_POST['tjammasuk'];
-    $jamkeluar  = $_POST['tjamkeluar'];
-    $istkeluar  = $_POST['tistirahatkeluar'];
-    $istmasuk   = $_POST['tistirahatmasuk'];
+    $jammasuk   = !empty($_POST['tjammasuk']) ? $_POST['tjammasuk'] : '00:00:00';
+    $jamkeluar  = !empty($_POST['tjamkeluar']) ? $_POST['tjamkeluar'] : '00:00:00';
+    $istkeluar  = !empty($_POST['tistirahatkeluar']) ? $_POST['tistirahatkeluar'] : '00:00:00';
+    $istmasuk   = !empty($_POST['tistirahatmasuk']) ? $_POST['tistirahatmasuk'] : '00:00:00';
 
     $sql = $koneksi->query("UPDATE tb_jadwal SET 
                             keterangan = '$keterangan', 
@@ -86,24 +86,24 @@ if(isset($_POST['simpan'])) {
                 </div>
 
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-2">Jam Masuk <span class="text-rose-500">*</span></label>
-                    <input type="time" name="tjammasuk" value="<?= $datadetail['jam_masuk'] ?>" required 
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Jam Masuk</label>
+                    <input type="time" name="tjammasuk" value="<?= $datadetail['jam_masuk'] ?>" 
                            class="block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 transition outline-none"/>
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-2">Jam Keluar <span class="text-rose-500">*</span></label>
-                    <input type="time" name="tjamkeluar" value="<?= $datadetail['jam_keluar'] ?>" required 
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Jam Keluar</label>
+                    <input type="time" name="tjamkeluar" value="<?= $datadetail['jam_keluar'] ?>" 
                            class="block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 transition outline-none"/>
                 </div>
                 
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-2">Istirahat Keluar <span class="text-rose-500">*</span></label>
-                    <input type="time" name="tistirahatkeluar" value="<?= $datadetail['istirahat_keluar'] ?>" required 
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Istirahat Keluar</label>
+                    <input type="time" name="tistirahatkeluar" value="<?= $datadetail['istirahat_keluar'] ?>" 
                            class="block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 transition outline-none"/>
                 </div>
                 <div>
-                    <label class="block text-sm font-bold text-gray-700 mb-2">Istirahat Masuk <span class="text-rose-500">*</span></label>
-                    <input type="time" name="tistirahatmasuk" value="<?= $datadetail['istirahat_masuk'] ?>" required 
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Istirahat Masuk</label>
+                    <input type="time" name="tistirahatmasuk" value="<?= $datadetail['istirahat_masuk'] ?>" 
                            class="block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 transition outline-none"/>
                 </div>
             </div>

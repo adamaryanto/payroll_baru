@@ -21,23 +21,23 @@
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">Jam Masuk <span class="text-rose-500">*</span></label>
-                        <input type="time" name="tjammasuk" required 
+                        <label class="block text-sm font-bold text-gray-700 mb-2">Jam Masuk</label>
+                        <input type="time" name="tjammasuk" 
                                class="block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 transition outline-none"/>
                     </div>
                     <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">Jam Keluar <span class="text-rose-500">*</span></label>
-                        <input type="time" name="tjamkeluar" required 
+                        <label class="block text-sm font-bold text-gray-700 mb-2">Jam Keluar</label>
+                        <input type="time" name="tjamkeluar" 
                                class="block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 transition outline-none"/>
                     </div>
                     <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">Istirahat Keluar <span class="text-rose-500">*</span></label>
-                        <input type="time" name="tistirahatkeluar" required 
+                        <label class="block text-sm font-bold text-gray-700 mb-2">Istirahat Keluar</label>
+                        <input type="time" name="tistirahatkeluar" 
                                class="block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 transition outline-none"/>
                     </div>
                     <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">Istirahat Masuk <span class="text-rose-500">*</span></label>
-                        <input type="time" name="tistirahatmasuk" required 
+                        <label class="block text-sm font-bold text-gray-700 mb-2">Istirahat Masuk</label>
+                        <input type="time" name="tistirahatmasuk" 
                                class="block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 transition outline-none"/>
                     </div>
                 </div>
@@ -63,10 +63,10 @@
 <?php
 if (isset($_POST['simpan'])) {
     $tketerangan      = $_POST['tketerangan'];
-    $tjammasuk        = $_POST['tjammasuk'];
-    $tjamkeluar       = $_POST['tjamkeluar'];
-    $tistirahatmasuk  = $_POST['tistirahatmasuk'];
-    $tistirahatkeluar = $_POST['tistirahatkeluar'];
+    $tjammasuk        = !empty($_POST['tjammasuk']) ? $_POST['tjammasuk'] : '00:00:00';
+    $tjamkeluar       = !empty($_POST['tjamkeluar']) ? $_POST['tjamkeluar'] : '00:00:00';
+    $tistirahatmasuk  = !empty($_POST['tistirahatmasuk']) ? $_POST['tistirahatmasuk'] : '00:00:00';
+    $tistirahatkeluar = !empty($_POST['tistirahatkeluar']) ? $_POST['tistirahatkeluar'] : '00:00:00';
 
     $sql = $koneksi->query("INSERT INTO tb_jadwal (keterangan, jam_masuk, jam_keluar, istirahat_masuk, istirahat_keluar) 
                             VALUES ('$tketerangan', '$tjammasuk', '$tjamkeluar', '$tistirahatmasuk', '$tistirahatkeluar')");
