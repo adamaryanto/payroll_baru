@@ -405,7 +405,8 @@ if (isset($_POST['update'])) {
 <script>
     $(document).ready(function() {
         function toggleTargetFields() {
-            var selectedText = $('select[name="tjadwal"] option:selected').text();
+            var selectVal = $('select[name="tjadwal"]').val();
+            var selectedText = $('select[name="tjadwal"] option[value="' + selectVal + '"]').text() || '';
             if (selectedText.toUpperCase().indexOf('FLEXIBLE') !== -1) {
                 $('#target-fields-container').show();
             } else {
@@ -413,9 +414,11 @@ if (isset($_POST['update'])) {
             }
         }
         
-        // Run on load and on change
+        // Run on load, delayed load, and on change (including select2)
         toggleTargetFields();
-        $('select[name="tjadwal"]').on('change', function() {
+        setTimeout(toggleTargetFields, 100);
+        setTimeout(toggleTargetFields, 500);
+        $('select[name="tjadwal"]').on('change change.select2', function() {
             toggleTargetFields();
         });
 
