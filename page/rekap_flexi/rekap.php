@@ -131,10 +131,10 @@ if (!function_exists('calculate_actual_hours')) {
                     </tr>
                     <tr>
                         <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[90px]">Target</th>
-                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[90px]">Aktual</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[90px]">Tercapai</th>
                         <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[140px]">Pencapaian</th>
                         <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[90px]">Target</th>
-                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[90px]">Aktual</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[90px]">Tercapai</th>
                         <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[140px]">Pencapaian</th>
                     </tr>
                 </thead>

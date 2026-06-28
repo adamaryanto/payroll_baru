@@ -101,10 +101,10 @@ if (!function_exists('calculate_actual_hours')) {
         </tr>
         <tr style="background-color:#f3f4f6;">
             <th style="background-color:#dcfce7;">Target</th>
-            <th style="background-color:#dcfce7;">Aktual</th>
+            <th style="background-color:#dcfce7;">Tercapai</th>
             <th style="background-color:#dcfce7;">Pencapaian</th>
             <th style="background-color:#dbeafe;">Target</th>
-            <th style="background-color:#dbeafe;">Aktual</th>
+            <th style="background-color:#dbeafe;">Tercapai</th>
             <th style="background-color:#dbeafe;">Pencapaian</th>
         </tr>
     </thead>
