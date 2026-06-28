@@ -120,7 +120,7 @@ if (!function_exists('calculate_actual_hours')) {
                                  FROM ms_karyawan k
                                  JOIN tb_jadwal j ON k.id_jadwal = j.id_jadwal
                                  LEFT JOIN ms_departmen d ON k.id_departmen = d.id_departmen
-                                 WHERE j.keterangan LIKE '%FLEXIBLE%' $whereClause
+                                 WHERE j.keterangan LIKE '%FLEXI%' $whereClause
                                  ORDER BY k.nama_karyawan ASC");
 
         if ($q_emp->num_rows == 0) {

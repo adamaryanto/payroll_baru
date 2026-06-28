@@ -698,7 +698,7 @@ if (isset($_SESSION['delete_success'])) {
 										}
 									}
 									
-									$is_assigned_flexible = ($assigned_shift && strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXIBLE') !== false);
+									$is_assigned_flexible = ($assigned_shift && strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false);
 									
 									if ($is_assigned_flexible) {
 										$shift = $assigned_shift;
@@ -713,7 +713,7 @@ if (isset($_SESSION['delete_success'])) {
 									$expected_hours = 7;
 									
 									if ($shift) {
-										$is_flexible = (strpos(strtoupper($shift['keterangan'] ?? ''), 'FLEXIBLE') !== false);
+										$is_flexible = (strpos(strtoupper($shift['keterangan'] ?? ''), 'FLEXI') !== false);
 										if ($is_flexible) {
 											if (preg_match('/(\d+)\s*JAM/i', $shift['keterangan'], $matches)) {
 												$expected_hours = (int)$matches[1];

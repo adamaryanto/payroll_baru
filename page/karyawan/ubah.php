@@ -407,7 +407,7 @@ if (isset($_POST['update'])) {
         function toggleTargetFields() {
             var selectVal = $('select[name="tjadwal"]').val();
             var selectedText = $('select[name="tjadwal"] option[value="' + selectVal + '"]').text() || '';
-            if (selectedText.toUpperCase().indexOf('FLEXIBLE') !== -1) {
+            if (selectedText.toUpperCase().indexOf('FLEXI') !== -1) {
                 $('#target-fields-container').show();
             } else {
                 $('#target-fields-container').hide();

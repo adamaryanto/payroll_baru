@@ -149,7 +149,7 @@ if (isset($_GET['id'])) {
     $has_ist_masuk = !empty($jamIstirahatMasukRealisasi) && $jamIstirahatMasukRealisasi != '00:00:00';
     $has_ist_keluar = !empty($jamIstirahatKeluarRealisasi) && $jamIstirahatKeluarRealisasi != '00:00:00';
 
-    $is_flexible = (strpos(strtoupper($datadetail['shift'] ?? ''), 'FLEXIBLE') !== false);
+    $is_flexible = (strpos(strtoupper($datadetail['shift'] ?? ''), 'FLEXI') !== false);
     $expected_hours = 7;
     if ($is_flexible && preg_match('/(\d+)\s*JAM/i', $datadetail['shift'], $matches)) {
         $expected_hours = (int)$matches[1];
@@ -609,7 +609,7 @@ $(document).ready(function() {
         let finalUpahPokok = (currentRUpah > 0) ? currentRUpah : upahMaster;
 
         const shift = shiftData[shiftId];
-        const isFlexible = (shift && shift.keterangan.toUpperCase().indexOf('FLEXIBLE') !== -1);
+        const isFlexible = (shift && shift.keterangan.toUpperCase().indexOf('FLEXI') !== -1);
         let expectedHours = 7;
         if (isFlexible) {
             let match = shift.keterangan.match(/(\d+)\s*JAM/i);
@@ -710,7 +710,7 @@ $(document).ready(function() {
     $('[name="tjammasuk"], [name="tjamkeluar"]').on('change input', function() {
         const shiftId = $('[name="tshift"]').val();
         const shift = shiftData[shiftId];
-        const isFlexible = (shift && shift.keterangan.toUpperCase().indexOf('FLEXIBLE') !== -1);
+        const isFlexible = (shift && shift.keterangan.toUpperCase().indexOf('FLEXI') !== -1);
         if (isFlexible) {
             let match = shift.keterangan.match(/(\d+)\s*JAM/i);
             let expectedHours = match ? parseInt(match[1]) : 7;
