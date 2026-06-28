@@ -1,12 +1,20 @@
 <?php
 include "../../koneksi.php";
 
-$TanggalAwal = $_GET['tanggal_awal'] ?? date('Y-m-d', strtotime('monday this week'));
-$TanggalAkhir = $_GET['tanggal_akhir'] ?? date('Y-m-d', strtotime('sunday this week'));
+$TanggalAcuan = $_GET['tanggal_acuan'] ?? date('Y-m-d');
 $SearchName = $_GET['search_name'] ?? '';
 
+// Calculate start and end of week based on TanggalAcuan
+$ts = strtotime($TanggalAcuan);
+$start_week = date('Y-m-d', strtotime('monday this week', $ts));
+$end_week = date('Y-m-d', strtotime('sunday this week', $ts));
+
+// Calculate start and end of month based on TanggalAcuan
+$start_month = date('Y-m-01', $ts);
+$end_month = date('Y-m-t', $ts);
+
 header("Content-type: application/vnd.ms-excel");
-header("Content-Disposition: attachment; filename=Rekap_Jam_Flexi_" . $TanggalAwal . "_to_" . $TanggalAkhir . ".xls");
+header("Content-Disposition: attachment; filename=Rekap_Target_Jam_Flexi_" . $TanggalAcuan . ".xls");
 echo "<meta charset='UTF-8'>";
 
 // Helper to calculate actual hours worked based on scan records
@@ -71,7 +79,8 @@ if (!function_exists('calculate_actual_hours')) {
     </tr>
     <tr>
         <th colspan="11" style="text-align:center; font-size:14px;">
-            Periode: <?= date('d/m/Y', strtotime($TanggalAwal)) ?> s/d <?= date('d/m/Y', strtotime($TanggalAkhir)) ?>
+            Minggu Rekap: <?= date('d/m/Y', strtotime($start_week)) ?> s/d <?= date('d/m/Y', strtotime($end_week)) ?> | 
+            Bulan Rekap: <?= date('F Y', $ts) ?>
         </th>
     </tr>
     <tr>
@@ -82,24 +91,25 @@ if (!function_exists('calculate_actual_hours')) {
 <table border="1" style="border-collapse:collapse;">
     <thead>
         <tr style="background-color:#e5e7eb;">
-            <th>No</th>
-            <th>No Absen</th>
-            <th>Nama Karyawan</th>
-            <th>Departemen</th>
-            <th>Nama Shift</th>
-            <th>Target (Minggu/Bulan)</th>
-            <th>Target Range Ini</th>
-            <th>Aktual Kerja</th>
-            <th>Selisih</th>
-            <th>Pencapaian</th>
-            <th>Status</th>
+            <th rowspan="2">No</th>
+            <th rowspan="2">No Absen</th>
+            <th rowspan="2">Nama Karyawan</th>
+            <th rowspan="2">Departemen</th>
+            <th rowspan="2">Nama Shift</th>
+            <th colspan="3" style="background-color:#dcfce7;">Minggu Ini</th>
+            <th colspan="3" style="background-color:#dbeafe;">Bulan Ini</th>
+        </tr>
+        <tr style="background-color:#f3f4f6;">
+            <th style="background-color:#dcfce7;">Target</th>
+            <th style="background-color:#dcfce7;">Aktual</th>
+            <th style="background-color:#dcfce7;">Pencapaian</th>
+            <th style="background-color:#dbeafe;">Target</th>
+            <th style="background-color:#dbeafe;">Aktual</th>
+            <th style="background-color:#dbeafe;">Pencapaian</th>
         </tr>
     </thead>
     <tbody>
         <?php
-        $days = (strtotime($TanggalAkhir) - strtotime($TanggalAwal)) / 86400 + 1;
-        if ($days <= 0) $days = 1;
-
         $whereClause = "";
         if (!empty($SearchName)) {
             $searchEscaped = $koneksi->real_escape_string($SearchName);
@@ -122,31 +132,34 @@ if (!function_exists('calculate_actual_hours')) {
                 $target_w = (float)($row['target_mingguan'] ?? 20.00);
                 $target_m = (float)($row['target_bulanan'] ?? 40.00);
 
-                if ($days <= 10) {
-                    $target_hours = round(($target_w / 7) * $days, 1);
-                } else {
-                    $target_hours = round(($target_m / 30) * $days, 1);
-                }
+                // Calculate actual hours worked
+                $actual_hours_week = calculate_actual_hours($koneksi, $PIN, $start_week, $end_week);
+                $actual_hours_month = calculate_actual_hours($koneksi, $PIN, $start_month, $end_month);
 
-                $actual_hours = calculate_actual_hours($koneksi, $PIN, $TanggalAwal, $TanggalAkhir);
-                $diff = round($actual_hours - $target_hours, 1);
-                $percentage = ($target_hours > 0) ? round(($actual_hours / $target_hours) * 100) : 0;
+                // Calculate percentages
+                $pct_week = ($target_w > 0) ? round(($actual_hours_week / $target_w) * 100) : 0;
+                $pct_month = ($target_m > 0) ? round(($actual_hours_month / $target_m) * 100) : 0;
 
-                $status = ($diff >= 0) ? "TERCAPAI" : "KURANG";
-                $diff_fmt = ($diff >= 0) ? "+" . $diff . " Jam" : $diff . " Jam";
+                $status_week = ($pct_week >= 100) ? "Lolos" : "Kurang";
+                $status_month = ($pct_month >= 100) ? "Lolos" : "Kurang";
 
                 echo "<tr>";
                 echo "<td align='center'>{$no}</td>";
-                echo "<td>'{$PIN}</td>"; // Prefix single quote to force string type in Excel
+                echo "<td>'{$PIN}</td>";
                 echo "<td>{$row['nama_karyawan']}</td>";
                 echo "<td>" . ($row['nama_departmen'] ?? '-') . "</td>";
                 echo "<td>{$row['nama_shift']}</td>";
-                echo "<td align='center'>{$target_w} / {$target_m}</td>";
-                echo "<td align='center'>{$target_hours} Jam</td>";
-                echo "<td align='center'>{$actual_hours} Jam</td>";
-                echo "<td align='center'>{$diff_fmt}</td>";
-                echo "<td align='center'>{$percentage}%</td>";
-                echo "<td align='center'>{$status}</td>";
+                
+                // Weekly
+                echo "<td align='center'>{$target_w} Jam</td>";
+                echo "<td align='center'>{$actual_hours_week} Jam</td>";
+                echo "<td align='center'>{$pct_week}% ({$status_week})</td>";
+
+                // Monthly
+                echo "<td align='center'>{$target_m} Jam</td>";
+                echo "<td align='center'>{$actual_hours_month} Jam</td>";
+                echo "<td align='center'>{$pct_month}% ({$status_month})</td>";
+                
                 echo "</tr>";
                 $no++;
             }

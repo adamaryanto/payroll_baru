@@ -1,8 +1,16 @@
 <?php
-// Set default date range to current week (Monday to Sunday)
-$TanggalAwal = $_GET['tanggal_awal'] ?? date('Y-m-d', strtotime('monday this week'));
-$TanggalAkhir = $_GET['tanggal_akhir'] ?? date('Y-m-d', strtotime('sunday this week'));
+// Set reference date (defaults to today)
+$TanggalAcuan = $_GET['tanggal_acuan'] ?? date('Y-m-d');
 $SearchName = $_GET['search_name'] ?? '';
+
+// Calculate start and end of week based on TanggalAcuan
+$ts = strtotime($TanggalAcuan);
+$start_week = date('Y-m-d', strtotime('monday this week', $ts));
+$end_week = date('Y-m-d', strtotime('sunday this week', $ts));
+
+// Calculate start and end of month based on TanggalAcuan
+$start_month = date('Y-m-01', $ts);
+$end_month = date('Y-m-t', $ts);
 
 // Helper to calculate actual hours worked based on scan records
 if (!function_exists('calculate_actual_hours')) {
@@ -66,7 +74,7 @@ if (!function_exists('calculate_actual_hours')) {
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
         <div>
             <h1 class="h3 font-bold text-gray-800 mb-1">Rekap Jam Kerja Flexi</h1>
-            <p class="text-sm text-gray-500">Pantau pemenuhan target jam kerja karyawan flexible (freelancer).</p>
+            <p class="text-sm text-gray-500">Pantau pemenuhan target jam kerja mingguan dan bulanan karyawan flexible.</p>
         </div>
     </div>
 
@@ -76,19 +84,16 @@ if (!function_exists('calculate_actual_hours')) {
             <form method="GET" action="">
                 <input type="hidden" name="page" value="rekap_flexi" />
                 <div class="row align-items-end">
-                    <div class="col-md-3 col-sm-12 mb-3 mb-md-0">
-                        <label class="font-bold text-gray-700 text-xs uppercase tracking-wider mb-2 d-block">Tanggal Awal:</label>
-                        <input type="date" name="tanggal_awal" value="<?= htmlspecialchars($TanggalAwal) ?>" class="form-control rounded-lg border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                    <div class="col-md-4 col-sm-12 mb-3 mb-md-0">
+                        <label class="font-bold text-gray-700 text-xs uppercase tracking-wider mb-2 d-block">Pilih Tanggal Acuan:</label>
+                        <input type="date" name="tanggal_acuan" value="<?= htmlspecialchars($TanggalAcuan) ?>" class="form-control rounded-lg border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                        <span class="text-xs text-gray-500 mt-1 d-block">Minggu & Bulan rekap dihitung otomatis dari tanggal acuan ini.</span>
                     </div>
-                    <div class="col-md-3 col-sm-12 mb-3 mb-md-0">
-                        <label class="font-bold text-gray-700 text-xs uppercase tracking-wider mb-2 d-block">Tanggal Akhir:</label>
-                        <input type="date" name="tanggal_akhir" value="<?= htmlspecialchars($TanggalAkhir) ?>" class="form-control rounded-lg border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-                    </div>
-                    <div class="col-md-3 col-sm-12 mb-3 mb-md-0">
+                    <div class="col-md-4 col-sm-12 mb-3 mb-md-0">
                         <label class="font-bold text-gray-700 text-xs uppercase tracking-wider mb-2 d-block">Cari Karyawan:</label>
                         <input type="text" name="search_name" value="<?= htmlspecialchars($SearchName) ?>" placeholder="Nama Karyawan..." class="form-control rounded-lg border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
                     </div>
-                    <div class="col-md-3 col-sm-12">
+                    <div class="col-md-4 col-sm-12">
                         <button type="submit" class="btn btn-primary btn-block py-2 font-bold rounded-lg shadow-sm">
                             <i class="fas fa-filter mr-2"></i> FILTER DATA
                         </button>
@@ -101,36 +106,40 @@ if (!function_exists('calculate_actual_hours')) {
     <!-- Table Card -->
     <div class="card shadow-sm border-0 rounded-xl overflow-hidden">
         <div class="card-header bg-white border-0 py-3 d-flex justify-content-between align-items-center">
-            <h5 class="mb-0 font-bold text-gray-700"><i class="fas fa-list mr-2 text-primary"></i>Daftar Pencapaian</h5>
-            <!-- Future Excel Export Link -->
-            <a href="page/rekap_flexi/excel.php?tanggal_awal=<?= urlencode($TanggalAwal) ?>&tanggal_akhir=<?= urlencode($TanggalAkhir) ?>&search_name=<?= urlencode($SearchName) ?>" target="_blank" class="btn btn-sm btn-success font-bold px-3 py-2 rounded-lg">
+            <div>
+                <h5 class="mb-0 font-bold text-gray-700"><i class="fas fa-list mr-2 text-primary"></i>Daftar Pencapaian</h5>
+                <span class="text-xs text-gray-500">
+                    Minggu: <b><?= date('d/m/Y', strtotime($start_week)) ?> - <?= date('d/m/Y', strtotime($end_week)) ?></b> | 
+                    Bulan: <b><?= date('F Y', $ts) ?></b>
+                </span>
+            </div>
+            <a href="page/rekap_flexi/excel.php?tanggal_acuan=<?= urlencode($TanggalAcuan) ?>&search_name=<?= urlencode($SearchName) ?>" target="_blank" class="btn btn-sm btn-success font-bold px-3 py-2 rounded-lg">
                 <i class="fas fa-file-excel mr-1"></i> Export Excel
             </a>
         </div>
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0 text-gray-700">
+            <table class="table table-hover align-middle mb-0 text-gray-700 table-bordered">
                 <thead class="bg-gray-50 border-bottom border-gray-200">
                     <tr>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center w-[50px]">No</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">No Absen</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Nama Karyawan</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Departemen</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Nama Shift</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center">Target (W/M)</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center">Target Range Ini</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center">Aktual Kerja</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center">Selisih</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center">Pencapaian</th>
-                        <th class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center">Status</th>
+                        <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center w-[50px]">No</th>
+                        <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">No Absen</th>
+                        <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Nama Karyawan</th>
+                        <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Departemen</th>
+                        <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Nama Shift</th>
+                        <th colspan="3" class="py-2 px-3 text-xs font-bold text-green-800 uppercase align-middle text-center bg-green-50">Minggu Ini</th>
+                        <th colspan="3" class="py-2 px-3 text-xs font-bold text-blue-800 uppercase align-middle text-center bg-blue-50">Bulan Ini</th>
+                    </tr>
+                    <tr>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[90px]">Target</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[90px]">Aktual</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[140px]">Pencapaian</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[90px]">Target</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[90px]">Aktual</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[140px]">Pencapaian</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                     <?php
-                    // Count number of days in the range
-                    $days = (strtotime($TanggalAkhir) - strtotime($TanggalAwal)) / 86400 + 1;
-                    if ($days <= 0) $days = 1;
-
-                    // Query flexible employees
                     $whereClause = "";
                     if (!empty($SearchName)) {
                         $searchEscaped = $koneksi->real_escape_string($SearchName);
@@ -153,25 +162,26 @@ if (!function_exists('calculate_actual_hours')) {
                             $target_w = (float)($row['target_mingguan'] ?? 20.00);
                             $target_m = (float)($row['target_bulanan'] ?? 40.00);
 
-                            // Calculate expected target for the date range
-                            if ($days <= 10) {
-                                $target_hours = round(($target_w / 7) * $days, 1);
+                            // Calculate actual hours worked for current week & current month
+                            $actual_hours_week = calculate_actual_hours($koneksi, $PIN, $start_week, $end_week);
+                            $actual_hours_month = calculate_actual_hours($koneksi, $PIN, $start_month, $end_month);
+
+                            // Calculate percentage achievements
+                            $pct_week = ($target_w > 0) ? round(($actual_hours_week / $target_w) * 100) : 0;
+                            $pct_month = ($target_m > 0) ? round(($actual_hours_month / $target_m) * 100) : 0;
+
+                            // Badges & styling for weekly target
+                            if ($pct_week >= 100) {
+                                $badge_week = '<span class="badge bg-green-100 text-green-800 px-2.5 py-1 rounded font-bold">' . $pct_week . '% (Lolos)</span>';
                             } else {
-                                $target_hours = round(($target_m / 30) * $days, 1);
+                                $badge_week = '<span class="badge bg-red-100 text-red-800 px-2.5 py-1 rounded font-bold">' . $pct_week . '% (Kurang)</span>';
                             }
 
-                            // Calculate actual hours worked
-                            $actual_hours = calculate_actual_hours($koneksi, $PIN, $TanggalAwal, $TanggalAkhir);
-                            $diff = round($actual_hours - $target_hours, 1);
-                            $percentage = ($target_hours > 0) ? round(($actual_hours / $target_hours) * 100) : 0;
-
-                            // Badges & status styling
-                            if ($diff >= 0) {
-                                $status_badge = '<span class="badge bg-green-100 text-green-800 px-3 py-1.5 rounded-full font-bold">TERCAPAI</span>';
-                                $diff_text = '<span class="text-green-600 font-bold">+' . $diff . ' Jam</span>';
+                            // Badges & styling for monthly target
+                            if ($pct_month >= 100) {
+                                $badge_month = '<span class="badge bg-green-100 text-green-800 px-2.5 py-1 rounded font-bold">' . $pct_month . '% (Lolos)</span>';
                             } else {
-                                $status_badge = '<span class="badge bg-red-100 text-red-800 px-3 py-1.5 rounded-full font-bold">KURANG</span>';
-                                $diff_text = '<span class="text-red-600 font-bold">' . $diff . ' Jam</span>';
+                                $badge_month = '<span class="badge bg-red-100 text-red-800 px-2.5 py-1 rounded font-bold">' . $pct_month . '% (Kurang)</span>';
                             }
 
                             echo "<tr>";
@@ -179,13 +189,18 @@ if (!function_exists('calculate_actual_hours')) {
                             echo "<td class='font-semibold text-gray-900'>{$PIN}</td>";
                             echo "<td class='font-semibold text-gray-800'>{$row['nama_karyawan']}</td>";
                             echo "<td>" . ($row['nama_departmen'] ?? '-') . "</td>";
-                            echo "<td><span class='badge bg-blue-50 text-blue-700 font-medium px-2.5 py-1 rounded'>{$row['nama_shift']}</span></td>";
-                            echo "<td class='text-center text-xs text-gray-500'>{$target_w} / {$target_m}</td>";
-                            echo "<td class='text-center font-bold text-gray-700'>{$target_hours} Jam</td>";
-                            echo "<td class='text-center font-bold text-gray-900'>{$actual_hours} Jam</td>";
-                            echo "<td class='text-center'>{$diff_text}</td>";
-                            echo "<td class='text-center font-extrabold text-blue-600'>{$percentage}%</td>";
-                            echo "<td class='text-center'>{$status_badge}</td>";
+                            echo "<td><span class='badge bg-light text-gray-700 font-medium px-2 py-1 border rounded'>{$row['nama_shift']}</span></td>";
+                            
+                            // Weekly Columns
+                            echo "<td class='text-center font-semibold text-gray-600 bg-green-50/30'>{$target_w} Jam</td>";
+                            echo "<td class='text-center font-bold text-gray-800 bg-green-50/30'>{$actual_hours_week} Jam</td>";
+                            echo "<td class='text-center bg-green-50/30'>{$badge_week}</td>";
+
+                            // Monthly Columns
+                            echo "<td class='text-center font-semibold text-gray-600 bg-blue-50/30'>{$target_m} Jam</td>";
+                            echo "<td class='text-center font-bold text-gray-800 bg-blue-50/30'>{$actual_hours_month} Jam</td>";
+                            echo "<td class='text-center bg-blue-50/30'>{$badge_month}</td>";
+                            
                             echo "</tr>";
                             $no++;
                         }
@@ -203,6 +218,18 @@ if (!function_exists('calculate_actual_hours')) {
 }
 .bg-gray-50 {
     background-color: #f9fafb !important;
+}
+.bg-green-50 {
+    background-color: #f0fdf4 !important;
+}
+.bg-blue-50 {
+    background-color: #eff6ff !important;
+}
+.bg-green-50\/30 {
+    background-color: rgba(240, 253, 244, 0.4) !important;
+}
+.bg-blue-50\/30 {
+    background-color: rgba(239, 246, 255, 0.4) !important;
 }
 .divide-gray-100 > tr {
     border-bottom: 1px solid #f3f4f6;
