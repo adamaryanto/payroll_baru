@@ -18,6 +18,16 @@ $TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 if ($IP == "") $IP = "192.168.110.201";
 if ($Key == "") $Key = "";
 
+// Pre-connection status check to the machine
+$isConnected = false;
+if (!empty($IP)) {
+	$socket = @fsockopen($IP, $port, $errno, $errstr, 1.5);
+	if ($socket) {
+		$isConnected = true;
+		fclose($socket);
+	}
+}
+
 // Proses hapus terpilih jika form disubmit
 if (isset($_POST['hapus_pilih']) && !empty($_POST['selected_logs'])) {
 	$count = 0;
@@ -324,7 +334,17 @@ if (isset($_SESSION['delete_success'])) {
 		<div class="card border-0 shadow-sm rounded-xl overflow-hidden bg-white">
 
 			<div class="border-b border-gray-100 py-4 px-4 md:px-5 bg-white">
-				<h3 class="text-xl text-blue-600 font-bold m-0"><i class="fas fa-download mr-2"></i>Download Log Data</h3>
+				<div class="d-flex justify-content-between align-items-center flex-wrap">
+					<h3 class="text-xl text-blue-600 font-bold m-0"><i class="fas fa-download mr-2"></i>Download Log Data</h3>
+					<div class="mt-2 mt-md-0">
+						<span class="font-bold text-gray-500 text-xs uppercase mr-1">Status Mesin:</span>
+						<?php if ($isConnected) : ?>
+							<span class="badge bg-green-100 text-green-800 border border-green-200 px-3 py-1.5 rounded font-bold shadow-sm"><i class="fas fa-circle text-green-500 mr-1"></i> Connected</span>
+						<?php else : ?>
+							<span class="badge bg-red-100 text-red-800 border border-red-200 px-3 py-1.5 rounded font-bold shadow-sm"><i class="fas fa-times-circle text-red-500 mr-1"></i> Disconnected</span>
+						<?php endif; ?>
+					</div>
+				</div>
 			</div>
 
 			<?php
@@ -513,7 +533,7 @@ if (isset($_SESSION['delete_success'])) {
 									}
 								}
 
-								$should_connect = true;
+								$should_connect = $isConnected;
 								$Connect = false;
 								if ($should_connect) {
 									$Connect = @fsockopen($IP, $port, $errno, $errstr, 1.5);
@@ -572,11 +592,7 @@ if (isset($_SESSION['delete_success'])) {
 										}
 									}
 								} else {
-									if ($should_connect) {
-										echo "<div class='alert alert-warning text-center font-bold' style='margin-bottom:15px; border-radius:8px;'><i class='fa fa-exclamation-triangle'></i> Gagal terhubung ke mesin absensi (IP: $IP). Menampilkan data lokal ter-update.</div>";
-									} else {
-										echo "<div class='alert alert-info text-center font-bold' style='margin-bottom:15px; border-radius:8px;'><i class='fa fa-info-circle'></i> Menampilkan database lokal (koneksi mesin dinonaktifkan di luar jaringan lokal).</div>";
-									}
+									echo "<div class='alert alert-warning text-center font-bold' style='margin-bottom:15px; border-radius:8px;'><i class='fa fa-exclamation-triangle'></i> Gagal terhubung ke mesin absensi (IP: $IP). Menampilkan data lokal ter-update.</div>";
 								}
 
 								// Query and group data from tb_record for Date Range
