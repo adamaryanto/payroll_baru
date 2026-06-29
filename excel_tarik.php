@@ -94,29 +94,7 @@ if ($cl_res) {
     }
 }
 
-$http_host = $_SERVER['HTTP_HOST'] ?? '';
-$is_local = (strpos($http_host, 'localhost') !== false || strpos($http_host, '127.0.0.1') !== false || strpos($http_host, '.test') !== false);
-
-// Skip connecting to private IPs on online servers (reduces connection timeout delay)
-$is_private_target = false;
-if ($IP === 'localhost' || $IP === '127.0.0.1') {
-	$is_private_target = true;
-} else {
-	$ip_parts = explode('.', $IP);
-	if (count($ip_parts) === 4) {
-		$first = (int)$ip_parts[0];
-		$second = (int)$ip_parts[1];
-		if ($first === 10 || ($first === 192 && $second === 168) || ($first === 172 && $second >= 16 && $second <= 31)) {
-			$is_private_target = true;
-		}
-	}
-}
-
 $should_connect = true;
-if (!$is_local && $is_private_target) {
-	$should_connect = false;
-}
-
 $Connect = false;
 if ($should_connect) {
 	$Connect = @fsockopen($IP, $port, $errno, $errstr, 0.3);
