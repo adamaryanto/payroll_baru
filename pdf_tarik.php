@@ -359,7 +359,7 @@ unset($row);
                     $golongan = $emp['label_gol'] ?? 'Harian';
                     $upah = $emp['upah'] ?? 0;
 
-                    // Cari Shift Terdekat atau gunakan shift terdaftar jika Flexible
+                    // Cari Shift Terdekat atau gunakan shift terdaftar jika sesuai
                     $assigned_shift = null;
                     if (!empty($emp['id_jadwal'])) {
                         $q_ass = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '{$emp['id_jadwal']}'");
@@ -368,9 +368,30 @@ unset($row);
                         }
                     }
                     
-                    $is_assigned_flexible = ($assigned_shift && strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false);
+                    $use_assigned = false;
+                    if ($assigned_shift) {
+                        if (strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false) {
+                            $use_assigned = true;
+                        } else {
+                            if (!empty($masuk) && $masuk != '00:00' && $masuk != '00:00:00') {
+                                $in_time = strtotime("1970-01-01 " . $masuk);
+                                $shift_time = strtotime("1970-01-01 " . $assigned_shift['jam_masuk']);
+                                $diff = abs($in_time - $shift_time);
+                                if ($diff > 43200) {
+                                    $diff = 86400 - $diff;
+                                }
+                                // Jika jam masuk riil selisihnya dalam batas 2 jam (7200 detik) dari jam masuk shift terdaftar
+                                if ($diff <= 7200) {
+                                    $use_assigned = true;
+                                }
+                            } else {
+                                // Jika tidak absen masuk, gunakan shift terdaftar
+                                $use_assigned = true;
+                            }
+                        }
+                    }
                     
-                    if ($is_assigned_flexible) {
+                    if ($use_assigned) {
                         $shift = $assigned_shift;
                     } else {
                         $shift = get_closest_shift($koneksi, $masuk);
