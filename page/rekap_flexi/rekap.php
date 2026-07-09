@@ -124,18 +124,26 @@ if (!function_exists('calculate_actual_hours')) {
                 <input type="hidden" name="page" value="rekap_flexi" />
                 <div class="row align-items-end">
                     <div class="col-md-4 col-sm-12 mb-3 mb-md-0">
-                        <label class="font-bold text-gray-700 text-xs uppercase tracking-wider mb-2 d-block">Pilih Tanggal Acuan:</label>
-                        <input type="date" name="tanggal_acuan" value="<?= htmlspecialchars($TanggalAcuan) ?>" class="form-control rounded-lg border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-                        <span class="text-xs text-gray-500 mt-1 d-block">Minggu & Bulan rekap dihitung otomatis dari tanggal acuan ini.</span>
+                        <div class="form-group mb-0">
+                            <label class="font-bold text-gray-700 text-xs uppercase mb-2 d-block">Pilih Tanggal Acuan:</label>
+                            <input type="date" name="tanggal_acuan" value="<?= htmlspecialchars($TanggalAcuan) ?>" class="form-control" style="height: 42px; border-radius: 8px;" />
+                        </div>
                     </div>
                     <div class="col-md-4 col-sm-12 mb-3 mb-md-0">
-                        <label class="font-bold text-gray-700 text-xs uppercase tracking-wider mb-2 d-block">Cari Karyawan:</label>
-                        <input type="text" name="search_name" value="<?= htmlspecialchars($SearchName) ?>" placeholder="Nama Karyawan..." class="form-control rounded-lg border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                        <div class="form-group mb-0">
+                            <label class="font-bold text-gray-700 text-xs uppercase mb-2 d-block">Cari Karyawan:</label>
+                            <input type="text" name="search_name" value="<?= htmlspecialchars($SearchName) ?>" placeholder="Nama Karyawan..." class="form-control" style="height: 42px; border-radius: 8px;" />
+                        </div>
                     </div>
                     <div class="col-md-4 col-sm-12">
-                        <button type="submit" class="btn btn-primary btn-block py-2 font-bold rounded-lg shadow-sm">
+                        <button type="submit" class="btn btn-primary btn-block font-bold" style="height: 42px; border-radius: 8px;">
                             <i class="fas fa-filter mr-2"></i> FILTER DATA
                         </button>
+                    </div>
+                </div>
+                <div class="row mt-2">
+                    <div class="col-12">
+                        <span class="text-xs text-gray-500"><i class="fas fa-info-circle mr-1"></i> Minggu & Bulan rekap dihitung otomatis dari tanggal acuan ini.</span>
                     </div>
                 </div>
             </form>
@@ -169,12 +177,12 @@ if (!function_exists('calculate_actual_hours')) {
                         <th colspan="3" class="py-2 px-3 text-xs font-bold text-blue-800 uppercase align-middle text-center bg-blue-50">Bulan Ini</th>
                     </tr>
                     <tr>
-                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[90px]">Target</th>
-                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[90px]">Tercapai</th>
-                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50 w-[140px]">Pencapaian</th>
-                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[90px]">Target</th>
-                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[90px]">Tercapai</th>
-                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50 w-[140px]">Pencapaian</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50" style="min-width: 100px; white-space: nowrap;">Target</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50" style="min-width: 110px; white-space: nowrap;">Tercapai</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-green-50" style="min-width: 140px; white-space: nowrap;">Pencapaian</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50" style="min-width: 100px; white-space: nowrap;">Target</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50" style="min-width: 110px; white-space: nowrap;">Tercapai</th>
+                        <th class="py-2 px-2 text-xs font-bold text-gray-600 uppercase text-center bg-blue-50" style="min-width: 140px; white-space: nowrap;">Pencapaian</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
