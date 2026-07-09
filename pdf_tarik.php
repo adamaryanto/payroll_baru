@@ -168,39 +168,61 @@ while ($row_rec = $db_records->fetch_assoc()) {
 	$rec_tgl = $row_rec['tgl'];
 
 	$time = substr($DateTime, 11, 5); // "08:12"
-	$key = $PIN . '_' . $rec_tgl;
-	if (!isset($grouped[$key])) {
-		$grouped[$key] = [
-			'pin' => $PIN,
-			'date' => $rec_tgl,
-			'masuk' => '',
-			'istirahat_keluar' => '',
-			'istirahat_masuk' => '',
-			'pulang' => '',
-			'raw_times' => []
-		];
+	$is_merged = false;
+	if ($time < '09:00') {
+		$prev_date = date('Y-m-d', strtotime('-1 day', strtotime($rec_tgl)));
+		$prev_key = $PIN . '_' . $prev_date;
+		if (isset($grouped[$prev_key]) && !empty($grouped[$prev_key]['masuk'])) {
+			$prev_masuk = $grouped[$prev_key]['masuk'];
+			$prev_pulang = $grouped[$prev_key]['pulang'] ?? '';
+			if ($prev_masuk >= '12:00' && (empty($prev_pulang) || $prev_pulang < '09:00')) {
+				if (empty($prev_pulang) || $time > $prev_pulang) {
+					$grouped[$prev_key]['pulang'] = $time;
+				}
+				$grouped[$prev_key]['raw_times'][] = [
+					'time' => $time,
+					'status' => $Status
+				];
+				$is_merged = true;
+			}
+		}
 	}
-	
-	$grouped[$key]['raw_times'][] = [
-		'time' => $time,
-		'status' => $Status
-	];
 
-	if ($Status == 0) {
-		if ($grouped[$key]['masuk'] == '' || $time < $grouped[$key]['masuk']) {
-			$grouped[$key]['masuk'] = $time;
+	if (!$is_merged) {
+		$key = $PIN . '_' . $rec_tgl;
+		if (!isset($grouped[$key])) {
+			$grouped[$key] = [
+				'pin' => $PIN,
+				'date' => $rec_tgl,
+				'masuk' => '',
+				'istirahat_keluar' => '',
+				'istirahat_masuk' => '',
+				'pulang' => '',
+				'raw_times' => []
+			];
 		}
-	} elseif ($Status == 2) {
-		if ($grouped[$key]['istirahat_keluar'] == '' || $time < $grouped[$key]['istirahat_keluar']) {
-			$grouped[$key]['istirahat_keluar'] = $time;
-		}
-	} elseif ($Status == 3) {
-		if ($grouped[$key]['istirahat_masuk'] == '' || $time < $grouped[$key]['istirahat_masuk']) {
-			$grouped[$key]['istirahat_masuk'] = $time;
-		}
-	} elseif ($Status == 1) {
-		if ($grouped[$key]['pulang'] == '' || $time > $grouped[$key]['pulang']) {
-			$grouped[$key]['pulang'] = $time;
+		
+		$grouped[$key]['raw_times'][] = [
+			'time' => $time,
+			'status' => $Status
+		];
+
+		if ($Status == 0) {
+			if ($grouped[$key]['masuk'] == '' || $time < $grouped[$key]['masuk']) {
+				$grouped[$key]['masuk'] = $time;
+			}
+		} elseif ($Status == 2) {
+			if ($grouped[$key]['istirahat_keluar'] == '' || $time < $grouped[$key]['istirahat_keluar']) {
+				$grouped[$key]['istirahat_keluar'] = $time;
+			}
+		} elseif ($Status == 3) {
+			if ($grouped[$key]['istirahat_masuk'] == '' || $time < $grouped[$key]['istirahat_masuk']) {
+				$grouped[$key]['istirahat_masuk'] = $time;
+			}
+		} elseif ($Status == 1) {
+			if ($grouped[$key]['pulang'] == '' || $time > $grouped[$key]['pulang']) {
+				$grouped[$key]['pulang'] = $time;
+			}
 		}
 	}
 }
