@@ -20,31 +20,69 @@ echo "<meta charset='UTF-8'>";
 // Helper to calculate actual hours worked based on scan records
 if (!function_exists('calculate_actual_hours')) {
     function calculate_actual_hours($koneksi, $PIN, $TanggalAwal, $TanggalAkhir) {
-        $q = $koneksi->query("SELECT * FROM tb_record WHERE userid = '$PIN' AND tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' ORDER BY tgl ASC, detail_waktu ASC");
+        $TanggalAwalQuery = date('Y-m-d', strtotime('-1 day', strtotime($TanggalAwal)));
+        $TanggalAkhirQuery = date('Y-m-d', strtotime('+1 day', strtotime($TanggalAkhir)));
+        
+        $q = $koneksi->query("SELECT * FROM tb_record WHERE userid = '$PIN' AND tgl BETWEEN '$TanggalAwalQuery' AND '$TanggalAkhirQuery' ORDER BY tgl ASC, detail_waktu ASC");
         $days_log = [];
         while ($r = $q->fetch_assoc()) {
             $date = $r['tgl'];
             $time = substr($r['detail_waktu'], 11, 5);
             $status = $r['status'];
-            if (!isset($days_log[$date])) {
-                $days_log[$date] = [
-                    'masuk' => '',
-                    'pulang' => '',
-                    'raw' => []
-                ];
-            }
-            $days_log[$date]['raw'][] = $time;
-            if ($status == 0) {
-                if ($days_log[$date]['masuk'] == '' || $time < $days_log[$date]['masuk']) {
-                    $days_log[$date]['masuk'] = $time;
+            
+            $is_merged = false;
+            $prev_date = date('Y-m-d', strtotime('-1 day', strtotime($date)));
+            if (isset($days_log[$prev_date]) && !empty($days_log[$prev_date]['masuk'])) {
+                $prev_masuk = $days_log[$prev_date]['masuk'];
+                $prev_pulang = $days_log[$prev_date]['pulang'] ?? '';
+                
+                $in_timestamp = strtotime($prev_date . ' ' . $prev_masuk);
+                $curr_timestamp = strtotime($date . ' ' . $time);
+                $diff_hours = ($curr_timestamp - $in_timestamp) / 3600;
+                
+                if ($diff_hours > 0 && $diff_hours <= 16) {
+                    $is_valid_merge = false;
+                    if (empty($prev_pulang)) {
+                        $is_valid_merge = true;
+                    } else {
+                        $prev_pulang_diff = (strtotime($prev_date . ' ' . $prev_pulang) - $in_timestamp) / 3600;
+                        if ($prev_pulang_diff <= 16) {
+                            $is_valid_merge = true;
+                        }
+                    }
+                    
+                    if ($is_valid_merge) {
+                        if (empty($prev_pulang) || $time > $prev_pulang) {
+                            $days_log[$prev_date]['pulang'] = $time;
+                        }
+                        $days_log[$prev_date]['raw'][] = $time;
+                        $is_merged = true;
+                    }
                 }
-            } elseif ($status == 1) {
-                if ($days_log[$date]['pulang'] == '' || $time > $days_log[$date]['pulang']) {
-                    $days_log[$date]['pulang'] = $time;
+            }
+            
+            if (!$is_merged) {
+                if (!isset($days_log[$date])) {
+                    $days_log[$date] = [
+                        'masuk' => '',
+                        'pulang' => '',
+                        'raw' => []
+                    ];
+                }
+                $days_log[$date]['raw'][] = $time;
+                if ($status == 0) {
+                    if ($days_log[$date]['masuk'] == '' || $time < $days_log[$date]['masuk']) {
+                        $days_log[$date]['masuk'] = $time;
+                    }
+                } elseif ($status == 1) {
+                    if ($days_log[$date]['pulang'] == '' || $time > $days_log[$date]['pulang']) {
+                        $days_log[$date]['pulang'] = $time;
+                    }
                 }
             }
         }
         
+        // Fallback for missing status tags
         foreach ($days_log as $date => &$day) {
             if (empty($day['masuk']) && !empty($day['raw'])) {
                 sort($day['raw']);
@@ -58,13 +96,15 @@ if (!function_exists('calculate_actual_hours')) {
         
         $total_hours = 0;
         foreach ($days_log as $date => $day) {
-            if (!empty($day['masuk']) && !empty($day['pulang'])) {
-                $duration = strtotime($day['pulang']) - strtotime($day['masuk']);
-                if ($duration > 43200) $duration -= 86400;
-                elseif ($duration < -43200) $duration += 86400;
-                $hours = $duration / 3600;
-                if ($hours > 0) {
-                    $total_hours += $hours;
+            if ($date >= $TanggalAwal && $date <= $TanggalAkhir) {
+                if (!empty($day['masuk']) && !empty($day['pulang'])) {
+                    $duration = strtotime($day['pulang']) - strtotime($day['masuk']);
+                    if ($duration > 43200) $duration -= 86400;
+                    elseif ($duration < -43200) $duration += 86400;
+                    $hours = $duration / 3600;
+                    if ($hours > 0) {
+                        $total_hours += $hours;
+                    }
                 }
             }
         }
