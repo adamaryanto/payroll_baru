@@ -608,13 +608,29 @@ if (isset($_SESSION['delete_success'])) {
 
 									$time = substr($DateTime, 11, 5); // "08:12"
 									$is_merged = false;
-									if ($time < '09:00') {
-										$prev_date = date('Y-m-d', strtotime('-1 day', strtotime($rec_tgl)));
-										$prev_key = $PIN . '_' . $prev_date;
-										if (isset($grouped[$prev_key]) && !empty($grouped[$prev_key]['masuk'])) {
-											$prev_masuk = $grouped[$prev_key]['masuk'];
-											$prev_pulang = $grouped[$prev_key]['pulang'] ?? '';
-											if ($prev_masuk >= '12:00' && (empty($prev_pulang) || $prev_pulang < '09:00')) {
+									$prev_date = date('Y-m-d', strtotime('-1 day', strtotime($rec_tgl)));
+									$prev_key = $PIN . '_' . $prev_date;
+									if (isset($grouped[$prev_key]) && !empty($grouped[$prev_key]['masuk'])) {
+										$prev_masuk = $grouped[$prev_key]['masuk'];
+										$prev_pulang = $grouped[$prev_key]['pulang'] ?? '';
+										
+										$in_timestamp = strtotime($prev_date . ' ' . $prev_masuk);
+										$curr_timestamp = strtotime($rec_tgl . ' ' . $time);
+										$diff_hours = ($curr_timestamp - $in_timestamp) / 3600;
+										
+										// Jika scan baru berada dalam rentang maks 16 jam dari absen masuk kemarin
+										if ($diff_hours > 0 && $diff_hours <= 16) {
+											$is_valid_merge = false;
+											if (empty($prev_pulang)) {
+												$is_valid_merge = true;
+											} else {
+												$prev_pulang_diff = (strtotime($prev_date . ' ' . $prev_pulang) - $in_timestamp) / 3600;
+												if ($prev_pulang_diff <= 16) {
+													$is_valid_merge = true;
+												}
+											}
+											
+											if ($is_valid_merge) {
 												if (empty($prev_pulang) || $time > $prev_pulang) {
 													$grouped[$prev_key]['pulang'] = $time;
 												}
