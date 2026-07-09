@@ -430,6 +430,14 @@ ksort($grouped_by_dept);
                         $s_keluar = !empty($shift['jam_keluar']) ? $shift['jam_keluar'] : '-';
                         $s_ist_keluar = !empty($shift['istirahat_keluar']) ? $shift['istirahat_keluar'] : '-';
                         $s_ist_masuk = !empty($shift['istirahat_masuk']) ? $shift['istirahat_masuk'] : '-';
+                        
+                        $shift_in = $shift['jam_masuk'] ?? '00:00:00';
+                        $shift_out = $shift['jam_keluar'] ?? '00:00:00';
+                        $shift_duration_sec = strtotime($shift_out) - strtotime($shift_in);
+                        if ($shift_duration_sec < 0) {
+                            $shift_duration_sec += 86400;
+                        }
+                        $expected_hours = $shift_duration_sec / 3600;
                     }
                 }
 
@@ -473,8 +481,9 @@ ksort($grouped_by_dept);
                 if (isset($custom_lembur[$key_lembur])) {
                     $final_lembur_jam = $custom_lembur[$key_lembur];
                 } else {
+                    // Auto-calculated lembur hours for all shifts (flexible and regular)
                     $final_lembur_jam = 0;
-                    if ($is_flexible && $has_masuk && $has_keluar) {
+                    if ($has_masuk && $has_keluar) {
                         $work_duration = (strtotime($pulang) - strtotime($masuk));
                         if ($work_duration > 43200) $work_duration -= 86400;
                         elseif ($work_duration < -43200) $work_duration += 86400;
