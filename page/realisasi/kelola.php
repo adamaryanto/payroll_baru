@@ -268,26 +268,88 @@ function syncRealisasiData($koneksi, $id_realisasi)
             $ra_ist_keluar = "'00:00:00'";
             $ra_ist_masuk = "'00:00:00'";
         } else {
-            // 3. Query records from tb_record
-            $query_logs = $koneksi->query("SELECT 
-                (SELECT TIME_FORMAT(detail_waktu, '%H:%i:%s') FROM tb_record WHERE userid = '$no_absen' AND DATE(tgl) = '$tgl_real' AND status = 0 ORDER BY detail_waktu ASC LIMIT 1) AS log_masuk,
-                (SELECT TIME_FORMAT(detail_waktu, '%H:%i:%s') FROM tb_record WHERE userid = '$no_absen' AND DATE(tgl) = '$tgl_real' AND status = 1 ORDER BY detail_waktu DESC LIMIT 1) AS log_keluar,
-                (SELECT TIME_FORMAT(detail_waktu, '%H:%i:%s') FROM tb_record WHERE userid = '$no_absen' AND DATE(tgl) = '$tgl_real' AND status = 2 ORDER BY detail_waktu ASC LIMIT 1) AS log_ist_keluar,
-                (SELECT TIME_FORMAT(detail_waktu, '%H:%i:%s') FROM tb_record WHERE userid = '$no_absen' AND DATE(tgl) = '$tgl_real' AND status = 3 ORDER BY detail_waktu ASC LIMIT 1) AS log_ist_masuk
-            ");
-
-            $logs = $query_logs->fetch_assoc();
-
-            $ra_masuk = $logs['log_masuk'] ? "'" . $logs['log_masuk'] . "'" : "'00:00:00'";
-            $ra_keluar = $logs['log_keluar'] ? "'" . $logs['log_keluar'] . "'" : "'00:00:00'";
-            $ra_ist_keluar = $logs['log_ist_keluar'] ? "'" . $logs['log_ist_keluar'] . "'" : "'00:00:00'";
-            $ra_ist_masuk = $logs['log_ist_masuk'] ? "'" . $logs['log_ist_masuk'] . "'" : "'00:00:00'";
-
-            $has_masuk = !empty($logs['log_masuk']);
-            $has_keluar = !empty($logs['log_keluar']);
-            $has_ist_keluar = !empty($logs['log_ist_keluar']);
-            $has_ist_masuk = !empty($logs['log_ist_masuk']);
-
+            // Get logs for today and tomorrow to support cross-midnight night-shift merge
+            $tgl_next = date('Y-m-d', strtotime('+1 day', strtotime($tgl_real)));
+            $q_logs = $koneksi->query("SELECT * FROM tb_record WHERE userid = '$no_absen' AND tgl IN ('$tgl_real', '$tgl_next') ORDER BY tgl ASC, detail_waktu ASC");
+            
+            $log_masuk = null;
+            $log_keluar = null;
+            $log_ist_keluar = null;
+            $log_ist_masuk = null;
+            
+            $raw_logs = [];
+            while ($r_log = $q_logs->fetch_assoc()) {
+                $raw_logs[] = $r_log;
+            }
+            
+            // Find earliest check-in (status 0) on $tgl_real
+            foreach ($raw_logs as $l) {
+                if ($l['tgl'] == $tgl_real && $l['status'] == 0) {
+                    $log_masuk = substr($l['detail_waktu'], 11, 8);
+                    break;
+                }
+            }
+            
+            // Fallback if no status 0 on $tgl_real: use first scan of the day
+            if (!$log_masuk) {
+                foreach ($raw_logs as $l) {
+                    if ($l['tgl'] == $tgl_real) {
+                        $log_masuk = substr($l['detail_waktu'], 11, 8);
+                        break;
+                    }
+                }
+            }
+            
+            if ($log_masuk) {
+                $in_timestamp = strtotime($tgl_real . ' ' . $log_masuk);
+                
+                // Find check-out (status 1) within 16 hours (check backwards for the latest valid checkout)
+                for ($i = count($raw_logs) - 1; $i >= 0; $i--) {
+                    $l = $raw_logs[$i];
+                    if ($l['status'] == 1) {
+                        $curr_time = substr($l['detail_waktu'], 11, 8);
+                        $curr_timestamp = strtotime($l['tgl'] . ' ' . $curr_time);
+                        $diff_hours = ($curr_timestamp - $in_timestamp) / 3600;
+                        if ($diff_hours > 0 && $diff_hours <= 16) {
+                            $log_keluar = $curr_time;
+                            break;
+                        }
+                    }
+                }
+                
+                // Find break-out (status 2) and break-in (status 3) within 16 hours
+                foreach ($raw_logs as $l) {
+                    $curr_time = substr($l['detail_waktu'], 11, 8);
+                    $curr_timestamp = strtotime($l['tgl'] . ' ' . $curr_time);
+                    $diff_hours = ($curr_timestamp - $in_timestamp) / 3600;
+                    if ($diff_hours > 0 && $diff_hours <= 16) {
+                        if ($l['status'] == 2 && !$log_ist_keluar) {
+                            $log_ist_keluar = $curr_time;
+                        }
+                        if ($l['status'] == 3 && !$log_ist_masuk) {
+                            $log_ist_masuk = $curr_time;
+                        }
+                    }
+                }
+            }
+            
+            $logs = [
+                'log_masuk' => $log_masuk,
+                'log_keluar' => $log_keluar,
+                'log_ist_keluar' => $log_ist_keluar,
+                'log_ist_masuk' => $log_ist_masuk
+            ];
+            
+            $ra_masuk = $log_masuk ? "'" . $log_masuk . "'" : "'00:00:00'";
+            $ra_keluar = $log_keluar ? "'" . $log_keluar . "'" : "'00:00:00'";
+            $ra_ist_keluar = $log_ist_keluar ? "'" . $log_ist_keluar . "'" : "'00:00:00'";
+            $ra_ist_masuk = $log_ist_masuk ? "'" . $log_ist_masuk . "'" : "'00:00:00'";
+            
+            $has_masuk = !empty($log_masuk);
+            $has_keluar = !empty($log_keluar);
+            $has_ist_keluar = !empty($log_ist_keluar);
+            $has_ist_masuk = !empty($log_ist_masuk);
+            
             $is_total_missing = (!$has_masuk && !$has_keluar);
         }
 
