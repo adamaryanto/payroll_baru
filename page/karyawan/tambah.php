@@ -224,15 +224,13 @@ if (isset($_POST['simpan'])) {
                             </select>
                         </div>
 
-                        <div class="form-group grid grid-cols-2 gap-4" id="target-fields-container" style="display: none;">
-                            <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">Target Mingguan (Jam)</label>
-                                <input type="number" step="0.1" name="ttarget_mingguan" value="20.0" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">Target Bulanan (Jam)</label>
-                                <input type="number" step="0.1" name="ttarget_bulanan" value="40.0" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
-                            </div>
+                         <div class="form-group target-fields" style="display: none;">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Target Mingguan (Jam)</label>
+                            <input type="number" step="0.1" name="ttarget_mingguan" value="20.0" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                        <div class="form-group target-fields" style="display: none;">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Target Bulanan (Jam)</label>
+                            <input type="number" step="0.1" name="ttarget_bulanan" value="40.0" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
                         </div>
 
                         
@@ -351,9 +349,9 @@ $(document).ready(function() {
         var selectVal = $('select[name="tjadwal"]').val();
         var selectedText = $('select[name="tjadwal"] option[value="' + selectVal + '"]').text() || '';
         if (selectedText.toUpperCase().indexOf('FLEXI') !== -1) {
-            $('#target-fields-container').show();
+            $('.target-fields').show();
         } else {
-            $('#target-fields-container').hide();
+            $('.target-fields').hide();
         }
     }
     
