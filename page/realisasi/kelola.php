@@ -2,7 +2,7 @@
 // Helpers for cross-midnight time comparisons
 if (!function_exists('is_time_late')) {
     function is_time_late($actual, $expected) {
-        if (empty($actual) || empty($expected) || $actual == '00:00:00') return false;
+        if (empty($actual) || empty($expected) || $actual == '00:00:00' || $expected == '00:00:00' || $expected == 'Bebas') return false;
         $diff = strtotime($actual) - strtotime($expected);
         if ($diff > 43200) $diff -= 86400;
         elseif ($diff < -43200) $diff += 86400;
@@ -11,7 +11,7 @@ if (!function_exists('is_time_late')) {
 }
 if (!function_exists('is_time_early')) {
     function is_time_early($actual, $expected) {
-        if (empty($actual) || empty($expected) || $actual == '00:00:00') return false;
+        if (empty($actual) || empty($expected) || $actual == '00:00:00' || $expected == '00:00:00' || $expected == 'Bebas') return false;
         $diff = strtotime($actual) - strtotime($expected);
         if ($diff > 43200) $diff -= 86400;
         elseif ($diff < -43200) $diff += 86400;
@@ -237,6 +237,7 @@ function syncRealisasiData($koneksi, $id_realisasi)
 
     // 2. Get all employees in this realization (using LEFT JOIN to include manual employees and RKK fallback)
     $query_details = $koneksi->query("SELECT RD.id_realisasi_detail, K.no_absen, RD.id_jadwal as detail_jadwal, RKKD.id_jadwal as rkk_jadwal, RD.status_realisasi_detail, 
+                                      COALESCE(J.keterangan, JR.keterangan) as shift_ket,
                                       COALESCE(J.jam_masuk, JR.jam_masuk) as s_masuk, 
                                       COALESCE(J.jam_keluar, JR.jam_keluar) as s_keluar, 
                                       COALESCE(J.istirahat_masuk, JR.istirahat_masuk) as s_ist_masuk, 
@@ -255,6 +256,8 @@ function syncRealisasiData($koneksi, $id_realisasi)
         $status_rd = $row['status_realisasi_detail'];
         
         // Include manual employees (Previously skipped)
+        $shift_ket = $row['shift_ket'] ?? '';
+        $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
 
         $s_masuk = $row['s_masuk'] ?? '00:00:00';
         $s_keluar = $row['s_keluar'] ?? '00:00:00';
@@ -397,7 +400,7 @@ function syncRealisasiData($koneksi, $id_realisasi)
 
             // Incomplete Log (Missing any expected punch)
             $hasIncompleteMain = ($has_masuk xor $has_keluar);
-            $isRestExpected = (!empty($s_ist_keluar));
+            $isRestExpected = (!$is_flexible && !empty($s_ist_keluar) && $s_ist_keluar != '00:00:00');
             $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
 
             if ($hasIncompleteMain || $hasIncompleteBreak) {
