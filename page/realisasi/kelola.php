@@ -237,7 +237,7 @@ function syncRealisasiData($koneksi, $id_realisasi)
     $gd_tidak_lengkap = $denda['denda_tidak_lengkap'] ?? 0;
 
     // 2. Get all employees in this realization (using LEFT JOIN to include manual employees and RKK fallback)
-    $query_details = $koneksi->query("SELECT RD.id_realisasi_detail, K.no_absen, RD.id_jadwal as detail_jadwal, RKKD.id_jadwal as rkk_jadwal, RD.status_realisasi_detail, 
+    $query_details = $koneksi->query("SELECT RD.id_realisasi_detail, K.no_absen, K.upah as upah_master, RD.id_jadwal as detail_jadwal, RKKD.id_jadwal as rkk_jadwal, RD.status_realisasi_detail, 
                                       COALESCE(J.keterangan, JR.keterangan) as shift_ket,
                                       COALESCE(J.jam_masuk, JR.jam_masuk) as s_masuk, 
                                       COALESCE(J.jam_keluar, JR.jam_keluar) as s_keluar, 
@@ -410,11 +410,14 @@ function syncRealisasiData($koneksi, $id_realisasi)
         }
 
         // Determine Wage adjustment for total absence
+        $upah_master = $row['upah_master'] ?? 0;
         $wage_update_sql = "";
         $status_enum = "Hadir";
         if ($is_total_missing) {
             $wage_update_sql = "r_upah = 0,";
             $status_enum = "Tidak Hadir";
+        } else {
+            $wage_update_sql = "r_upah = '$upah_master',";
         }
 
         // 5. Update the detail record and SET STATUS TO 2 (Synced)
