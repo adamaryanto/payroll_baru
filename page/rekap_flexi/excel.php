@@ -99,8 +99,9 @@ if (!function_exists('calculate_actual_hours')) {
             if ($date >= $TanggalAwal && $date <= $TanggalAkhir) {
                 if (!empty($day['masuk']) && !empty($day['pulang'])) {
                     $duration = strtotime($day['pulang']) - strtotime($day['masuk']);
-                    if ($duration > 43200) $duration -= 86400;
-                    elseif ($duration < -43200) $duration += 86400;
+                    if ($duration < 0) {
+                        $duration += 86400;
+                    }
                     $hours = $duration / 3600;
                     if ($hours > 0) {
                         $total_hours += $hours;

@@ -515,8 +515,9 @@ unset($row);
                         $final_lembur_jam = 0;
                         if ($has_masuk && $has_keluar) {
                             $work_duration = (strtotime($pulang) - strtotime($masuk));
-                            if ($work_duration > 43200) $work_duration -= 86400;
-                            elseif ($work_duration < -43200) $work_duration += 86400;
+                            if ($work_duration < 0) {
+                                $work_duration += 86400;
+                            }
                             
                             $work_hours = $work_duration / 3600;
                             if ($work_hours > $expected_hours) {
