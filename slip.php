@@ -60,6 +60,7 @@ $sql = "SELECT
     jd.jam_keluar,
     jd.istirahat_masuk,
     jd.istirahat_keluar,
+    jd.keterangan as shift_ket,
     rd.status_rkk,
     os.OS_DHK
 FROM tb_realisasi_detail r
@@ -118,23 +119,25 @@ if($result->num_rows > 0) {
 $no=1;
 $totalKeseluruhan = 0;
 while($row = $result->fetch_assoc()){
-    // Logika Pelanggaran Dinamis (Sync with realisasi/kelola.php)
-    $isLate = (!empty($row['ra_masuk']) && $row['ra_masuk'] != '00:00:00' && !empty($row['jam_masuk']) && $row['jam_masuk'] != '00:00:00' && strtotime($row['ra_masuk']) > strtotime($row['jam_masuk']));
-    $isLateBreak = (!empty($row['ra_istirahat_masuk']) && $row['ra_istirahat_masuk'] != '00:00:00' && !empty($row['istirahat_masuk']) && $row['istirahat_masuk'] != '00:00:00' && strtotime($row['ra_istirahat_masuk']) > strtotime($row['istirahat_masuk']));
-    $isEarlyOut = (!empty($row['ra_keluar']) && $row['ra_keluar'] != '00:00:00' && !empty($row['jam_keluar']) && $row['jam_keluar'] != '00:00:00' && strtotime($row['ra_keluar']) < strtotime($row['jam_keluar']));
+    $shift_ket = $row['shift_ket'] ?? '';
+    $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+
+    $isLate = (!$is_flexible && !empty($row['ra_masuk']) && $row['ra_masuk'] != '00:00:00' && !empty($row['jam_masuk']) && $row['jam_masuk'] != '00:00:00' && strtotime($row['ra_masuk']) > strtotime($row['jam_masuk']));
+    $isLateBreak = (!$is_flexible && !empty($row['ra_istirahat_masuk']) && $row['ra_istirahat_masuk'] != '00:00:00' && !empty($row['istirahat_masuk']) && $row['istirahat_masuk'] != '00:00:00' && strtotime($row['ra_istirahat_masuk']) > strtotime($row['istirahat_masuk']));
+    $isEarlyOut = (!$is_flexible && !empty($row['ra_keluar']) && $row['ra_keluar'] != '00:00:00' && !empty($row['jam_keluar']) && $row['jam_keluar'] != '00:00:00' && strtotime($row['ra_keluar']) < strtotime($row['jam_keluar']));
 
     // Incomplete Logs
     $hasIncompleteMain = (
         (!empty($row['ra_masuk']) && $row['ra_masuk'] != '00:00:00' && (empty($row['ra_keluar']) || $row['ra_keluar'] == '00:00:00')) ||
         ((empty($row['ra_masuk']) || $row['ra_masuk'] == '00:00:00') && !empty($row['ra_keluar']) && $row['ra_keluar'] != '00:00:00')
     );
-    $isRestExpected = (!empty($row['istirahat_keluar']) && $row['istirahat_keluar'] != '00:00:00');
+    $isRestExpected = (!$is_flexible && !empty($row['istirahat_keluar']) && $row['istirahat_keluar'] != '00:00:00');
     $hasIncompleteBreak = ($isRestExpected && (
         (empty($row['ra_istirahat_keluar']) || $row['ra_istirahat_keluar'] == '00:00:00') ||
         (empty($row['ra_istirahat_masuk']) || $row['ra_istirahat_masuk'] == '00:00:00')
     ));
 
-    $isEarlyBreak = (!empty($row['ra_istirahat_keluar']) && $row['ra_istirahat_keluar'] != '00:00:00' && !empty($row['istirahat_keluar']) && $row['istirahat_keluar'] != '00:00:00' && strtotime($row['ra_istirahat_keluar']) < strtotime($row['istirahat_keluar']));
+    $isEarlyBreak = (!$is_flexible && !empty($row['ra_istirahat_keluar']) && $row['ra_istirahat_keluar'] != '00:00:00' && !empty($row['istirahat_keluar']) && $row['istirahat_keluar'] != '00:00:00' && strtotime($row['ra_istirahat_keluar']) < strtotime($row['istirahat_keluar']));
 
     // Skip Denda if wage is 0 or status is "Digantikan"
     if ($row['r_upah'] == 0 || $row['status_rkk'] == 'Digantikan') {

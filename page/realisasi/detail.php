@@ -169,7 +169,7 @@ if (isset($_GET['id'])) {
         }
         $hasIncompleteBreak = false;
     } else {
-        $isRestExpected = (!empty($datadetail['shift_istirahat_keluar']));
+        $isRestExpected = (!empty($datadetail['shift_istirahat_keluar']) && $datadetail['shift_istirahat_keluar'] != '00:00:00');
         $hasIncompleteBreak = ($isRestExpected && ($has_ist_keluar XOR $has_ist_masuk));
         
         $isLate = ($has_masuk && !empty($datadetail['shift_masuk']) && is_time_late($jamMasukRealisasi, $datadetail['shift_masuk']));
@@ -492,9 +492,9 @@ if (isset($_POST['simpan'])) {
             $p_ist_telat = $gd_istirahat_telat;
         }
 
-        // Incomplete Log
-        $hasIncompleteMain = ($has_masuk XOR $has_keluar);
-        $isRestExpected = (!empty($s_ist_keluar));
+        $shift_ket = $dJadwal['keterangan'] ?? '';
+        $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+        $isRestExpected = (!$is_flexible && !empty($s_ist_keluar) && $s_ist_keluar != '00:00:00');
         $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
         
         if ($hasIncompleteMain || $hasIncompleteBreak) {

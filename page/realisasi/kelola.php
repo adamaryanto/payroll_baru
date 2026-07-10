@@ -74,6 +74,7 @@ if (isset($_GET['id'])) {
         J.jam_keluar as shift_keluar,
         J.istirahat_masuk as shift_istirahat_masuk,
         J.istirahat_keluar as shift_istirahat_keluar,
+        J.keterangan as shift_ket,
         (SELECT K3.nama_karyawan 
          FROM tb_rkk_update U1 
          JOIN tb_rkk_update U2 ON U1.id_rkk_detail = U2.id_rkk_detail 
@@ -458,7 +459,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
     $gd_tidak_lengkap = $denda['denda_tidak_lengkap'] ?? 0;
 
     // 2. Get all details for this realization
-    $query_details = $koneksi->query("SELECT RD.*, J.jam_masuk as s_masuk, J.jam_keluar as s_keluar, J.istirahat_masuk as s_ist_masuk, J.istirahat_keluar as s_ist_keluar
+    $query_details = $koneksi->query("SELECT RD.*, J.keterangan as shift_ket, J.jam_masuk as s_masuk, J.jam_keluar as s_keluar, J.istirahat_masuk as s_ist_masuk, J.istirahat_keluar as s_ist_keluar
                                       FROM tb_realisasi_detail RD
                                       LEFT JOIN tb_jadwal J ON RD.id_jadwal = J.id_jadwal
                                       WHERE RD.id_realisasi = '$id_realisasi'");
@@ -507,9 +508,9 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                 $p_ist_telat = $gd_istirahat_telat;
             }
 
-            // Incomplete Log (Missing any expected punch)
-            $hasIncompleteMain = ($has_masuk xor $has_keluar);
-            $isRestExpected = ($s_ist_keluar != '00:00:00');
+            $shift_ket = $row['shift_ket'] ?? '';
+            $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+            $isRestExpected = (!$is_flexible && $s_ist_keluar != '00:00:00' && $s_ist_keluar != 'Bebas');
             $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
 
             if ($hasIncompleteMain || $hasIncompleteBreak) {
@@ -659,10 +660,12 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                     $isLateBreak = ($has_ist_masuk && !empty($data['r_istirahat_masuk']) && is_time_late($data['ra_istirahat_masuk'], $data['r_istirahat_masuk']));
                                     $isEarlyBreak = ($has_ist_keluar && !empty($data['r_istirahat_keluar']) && is_time_early($data['ra_istirahat_keluar'], $data['r_istirahat_keluar']));
 
-                                    $isTotalMissing = (!$has_masuk && !$has_keluar);
-                                    $hasIncompleteMain = ($has_masuk xor $has_keluar);
-                                    $isRestExpected = (!empty($data['r_istirahat_keluar']));
-                                    $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
+                                     $isTotalMissing = (!$has_masuk && !$has_keluar);
+                                     $hasIncompleteMain = ($has_masuk xor $has_keluar);
+                                     $shift_ket = $data['shift_ket'] ?? '';
+                                     $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+                                     $isRestExpected = (!$is_flexible && !empty($data['r_istirahat_keluar']) && $data['r_istirahat_keluar'] != '00:00:00');
+                                     $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
 
                                      // Logic Status Kehadiran (Refined)
                                      // Attendance Status Logic (ENUM-based)
