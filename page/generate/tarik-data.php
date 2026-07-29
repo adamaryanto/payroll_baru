@@ -631,7 +631,8 @@ if (isset($_SESSION['delete_success'])) {
 											}
 											
 											if ($is_valid_merge) {
-												if (empty($prev_pulang) || $time > $prev_pulang) {
+												$prev_pulang_ts = !empty($prev_pulang) ? strtotime($prev_date . ' ' . $prev_pulang) : 0;
+												if (empty($prev_pulang) || $curr_timestamp > $prev_pulang_ts) {
 													$grouped[$prev_key]['pulang'] = $time;
 												}
 												$grouped[$prev_key]['raw_times'][] = [

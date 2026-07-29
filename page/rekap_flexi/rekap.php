@@ -47,7 +47,8 @@ if (!function_exists('calculate_actual_hours')) {
                     }
                     
                     if ($is_valid_merge) {
-                        if (empty($prev_pulang) || $time > $prev_pulang) {
+                        $prev_pulang_ts = !empty($prev_pulang) ? strtotime($prev_date . ' ' . $prev_pulang) : 0;
+                        if (empty($prev_pulang) || $curr_timestamp > $prev_pulang_ts) {
                             $days_log[$prev_date]['pulang'] = $time;
                         }
                         $days_log[$prev_date]['raw'][] = $time;
