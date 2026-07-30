@@ -321,6 +321,23 @@ function syncRealisasiData($koneksi, $id_realisasi)
                     }
                 }
                 
+                // Fallback: if no check-out with status 1 is found, use the latest scan within 16 hours of check-in
+                if (!$log_keluar) {
+                    for ($i = count($raw_logs) - 1; $i >= 0; $i--) {
+                        $l = $raw_logs[$i];
+                        $curr_time = substr($l['detail_waktu'], 11, 8);
+                        if ($l['tgl'] == $tgl_real && $curr_time == $log_masuk) {
+                            continue;
+                        }
+                        $curr_timestamp = strtotime($l['tgl'] . ' ' . $curr_time);
+                        $diff_hours = ($curr_timestamp - $in_timestamp) / 3600;
+                        if ($diff_hours > 0 && $diff_hours <= 16) {
+                            $log_keluar = $curr_time;
+                            break;
+                        }
+                    }
+                }
+                
                 // Find break-out (status 2) and break-in (status 3) within 16 hours
                 foreach ($raw_logs as $l) {
                     $curr_time = substr($l['detail_waktu'], 11, 8);
