@@ -1,24 +1,59 @@
 <?php
 
 set_time_limit(0); // unlimited
+ignore_user_abort(true);
 
-$tampil = $koneksi->query("SELECT * from tb_mesin");
-$data = $tampil->fetch_assoc();
-$idmesin = $data['id_mesin'] ?? '';
-$nomesin = $data['no_mesin'] ?? '';
-$namamesin = $data['nama_mesin'] ?? '';
-$ipmesin = $data['ip_mesin'] ?? '';
-$commkey = $data['comm_key'] ?? '';
-$port = $data['port'] ?? '';
+// Include device sync helper for multi-device support
+include_once __DIR__ . '/../../device_sync_helper.php';
+create_sync_log_table($koneksi);
 
-$IP = $_GET['ip'] ?? $ipmesin;
-$Key = $_GET['key'] ?? "0";
+// Get all devices
+$devices = get_all_devices($koneksi);
+
+// Get date range
 $TanggalAwal = $_GET['tanggal_awal'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 $TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
-if ($IP == "") $IP = "192.168.110.201";
-if ($Key == "") $Key = "";
 
-// Pre-connection status check to the machine
+// Handle multi-device pull
+$pull_results = null;
+if (isset($_GET['pull_all']) || isset($_POST['pull_all'])) {
+    // Pull from all devices
+    $pull_results = pull_attendance_from_all_devices($koneksi, $TanggalAwal, $TanggalAkhir);
+    
+    // Log the operation
+    foreach($pull_results['per_device'] as $device_id => $result) {
+        if($result['online']) {
+            log_sync_activity($koneksi, 'attendance_pull', $device_id, null, 
+                             'success', "Pulled {$result['records_pulled']} records, saved {$result['records_saved']}");
+        }
+    }
+}
+
+// For backward compatibility (single device selection)
+$selected_device = null;
+$selected_ip = $_GET['ip'] ?? '';
+$selected_key = $_GET['key'] ?? "0";
+
+if(!empty($selected_ip)) {
+    foreach($devices as $device) {
+        if($device['ip_mesin'] == $selected_ip) {
+            $selected_device = $device;
+            break;
+        }
+    }
+}
+
+// If no specific device selected, use first device for legacy display
+if(!$selected_device && count($devices) > 0) {
+    $selected_device = $devices[0];
+}
+
+$IP = $selected_device['ip_mesin'] ?? '';
+$Key = $selected_device['comm_key'] ?? "0";
+$port = $selected_device['port'] ?? '';
+$namamesin = $selected_device['nama_mesin'] ?? '';
+
+// Pre-connection status check to selected machine (for legacy display)
 $isConnected = false;
 if (!empty($IP)) {
 	$socket = @fsockopen($IP, $port, $errno, $errstr, 1.5);
@@ -406,8 +441,8 @@ if (isset($_SESSION['delete_success'])) {
 			//include "koneksi.php";
 			//$IP= $HTTP_GET_VARS["121.0.0.144"];
 			//$Key= $HTTP_GET_VARS[""];
-			$IP = $_GET['ip'] ?? $ipmesin;
-			$Key = $_GET['key'] ?? "0";
+			$IP = $_GET['ip'] ?? ($selected_device['ip_mesin'] ?? '');
+			$Key = $_GET['key'] ?? ($selected_device['comm_key'] ?? "0");
 			$TanggalAwal = $_GET['tanggal_awal'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 			$TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 			if ($IP == "") $IP = "192.168.110.201";
@@ -420,12 +455,28 @@ if (isset($_SESSION['delete_success'])) {
 				<div class="p-4 md:p-5 bg-gray-50 border-b border-gray-100">
 					<div class="row items-end">
 						<div class="col-md-3 col-sm-12 mb-3 mb-md-0">
-							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">IP Address:</label>
-							<input type="text" name="ip" value="<?php echo $IP; ?>" placeholder="Contoh: 192.168.1.1" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
+							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">Pilih Mesin:</label>
+							<select name="ip" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" onchange="updateCommKey(this)">
+								<option value="">- Pilih Mesin -</option>
+								<?php foreach($devices as $device): 
+									$is_online = !empty($device['ip_mesin']) ? test_device_connection($device['ip_mesin'], $device['port']) : false;
+									$selected = ($IP == $device['ip_mesin']) ? 'selected' : '';
+								?>
+								<option value="<?php echo htmlspecialchars($device['ip_mesin']); ?>" 
+										data-key="<?php echo htmlspecialchars($device['comm_key']); ?>"
+										data-port="<?php echo htmlspecialchars($device['port']); ?>"
+										<?php echo $selected; ?>
+										<?php echo !$is_online ? 'style="color:#999;"' : ''; ?>>
+									<?php echo htmlspecialchars($device['nama_mesin']); ?> 
+									(<?php echo htmlspecialchars($device['ip_mesin']); ?>)
+									<?php echo !$is_online ? ' [OFFLINE]' : ''; ?>
+								</option>
+								<?php endforeach; ?>
+							</select>
 						</div>
 						<div class="col-md-1 col-sm-12 mb-3 mb-md-0">
 							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">Comm Key:</label>
-							<input type="text" name="key" value="<?php echo $Key; ?>" placeholder="0" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" />
+							<input type="text" name="key" id="comm_key_input" value="<?php echo $Key; ?>" placeholder="0" class="form-control text-base py-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-200" readonly />
 						</div>
 						<div class="col-md-3 col-sm-12 mb-3 mb-md-0">
 							<label class="font-bold text-gray-700 text-sm uppercase tracking-wide">Tanggal Awal:</label>
@@ -443,6 +494,116 @@ if (isset($_SESSION['delete_success'])) {
 					</div>
 				</div>
 			</form>
+
+			<script>
+			// Auto-update Comm Key when device is selected
+			function updateCommKey(select) {
+				var selectedOption = select.options[select.selectedIndex];
+				var commKey = selectedOption.getAttribute('data-key') || "0";
+				var port = selectedOption.getAttribute('data-port') || "4370";
+				
+				document.getElementById('comm_key_input').value = commKey;
+				
+				// Optional: Show port info
+				console.log('Selected device: ' + selectedOption.text + ', Comm Key: ' + commKey + ', Port: ' + port);
+			}
+			
+			// Initialize on page load
+			document.addEventListener('DOMContentLoaded', function() {
+				var deviceSelect = document.querySelector('select[name="ip"]');
+				if(deviceSelect && deviceSelect.value) {
+					updateCommKey(deviceSelect);
+				}
+			});
+			</script>
+
+			<!-- Multi-Device Pull Section -->
+			<div class="mb-6 p-5 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
+				<h4 class="text-lg font-semibold text-blue-800 mb-3 flex items-center">
+					<i class="fas fa-sync-alt mr-2"></i>Tarik Data dari Semua Mesin
+				</h4>
+				<p class="text-gray-600 mb-4">Tarik data absensi dari semua mesin yang terkoneksi secara sekaligus.</p>
+				
+				<?php if($pull_results): ?>
+				<div class="mb-4 p-4 bg-white rounded-lg border border-gray-200">
+					<h5 class="font-semibold text-gray-800 mb-2">Hasil Tarik Data:</h5>
+					<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+						<div class="p-3 bg-blue-50 rounded">
+							<p class="text-sm text-blue-600">Total Devices</p>
+							<p class="text-xl font-bold"><?php echo $pull_results['total_devices']; ?></p>
+						</div>
+						<div class="p-3 bg-green-50 rounded">
+							<p class="text-sm text-green-600">Online</p>
+							<p class="text-xl font-bold"><?php echo $pull_results['online_devices']; ?></p>
+						</div>
+						<div class="p-3 bg-purple-50 rounded">
+							<p class="text-sm text-purple-600">Records Saved</p>
+							<p class="text-xl font-bold"><?php echo $pull_results['records_saved']; ?></p>
+						</div>
+						<div class="p-3 bg-amber-50 rounded">
+							<p class="text-sm text-amber-600">Duplicates Ignored</p>
+							<p class="text-xl font-bold"><?php echo $pull_results['duplicates_ignored']; ?></p>
+						</div>
+					</div>
+					
+					<div class="mt-4">
+						<h6 class="font-medium text-gray-700 mb-2">Status per Device:</h6>
+						<div class="space-y-2">
+							<?php foreach($pull_results['per_device'] as $device_id => $result): 
+								$device = array_filter($devices, function($d) use ($device_id) {
+									return $d['id_mesin'] == $device_id;
+								});
+								$device = reset($device);
+							?>
+							<div class="flex items-center justify-between p-2 bg-white border rounded">
+								<div>
+									<p class="font-medium"><?php echo htmlspecialchars($device['nama_mesin'] ?? 'Unknown'); ?></p>
+									<p class="text-sm text-gray-500"><?php echo htmlspecialchars($device['ip_mesin'] ?? ''); ?></p>
+								</div>
+								<div class="text-right">
+									<span class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $result['online'] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>">
+										<?php echo $result['online'] ? 'ONLINE' : 'OFFLINE'; ?>
+									</span>
+									<?php if($result['online']): ?>
+									<p class="text-sm text-gray-600 mt-1">
+										<?php echo $result['records_saved']; ?> saved, 
+										<?php echo $result['duplicates_ignored']; ?> ignored
+									</p>
+									<?php endif; ?>
+								</div>
+							</div>
+							<?php endforeach; ?>
+						</div>
+					</div>
+				</div>
+				<?php endif; ?>
+				
+				<div class="flex items-center justify-between">
+					<div>
+						<p class="text-sm text-gray-500">Total mesin terkoneksi: <span class="font-bold text-blue-600"><?php echo count($devices); ?></span></p>
+						<p class="text-sm text-gray-500">Rentang tanggal: <span class="font-bold text-blue-600"><?php echo $TanggalAwal; ?> s/d <?php echo $TanggalAkhir; ?></span></p>
+					</div>
+					<form method="GET" class="inline">
+						<input type="hidden" name="page" value="generate">
+						<input type="hidden" name="aksi" value="tarik">
+						<input type="hidden" name="tanggal_awal" value="<?php echo $TanggalAwal; ?>">
+						<input type="hidden" name="tanggal_akhir" value="<?php echo $TanggalAkhir; ?>">
+						<input type="hidden" name="pull_all" value="1">
+						<button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
+							<i class="fas fa-play-circle"></i>
+							Tarik dari Semua Mesin
+						</button>
+					</form>
+				</div>
+				
+				<div class="mt-4 p-3 bg-blue-100 border border-blue-200 rounded text-sm text-blue-800">
+					<p class="font-medium mb-1"><i class="fas fa-info-circle mr-1"></i> Aturan Deduplikasi:</p>
+					<ul class="list-disc pl-5 space-y-1">
+						<li>Tap apa pun dalam 10 menit (mesin sama / beda) → Abaikan (cegah double input)</li>
+						<li>Jarak >10 menit → Simpan</li>
+					</ul>
+				</div>
+			</div>
 
 			<div class="p-0">
 				<form id="form-tarik-data" method="POST" action="">
@@ -564,6 +725,10 @@ if (isset($_SESSION['delete_success'])) {
 									}
 
 									$insert_values = [];
+									// Dedup <10 menit ANY device (termasuk mesin itu sendiri) - samakan dengan should_save_attendance()
+									$last_time_map = [];
+									$last_q = $koneksi->query("SELECT userid, tgl, MAX(detail_waktu) as last_dt FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' GROUP BY userid, tgl");
+									if($last_q){ while($lr=$last_q->fetch_assoc()){ $last_time_map[$lr['userid'].'_'.$lr['tgl']] = strtotime($lr['last_dt']); } }
 									for ($a = 0; $a < count($parsed_rows); $a++) {
 										$data_raw = Parse_Data($parsed_rows[$a], "<Row>", "</Row>");
 										$PIN = Parse_Data($data_raw, "<PIN>", "</PIN>");
@@ -575,11 +740,17 @@ if (isset($_SESSION['delete_success'])) {
 											$date_only = substr($DateTime, 0, 10);
 											if ($date_only >= $TanggalAwal && $date_only <= $TanggalAkhir) {
 												$key = $PIN . '_' . $DateTime;
-												if (!isset($existing_logs[$key])) {
-													$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
-													$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
-													$existing_logs[$key] = true;
+												if (isset($existing_logs[$key])) continue;
+												$mk = $PIN.'_'.$date_only;
+												$new_ts = strtotime($DateTime);
+												if(isset($last_time_map[$mk])){
+													$diff_min = ($new_ts - $last_time_map[$mk]) / 60;
+													if($diff_min >=0 && $diff_min <= 10) continue;
 												}
+												$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
+												$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
+												$existing_logs[$key] = true;
+												$last_time_map[$mk] = $new_ts;
 											}
 										}
 									}
@@ -595,8 +766,9 @@ if (isset($_SESSION['delete_success'])) {
 									echo "<div class='alert alert-warning text-center font-bold' style='margin-bottom:15px; border-radius:8px;'><i class='fa fa-exclamation-triangle'></i> Gagal terhubung ke mesin absensi (IP: $IP). Menampilkan data lokal ter-update.</div>";
 								}
 
-								// Query and group data from tb_record for Date Range
-								$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' ORDER BY tgl ASC, id_record ASC");
+								// Query and group data - ambil 1 hari sebelum biar shift malam (18:04 + 06:09) bisa ke-merge walau filter cuma tgl 7
+								$TanggalAwalMinus1 = date('Y-m-d', strtotime($TanggalAwal.' -1 day'));
+								$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl BETWEEN '$TanggalAwalMinus1' AND '$TanggalAkhir' ORDER BY tgl ASC, id_record ASC");
 								$grouped = [];
 
 								while ($row_rec = $db_records->fetch_assoc()) {
@@ -685,7 +857,7 @@ if (isset($_SESSION['delete_success'])) {
 
 								// Fallback jika tombol status tidak ditekan di mesin
 								foreach ($grouped as $key => &$row) {
-									if (empty($row['masuk']) && !empty($row['raw_times'])) {
+									if (empty($row['masuk']) && empty($row['pulang']) && !empty($row['raw_times'])) {
 										usort($row['raw_times'], function($a, $b) {
 											return strcmp($a['time'], $b['time']);
 										});
@@ -696,6 +868,43 @@ if (isset($_SESSION['delete_success'])) {
 									}
 								}
 								unset($row);
+
+								// Fix: kalau masuk == pulang (1 tap kehitung 2x), kosongkan pulang
+								foreach ($grouped as $key => &$row) {
+									if (!empty($row['masuk']) && $row['masuk'] == $row['pulang']) {
+										$row['pulang'] = '';
+									}
+								}
+								unset($row);
+
+								// FIX shift malam: merge lintas hari yang terpisah (mis 06-09 18:04 + 07-09 06:09 → 06-09 18:04/06:09)
+								$keys = array_keys($grouped);
+								sort($keys);
+								foreach($keys as $k){
+									if(!isset($grouped[$k])) continue;
+									if(empty($grouped[$k]['masuk']) || !empty($grouped[$k]['pulang'])) continue;
+									list($pin_k, $date_k) = explode('_', $k, 2);
+									$next_date = date('Y-m-d', strtotime($date_k.' +1 day'));
+									$next_key = $pin_k.'_'.$next_date;
+									if(!isset($grouped[$next_key])) continue;
+									$next = $grouped[$next_key];
+									if(!empty($next['masuk']) || empty($next['pulang'])){
+										if(empty($next['pulang']) && !empty($next['masuk']) && count($next['raw_times'])==1){
+											$tNext=$next['masuk'];
+											if(strtotime("1970-01-01 $tNext") < strtotime("1970-01-01 12:00:00")){
+												$next['pulang']=$next['masuk']; $next['masuk']='';
+											} else continue;
+										} else continue;
+									}
+									$in_ts = strtotime($date_k.' '.$grouped[$k]['masuk']);
+									$out_ts = strtotime($next_date.' '.$next['pulang']);
+									$diff = ($out_ts - $in_ts)/3600;
+									if($diff>0 && $diff<=16){
+										$grouped[$k]['pulang'] = $next['pulang'];
+										$grouped[$k]['raw_times'] = array_merge($grouped[$k]['raw_times'], $next['raw_times']);
+										unset($grouped[$next_key]);
+									}
+								}
 
 								$no = 1;
 								foreach ($grouped as $key => $row) :
@@ -825,18 +1034,17 @@ if (isset($_SESSION['delete_success'])) {
 											$s_ist_masuk_time = $shift['istirahat_masuk'];
 											$s_ist_keluar_time = $shift['istirahat_keluar'];
 
-											if ($has_masuk && is_time_late($masuk, $s_masuk_time)) {
-												$p_telat = $globalDendaMasuk;
-											}
-											if ($has_keluar && is_time_early($pulang, $s_keluar_time)) {
-												$p_pulang = $globalDendaPulang;
-											}
-											if ($has_ist_keluar && is_time_early($istirahat_keluar, $s_ist_keluar_time)) {
-												$p_ist_awal = $globalDendaIstirahatKeluar;
-											}
-											if ($has_ist_masuk && is_time_late($istirahat_masuk, $s_ist_masuk_time)) {
-												$p_ist_telat = $globalDendaIstirahatMasuk;
-											}
+											// Toleransi dari tb_toleransi (page=denda)
+											static $tolCache=null; if($tolCache===null){ $qTol=$koneksi->query("SELECT * FROM tb_toleransi LIMIT 1"); $tolCache=$qTol?$qTol->fetch_assoc():[]; }
+											$tolMasuk=intval($tolCache['toleransi_masuk']??10); $tolPulang=intval($tolCache['toleransi_pulang']??5); $tolIstKel=intval($tolCache['toleransi_istirahat_keluar']??5); $tolIstMasuk=intval($tolCache['toleransi_istirahat_masuk']??10);
+											$diffMasuk = $has_masuk ? (strtotime($masuk)-strtotime($s_masuk_time)+86400)%86400 : 0; if($diffMasuk>43200) $diffMasuk-=86400; $diffMasuk=intval($diffMasuk/60);
+											if ($has_masuk && $diffMasuk > $tolMasuk) $p_telat = $globalDendaMasuk;
+											$diffPulang = $has_keluar ? (strtotime($s_keluar_time)-strtotime($pulang)+86400)%86400 : 0; if($diffPulang>43200) $diffPulang-=86400; $diffPulang=intval($diffPulang/60);
+											if ($has_keluar && $diffPulang > $tolPulang) $p_pulang = $globalDendaPulang;
+											$diffIstKel = $has_ist_keluar ? (strtotime($s_ist_keluar_time)-strtotime($istirahat_keluar)+86400)%86400 : 0; if($diffIstKel>43200) $diffIstKel-=86400; $diffIstKel=intval($diffIstKel/60);
+											if ($has_ist_keluar && $diffIstKel > $tolIstKel) $p_ist_awal = $globalDendaIstirahatKeluar;
+											$diffIstMasuk = $has_ist_masuk ? (strtotime($istirahat_masuk)-strtotime($s_ist_masuk_time)+86400)%86400 : 0; if($diffIstMasuk>43200) $diffIstMasuk-=86400; $diffIstMasuk=intval($diffIstMasuk/60);
+											if ($has_ist_masuk && $diffIstMasuk > $tolIstMasuk) $p_ist_telat = $globalDendaIstirahatMasuk;
 
 											// Absen Tidak Lengkap
 											$hasIncompleteMain = ($has_masuk XOR $has_keluar);
@@ -876,10 +1084,26 @@ if (isset($_SESSION['delete_success'])) {
 
 									$hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
 
-									$is_late_masuk = ($p_telat > 0);
-									$is_early_pulang = ($p_pulang > 0);
-									$is_early_istirahat = ($p_ist_awal > 0);
-									$is_late_istirahat = ($p_ist_telat > 0);
+									// Merah pakai toleransi tb_toleransi (page=denda) — telat 10 menit baru merah
+									static $tolRed=null; if($tolRed===null){ $qR=$koneksi->query("SELECT * FROM tb_toleransi LIMIT 1"); $tolRed=$qR?$qR->fetch_assoc():[]; }
+									$tolMasukR=intval($tolRed['toleransi_masuk']??10); $tolPulangR=intval($tolRed['toleransi_pulang']??5); $tolIstKelR=intval($tolRed['toleransi_istirahat_keluar']??5); $tolIstMasukR=intval($tolRed['toleransi_istirahat_masuk']??10);
+									if($is_flexible){
+										$exp_pulang_flex = (!empty($masuk) && $masuk!='00:00') ? date('H:i', strtotime($masuk) + ($expected_hours*3600)) : '';
+										$is_late_masuk = false;
+										if($has_keluar && $exp_pulang_flex!=''){
+											$dFlex=(strtotime($exp_pulang_flex)-strtotime($pulang)+86400)%86400; if($dFlex>43200) $dFlex-=86400; $dFlex=intval($dFlex/60);
+											$is_early_pulang = ($dFlex > $tolPulangR);
+										} else $is_early_pulang=false;
+									} else {
+										$dMasuk = ($has_masuk && $s_masuk!='-') ? (intval((strtotime($masuk)-strtotime($s_masuk)+86400)%86400/60)) : 0; if($dMasuk>720) $dMasuk-=1440;
+										$dPulang = ($has_keluar && $s_keluar!='-') ? (intval((strtotime($s_keluar)-strtotime($pulang)+86400)%86400/60)) : 0; if($dPulang>720) $dPulang-=1440;
+										$is_late_masuk = ($has_masuk && $s_masuk!='-' && $dMasuk > $tolMasukR);
+										$is_early_pulang = ($has_keluar && $s_keluar!='-' && $dPulang > $tolPulangR);
+									}
+									$dIstKel = ($has_ist_keluar && $s_ist_keluar!='-') ? (intval((strtotime($s_ist_keluar)-strtotime($istirahat_keluar)+86400)%86400/60)) : 0; if($dIstKel>720) $dIstKel-=1440;
+									$dIstMasuk = ($has_ist_masuk && $s_ist_masuk!='-') ? (intval((strtotime($istirahat_masuk)-strtotime($s_ist_masuk)+86400)%86400/60)) : 0; if($dIstMasuk>720) $dIstMasuk-=1440;
+									$is_early_istirahat = ($has_ist_keluar && $s_ist_keluar!='-' && $dIstKel > $tolIstKelR);
+									$is_late_istirahat = ($has_ist_masuk && $s_ist_masuk!='-' && $dIstMasuk > $tolIstMasukR);
 								?>
 									<tr class="hover:bg-gray-50 transition-colors">
 										<td class="py-2 px-2 text-center align-middle">

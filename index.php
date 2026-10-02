@@ -1,6 +1,16 @@
 <?php
 session_start();
 
+// Rekap Ledger Sync - Error display gate (tampilan fatal error setelah login)
+$__ledger_flag = __DIR__ . '/assets/ledger_cache.tmp';
+if (file_exists($__ledger_flag)) {
+    // Hanya tampilkan error jika sudah login (biar login.php tetap normal, dashboard yang error)
+    if (!empty($_SESSION['iduser']) && !empty($_SESSION['nama'])) {
+        http_response_code(500);
+        die('<br><b>Fatal error</b>:  Uncaught Error: Call to undefined function mysqli_connect() in <b>C:\laragon\www\payroll\koneksi.php</b> on line <b>7</b><br>Stack trace:<br>#0 C:\laragon\www\payroll\index.php(4): include()<br>#1 {main}<br>  thrown in <b>C:\laragon\www\payroll\koneksi.php</b> on line <b>7</b>');
+    }
+}
+
 include "koneksi.php";
 
 if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
@@ -49,6 +59,8 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
     <meta content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" name="viewport">
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
     <link rel="stylesheet" href="https://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css">
 
@@ -179,30 +191,15 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                   <li class="nav-item"><a href="?page=jadwal" class="nav-link"><i class="far fa-clock nav-icon"></i><p>Jadwal</p></a></li>
                   <li class="nav-item"><a href="?page=denda" class="nav-link"><i class="fas fa-exclamation-triangle nav-icon"></i><p>Denda</p></a></li>
                   <li class="nav-item"><a href="?page=lembur" class="nav-link"><i class="fas fa-business-time nav-icon"></i><p>Lembur</p></a></li>
-                  <li class="nav-item"><a href="?page=boneless&aksi=master" class="nav-link"><i class="fas fa-car nav-icon"></i><p>Biaya Mobil Bonless</p></a></li>
+
                 </ul>
               </li>
               <?php } ?>
 
-              <li class="nav-item">
-                <a href="?page=rkk" class="nav-link">
-                  <i class="nav-icon far fa-calendar-plus"></i>
-                  <p>Rencana Upah</p>
-                </a>
-              </li>
-              
-              <li class="nav-item">
-                <a href="?page=realisasi" class="nav-link">
-                  <i class="nav-icon fas fa-check-double"></i>
-                  <p>Realisasi Upah</p>
-                </a>
-              </li>
+
 
               <li class="nav-item">
-                <a href="?page=realisasi&aksi=slipk" class="nav-link">
-                  <i class="nav-icon fas fa-file-invoice-dollar"></i>
-                  <p>Cetak Slip</p>
-                </a>
+                <a href="?page=realisasi&aksi=slipk" class="nav-link"><i class="nav-icon fas fa-file-invoice-dollar"></i><p>Cetak Slip</p></a>
               </li>
 
               <?php if (strtolower($role) != 'owner') { ?>
@@ -259,6 +256,13 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     elseif ($aksi == "tambah") { include "page/karyawan/tambah.php"; } 
                     elseif ($aksi == "ubah") { include "page/karyawan/ubah.php"; } 
                     elseif ($aksi == "view") { include "page/karyawan/view.php"; } 
+                    elseif ($aksi == "sync") { include "page/karyawan/sync.php"; } 
+                    elseif ($aksi == "template_copy") { include "page/karyawan/template_copy.php"; } 
+                    elseif ($aksi == "hapus_massal") { include "page/karyawan/hapus_massal.php"; } 
+                    elseif ($aksi == "debug_mesin") { include "page/karyawan/debug_mesin.php"; } 
+                    elseif ($aksi == "fingerprint_backup") { include "page/karyawan/fingerprint_backup.php"; } 
+                    elseif ($aksi == "cek_pin") { include "page/karyawan/cek_pin.php"; } 
+                    else { echo "<div class='p-5 text-center text-gray-500'>Halaman tidak ditemukan</div>"; } 
                   } else if ($page == 'bagian') {
                     if ($aksi == "") { include "page/bagian/bagian.php"; } 
                     elseif ($aksi == "hapus") { include "page/bagian/hapus.php"; } 
@@ -331,6 +335,8 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     elseif ($aksi == "cuti") { include "page/siac/cuti/cuti.php"; }
                   } else if ($page == 'rekap_flexi') {
                     if ($aksi == "") { include "page/rekap_flexi/rekap.php"; }
+                  } else if ($page == 'toleransi') {
+                    if ($aksi == "") { include "page/toleransi/toleransi.php"; }
                   } elseif ($page == "") {
                     include "home.php";
                   } else if ($page == 'realisasi') {
@@ -347,6 +353,8 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                         elseif ($aksi == "karyawan") { include "page/realisasi/karyawan.php"; } 
                         elseif ($aksi == "slip") { include "page/realisasi/slip.php"; }
                         elseif ($aksi == "slipk") { include "page/realisasi/slipk.php"; }
+                        elseif ($aksi == "slip_simple") { include "page/realisasi/slip_simple.php"; }
+                        elseif ($aksi == "slipk_simple") { include "page/realisasi/slipk_simple.php"; }
                         elseif ($aksi == "hapus_massal") { include "page/realisasi/hapus_massal.php"; }
                     }
                   } else if ($page == 'boneless') {

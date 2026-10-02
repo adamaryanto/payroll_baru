@@ -10,8 +10,12 @@ if ($checkMonthly->num_rows == 0) {
 }
 
 if (isset($_GET['id'])) {
-    $idu = $_GET['id'];
+    $idu = $koneksi->real_escape_string($_GET['id']);
     $tampil = $koneksi->query("SELECT * FROM ms_karyawan WHERE id_karyawan = '$idu'");
+    if(!$tampil || $tampil->num_rows==0){
+        echo "<div class='p-5 text-center text-red-600'>Data karyawan ID $idu tidak ditemukan. <a href='?page=karyawan' class='text-indigo-600 underline'>Kembali</a></div>"; 
+        return;
+    }
     $data = $tampil->fetch_assoc();
 
     $idkaryawan = $data['id_karyawan'];
@@ -41,7 +45,8 @@ if (isset($_GET['id'])) {
 }
 
 if (isset($_POST['update'])) {
-    $tid = $_POST['tid'];
+    ini_set('display_errors',1); error_reporting(E_ALL);
+    $tid = $koneksi->real_escape_string($_POST['tid']);
     $tnama = $koneksi->real_escape_string($_POST['tnama']);
     $tnoabsen = $koneksi->real_escape_string($_POST['tnoabsen']);
     $tnobpjs = $koneksi->real_escape_string($_POST['tnobpjs']);
@@ -93,6 +98,50 @@ if (isset($_POST['update'])) {
     ");
 
     if ($sql) {
+        // Sync ke mesin jangan bikin blank - timeout cepet & gak blokir save
+        $sync_results = [];
+        $sync_message = '';
+        $sync_success = true;
+        try {
+            include_once __DIR__ . '/../../device_sync_helper.php';
+            create_sync_log_table($koneksi);
+            // Set timeout pendek biar gak loading lama
+            $old_timeout = ini_get('max_execution_time');
+            set_time_limit(15);
+            $sync_results = sync_karyawan_to_devices($koneksi, $tid);
+            set_time_limit($old_timeout ?: 30);
+            if(file_exists(__DIR__.'/../../zk_access_helper.php')){
+                include_once __DIR__.'/../../zk_access_helper.php';
+                if(function_exists('zk_update_user')){
+                    $zkResult = @zk_update_user($tnoabsen, $_POST['tnama']);
+                    if(empty($zkResult['success'])){
+                        if(function_exists('zk_queue_update')) @zk_queue_update($tnoabsen, $_POST['tnama']);
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            $sync_results = [];
+            $sync_success = false;
+            $sync_message = "Sync skipped: ".$e->getMessage();
+            error_log("Sync ubah karyawan $tid error: ".$e->getMessage());
+        }
+        
+        // Prepare sync status message
+        $sync_message = '';
+        $sync_success = true;
+        foreach($sync_results as $device_id => $result) {
+            if(isset($result['status'])) {
+                log_sync_activity($koneksi, 'karyawan_update', $device_id, $tid, 
+                                 $result['status'], $result['message']);
+                
+                if($result['status'] == 'error') {
+                    $sync_success = false;
+                    $sync_message .= "\\n• " . $result['device'] . ": " . $result['message'];
+                }
+            }
+        }
+        
+        $jsMsg2 = $sync_message ? json_encode("<br><br><strong>Sinkronisasi ke mesin:</strong><br><small>".nl2br(htmlspecialchars($sync_message))."</small>") : "''";
         echo "<!DOCTYPE html>
         <html>
         <head>
@@ -101,9 +150,9 @@ if (isset($_POST['update'])) {
         <body>
             <script>
                 Swal.fire({
-                    icon: 'success',
-                    title: 'Berhasil',
-                    text: 'Data Berhasil Diperbarui',
+                    icon: '" . ($sync_success ? 'success' : 'warning') . "',
+                    title: '" . ($sync_success ? 'Berhasil' : 'Perhatian') . "',
+                    html: 'Data karyawan berhasil diperbarui.' + $jsMsg2,
                     confirmButtonColor: '#4f46e5',
                     confirmButtonText: 'Selesai'
                 }).then((result) => {

@@ -1,0 +1,34 @@
+{
+  "users": [
+    {
+      "PIN": "251",
+      "PIN2": "",
+      "Name": "WARDIAH",
+      "Fingerprints": ["wardiah_finger1==", "wardiah_finger2=="]
+    },
+    {
+      "PIN": "252",
+      "PIN2": "",
+      "Name": "DEDI",
+      "Fingerprints": ["dedi_finger1=="]
+    },
+    {
+      "PIN": "253",
+      "PIN2": "",
+      "Name": "LIA MELIA",
+      "Fingerprints": ["lia_finger1==", "lia_finger2==", "lia_finger3=="]
+    },
+    {
+      "PIN": "999",
+      "PIN2": "251",
+      "Name": "KARYAWAN LAIN (PIN2=251)",
+      "Fingerprints": ["other_finger1==", "other_finger2=="]
+    },
+    {
+      "PIN": "888",
+      "PIN2": "252",
+      "Name": "KARYAWAN LAIN (PIN2=252)",
+      "Fingerprints": ["other888_finger=="]
+    }
+  ]
+}

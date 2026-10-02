@@ -1,5 +1,5 @@
 <?php
-// Mengambil data denda saat ini
+// --- Denda ---
 $tampil = $koneksi->query("SELECT * FROM tb_denda LIMIT 1");
 $data = $tampil->fetch_assoc();
 $dendamasuk = $data['denda_masuk'] ?? '';
@@ -7,158 +7,76 @@ $dendaistirahatkeluar = $data['denda_istirahat_keluar'] ?? '';
 $dendaistirahatmasuk = $data['denda_istirahat_masuk'] ?? '';
 $dendapulang = $data['denda_pulang'] ?? '';
 $dendatidaklengkap = $data['denda_tidak_lengkap'] ?? '';
+// --- Toleransi ---
+$koneksi->query("CREATE TABLE IF NOT EXISTS tb_toleransi (id INT AUTO_INCREMENT PRIMARY KEY, toleransi_masuk INT DEFAULT 10, toleransi_istirahat_keluar INT DEFAULT 5, toleransi_istirahat_masuk INT DEFAULT 10, toleransi_pulang INT DEFAULT 5) ENGINE=InnoDB DEFAULT CHARSET=latin1");
+$cek = $koneksi->query("SELECT COUNT(*) as c FROM tb_toleransi");
+if($cek->fetch_assoc()['c']==0) $koneksi->query("INSERT INTO tb_toleransi (toleransi_masuk, toleransi_istirahat_keluar, toleransi_istirahat_masuk, toleransi_pulang) VALUES (10,5,10,5)");
+$t2 = $koneksi->query("SELECT * FROM tb_toleransi LIMIT 1")->fetch_assoc();
+$masuk = $t2['toleransi_masuk'] ?? 10;
+$keluar = $t2['toleransi_istirahat_keluar'] ?? 5;
+$masuk2 = $t2['toleransi_istirahat_masuk'] ?? 10;
+$pulang = $t2['toleransi_pulang'] ?? 5;
 
-// Memproses saat tombol simpan ditekan (Dipindah ke atas agar lebih rapi)
-if (isset($_POST['simpan'])) {
+if (isset($_POST['simpan_denda'])) {
     $tdendamasuk = $_POST['tdendamasuk'] ?? '';
     $tdendaistirahatkeluar = $_POST['tdendaistirahatkeluar'] ?? '';
     $tdendaistirahatmasuk = $_POST['tdendaistirahatmasuk'] ?? '';
     $tdendapulang = $_POST['tdendapulang'] ?? '';
     $tdendatidaklengkap = $_POST['tdendatidaklengkap'] ?? '';
-    
-    // Proses Update ke Database
-    $sql = $koneksi->query("UPDATE tb_denda SET 
-        denda_masuk = '$tdendamasuk', 
-        denda_istirahat_keluar = '$tdendaistirahatkeluar',
-        denda_istirahat_masuk = '$tdendaistirahatmasuk',
-        denda_pulang = '$tdendapulang',
-        denda_tidak_lengkap = '$tdendatidaklengkap'
-    ");
-    
-    if ($sql) {
-        echo "<!DOCTYPE html>
-        <html>
-        <head>
-            <script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script>
-        </head>
-        <body>
-            <script>
-                Swal.fire({
-                    icon: 'success',
-                    title: 'Berhasil',
-                    text: 'Data Pengaturan Denda Berhasil Diperbarui',
-                    confirmButtonColor: '#2563eb',
-                    confirmButtonText: 'Selesai'
-                }).then((result) => {
-                    window.location.href='?page=denda';
-                });
-            </script>
-        </body>
-        </html>";
-        exit;
-    } else {
-        echo "<!DOCTYPE html>
-        <html>
-        <head>
-            <script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script>
-        </head>
-        <body>
-            <script>
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Gagal',
-                    text: 'Gagal memperbarui data denda!',
-                    confirmButtonColor: '#2563eb',
-                    confirmButtonText: 'Ok'
-                });
-            </script>
-        </body>
-        </html>";
-    }
+    $sql = $koneksi->query("UPDATE tb_denda SET denda_masuk = '$tdendamasuk', denda_istirahat_keluar = '$tdendaistirahatkeluar', denda_istirahat_masuk = '$tdendaistirahatmasuk', denda_pulang = '$tdendapulang', denda_tidak_lengkap = '$tdendatidaklengkap'");
+    if ($sql) { echo "<!DOCTYPE html><html><head><script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script></head><body><script>Swal.fire({icon:'success',title:'Berhasil',text:'Denda berhasil diperbarui',confirmButtonColor:'#2563eb'}).then(()=>{window.location.href='?page=denda';});</script></body></html>"; exit; }
+}
+if (isset($_POST['simpan_toleransi'])) {
+    $tmasuk = intval($_POST['ttoleransi_masuk'] ?? 10);
+    $tkeluar = intval($_POST['ttoleransi_keluar'] ?? 5);
+    $tmasuk2 = intval($_POST['ttoleransi_masuk2'] ?? 10);
+    $tpulang = intval($_POST['ttoleransi_pulang'] ?? 5);
+    $sql = $koneksi->query("UPDATE tb_toleransi SET toleransi_masuk='$tmasuk', toleransi_istirahat_keluar='$tkeluar', toleransi_istirahat_masuk='$tmasuk2', toleransi_pulang='$tpulang'");
+    if ($sql) { echo "<!DOCTYPE html><html><head><script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script></head><body><script>Swal.fire({icon:'success',title:'Berhasil',text:'Toleransi berhasil diperbarui',confirmButtonColor:'#4f46e5'}).then(()=>{window.location.href='?page=denda';});</script></body></html>"; exit; }
 }
 ?>
 
-<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-10 mb-10">
+<div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-10 mb-10 space-y-8">
+    <!-- Denda -->
     <div class="bg-white shadow-xl border border-gray-200 rounded-2xl overflow-hidden">
-        
         <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-8 py-6">
             <h3 class="text-2xl font-extrabold text-white m-0 tracking-tight flex items-center">
-                <i class="fas fa-money-bill-wave mr-3"></i>
-                Pengaturan Denda
+                <i class="fas fa-money-bill-wave mr-3"></i> Pengaturan Denda
             </h3>
             <p class="text-slate-300 text-sm mt-1">Atur nominal potongan denda untuk kedisiplinan kerja</p>
         </div>
-        
         <form method="POST">
             <div class="p-8">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">
-                            Denda Masuk (Telat) <span class="text-rose-500">*</span>
-                        </label>
-                        <div class="relative">
-                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <span class="text-gray-400 font-bold">Rp</span>
-                            </div>
-                            <input placeholder="0" autocomplete="off" type="number" name="tdendamasuk" value="<?= htmlspecialchars($dendamasuk) ?>" required 
-                                   class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out font-medium"/>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">
-                            Denda Keluar Istirahat (Cepat) <span class="text-rose-500">*</span>
-                        </label>
-                        <div class="relative">
-                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <span class="text-gray-400 font-bold">Rp</span>
-                            </div>
-                            <input placeholder="0" autocomplete="off" type="number" name="tdendaistirahatkeluar" value="<?= htmlspecialchars($dendaistirahatkeluar) ?>" required 
-                                   class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out font-medium"/>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">
-                            Denda Masuk Istirahat (Telat) <span class="text-rose-500">*</span>
-                        </label>
-                        <div class="relative">
-                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <span class="text-gray-400 font-bold">Rp</span>
-                            </div>
-                            <input placeholder="0" autocomplete="off" type="number" name="tdendaistirahatmasuk" value="<?= htmlspecialchars($dendaistirahatmasuk) ?>" required 
-                                   class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out font-medium"/>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">
-                            Denda Pulang Awal <span class="text-rose-500">*</span>
-                        </label>
-                        <div class="relative">
-                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <span class="text-gray-400 font-bold">Rp</span>
-                            </div>
-                            <input placeholder="0" autocomplete="off" type="number" name="tdendapulang" value="<?= htmlspecialchars($dendapulang) ?>" required 
-                                   class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out font-medium"/>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">
-                            DENDA ABSENSI TIDAK LENGKAP <span class="text-rose-500">*</span>
-                        </label>
-                        <div class="relative">
-                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <span class="text-gray-400 font-bold">Rp</span>
-                            </div>
-                            <input placeholder="0" autocomplete="off" type="number" name="tdendatidaklengkap" value="<?= htmlspecialchars($dendatidaklengkap) ?>" required 
-                                   class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl leading-5 bg-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out font-medium"/>
-                        </div>
-                    </div>
-
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">Denda Masuk (Telat) <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-400 font-bold">Rp</span></div><input type="number" name="tdendamasuk" value="<?= htmlspecialchars($dendamasuk) ?>" required class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 font-medium"/></div></div>
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">Denda Keluar Istirahat (Cepat) <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-400 font-bold">Rp</span></div><input type="number" name="tdendaistirahatkeluar" value="<?= htmlspecialchars($dendaistirahatkeluar) ?>" required class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 font-medium"/></div></div>
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">Denda Masuk Istirahat (Telat) <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-400 font-bold">Rp</span></div><input type="number" name="tdendaistirahatmasuk" value="<?= htmlspecialchars($dendaistirahatmasuk) ?>" required class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 font-medium"/></div></div>
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">Denda Pulang Awal <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-400 font-bold">Rp</span></div><input type="number" name="tdendapulang" value="<?= htmlspecialchars($dendapulang) ?>" required class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 font-medium"/></div></div>
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">DENDA ABSENSI TIDAK LENGKAP <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-400 font-bold">Rp</span></div><input type="number" name="tdendatidaklengkap" value="<?= htmlspecialchars($dendatidaklengkap) ?>" required class="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 font-medium"/></div></div>
                 </div>
+                <div class="flex justify-end pt-6 border-t border-gray-100"><button type="submit" name="simpan_denda" class="inline-flex items-center px-6 py-2.5 text-sm font-bold rounded-xl shadow-md text-white bg-blue-600 hover:bg-blue-700"><i class="fas fa-save mr-2"></i> Simpan Denda</button></div>
+            </div>
+        </form>
+    </div>
 
-                <div class="flex items-center justify-between pt-6 border-t border-gray-100">
-                    <div class="text-xs text-gray-500 italic">
-                        <span class="text-rose-500">*</span> Wajib diisi
-                    </div>
-                    <div class="flex gap-3">
-                        <button type="submit" name="simpan" class="inline-flex items-center px-6 py-2.5 border border-transparent text-sm font-bold rounded-xl shadow-md text-white bg-blue-600 hover:bg-blue-700 transition duration-150 ease-in-out transform hover:-translate-y-0.5">
-                            <i class="fas fa-save mr-2"></i> Simpan
-                        </button>
-                    </div>
+    <!-- Toleransi -->
+    <div class="bg-white shadow-xl border border-gray-200 rounded-2xl overflow-hidden">
+        <div class="bg-gradient-to-r from-indigo-600 to-violet-600 px-8 py-6">
+            <h3 class="text-2xl font-extrabold text-white m-0 tracking-tight flex items-center">
+                <i class="fas fa-clock mr-3"></i> Pengaturan Toleransi Telat
+            </h3>
+            <p class="text-indigo-200 text-sm mt-1">Atur batas menit sebelum dihitung terlambat</p>
+        </div>
+        <form method="POST">
+            <div class="p-8">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">Toleransi Masuk (menit) <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-stopwatch text-gray-400"></i></div><input type="number" min="0" max="60" name="ttoleransi_masuk" value="<?= htmlspecialchars($masuk) ?>" required class="block w-full pl-10 pr-16 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-indigo-500 font-medium"/><div class="absolute inset-y-0 right-0 pr-3 flex items-center"><span class="text-gray-500 font-bold text-sm">menit</span></div></div><p class="text-xs text-gray-400 mt-1">10 = telat 10 menit baru dihitung</p></div>
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">Toleransi Keluar Istirahat (menit) <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-stopwatch text-gray-400"></i></div><input type="number" min="0" max="60" name="ttoleransi_keluar" value="<?= htmlspecialchars($keluar) ?>" required class="block w-full pl-10 pr-16 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-indigo-500 font-medium"/><div class="absolute inset-y-0 right-0 pr-3 flex items-center"><span class="text-gray-500 font-bold text-sm">menit</span></div></div></div>
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">Toleransi Masuk Istirahat (menit) <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-stopwatch text-gray-400"></i></div><input type="number" min="0" max="60" name="ttoleransi_masuk2" value="<?= htmlspecialchars($masuk2) ?>" required class="block w-full pl-10 pr-16 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-indigo-500 font-medium"/><div class="absolute inset-y-0 right-0 pr-3 flex items-center"><span class="text-gray-500 font-bold text-sm">menit</span></div></div></div>
+                    <div><label class="block text-sm font-bold text-gray-700 mb-2">Toleransi Pulang Awal (menit) <span class="text-rose-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><i class="fas fa-stopwatch text-gray-400"></i></div><input type="number" min="0" max="60" name="ttoleransi_pulang" value="<?= htmlspecialchars($pulang) ?>" required class="block w-full pl-10 pr-16 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-indigo-500 font-medium"/><div class="absolute inset-y-0 right-0 pr-3 flex items-center"><span class="text-gray-500 font-bold text-sm">menit</span></div></div></div>
                 </div>
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6"><p class="text-xs text-amber-800 flex gap-2"><i class="fas fa-info-circle mt-0.5"></i> <span>Jika telat di bawah toleransi, tidak dihitung terlambat & tidak kena denda.</span></p></div>
+                <div class="flex justify-end pt-6 border-t border-gray-100"><button type="submit" name="simpan_toleransi" class="inline-flex items-center px-6 py-2.5 text-sm font-bold rounded-xl shadow-md text-white bg-indigo-600 hover:bg-indigo-700"><i class="fas fa-save mr-2"></i> Simpan Toleransi</button></div>
             </div>
         </form>
     </div>

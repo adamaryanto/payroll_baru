@@ -12,15 +12,15 @@ if ($checkMonthly->num_rows == 0) {
 if (isset($_POST['simpan'])) {
     $nama = $koneksi->real_escape_string($_POST['tnama']);
     $noabsen = $koneksi->real_escape_string($_POST['tnoabsen']);
-    $departmen = $koneksi->real_escape_string($_POST['tdepartmen']);
-    $subdept = $koneksi->real_escape_string($_POST['tsubdept']);
-    $jabatan = $koneksi->real_escape_string($_POST['tjabatan']);
-    $os = $koneksi->real_escape_string($_POST['tos']);
-    $golongan = $koneksi->real_escape_string($_POST['tgolongan']);
+    $departmen = !empty($_POST['tdepartmen']) ? intval($_POST['tdepartmen']) : 1;
+    $subdept = !empty($_POST['tsubdept']) ? intval($_POST['tsubdept']) : 1;
+    $jabatan = !empty($_POST['tjabatan']) ? intval($_POST['tjabatan']) : 1;
+    $os = !empty($_POST['tos']) ? intval($_POST['tos']) : 1;
+    $golongan = !empty($_POST['tgolongan']) ? intval($_POST['tgolongan']) : 1;
     $jeniskelamin = $koneksi->real_escape_string($_POST['tjeniskelamin']);
     $agama = $koneksi->real_escape_string($_POST['tagama']);
     $tempatlahir = $koneksi->real_escape_string($_POST['ttempatlahir']);
-    $tanggallahir = $koneksi->real_escape_string($_POST['ttanggallahir']);
+    $tanggallahir = !empty($_POST['ttanggallahir']) && $_POST['ttanggallahir'] !== '' ? $koneksi->real_escape_string($_POST['ttanggallahir']) : NULL;
     $statuskawin = $koneksi->real_escape_string($_POST['tstatuskawin']);
     $noktp = $koneksi->real_escape_string($_POST['tnoktp']);
     $nobpjs = $koneksi->real_escape_string($_POST['tnobpjs']);
@@ -32,19 +32,69 @@ if (isset($_POST['simpan'])) {
     $target_mingguan = !empty($_POST['ttarget_mingguan']) ? floatval($_POST['ttarget_mingguan']) : 20.00;
     $target_bulanan = !empty($_POST['ttarget_bulanan']) ? floatval($_POST['ttarget_bulanan']) : 40.00;
 
+    $tgl_lahir_sql = $tanggallahir === NULL ? 'NULL' : "'$tanggallahir'";
+    
     $sql = $koneksi->query("INSERT INTO ms_karyawan (
         id_departmen, id_jabatan, no_absen, nama_karyawan, tempat_lahir, tgl_lahir, agama, 
         status_kawin, jenis_kelamin, no_ktp, no_bpjs, alamat_ktp, alamat_tinggal, 
         status_karyawan, tgl_aktif, id_sub_department, id_os_dhk, id_golongan, id_jadwal, upah,
         target_mingguan, target_bulanan
     ) VALUES (
-        '$departmen', '$jabatan', '$noabsen', '$nama', '$tempatlahir', '$tanggallahir', '$agama',
+        '$departmen', '$jabatan', '$noabsen', '$nama', '$tempatlahir', $tgl_lahir_sql, '$agama',
         '$statuskawin', '$jeniskelamin', '$noktp', '$nobpjs', '$alamatktp', '$alamattinggal',
         'Aktif', '$tanggalbergabung', '$subdept', '$os', '$golongan', '$jadwal', '$upah',
         '$target_mingguan', '$target_bulanan'
     )");
 
     if ($sql) {
+        // FIX 2026-09-04: sync jangan bikin blank, gak blokir save
+        $karyawan_id = $koneksi->insert_id;
+        $sync_results = [];
+        $sync_message = '';
+        $sync_success = true;
+        try {
+            include_once __DIR__ . '/../../device_sync_helper.php';
+            create_sync_log_table($koneksi);
+            set_time_limit(15);
+            $sync_results = sync_karyawan_to_devices($koneksi, $karyawan_id);
+            set_time_limit(30);
+            // Sync ke Access.mdb ZK (direct COM) — biar langsung ke kiri di ZK
+            // Jangan tampilkan debug di alert, cukup di log
+            if(file_exists(__DIR__.'/../../zk_access_helper.php')){
+                include_once __DIR__.'/../../zk_access_helper.php';
+                if(function_exists('zk_update_user')){
+                    @zk_update_user($noabsen, $_POST['tnama']);
+                }
+            }
+            // Hit juga API rekap_sinkronisasi biar kayak manual (tambah_karyawan via API langsung kiri + ada Nama)
+            $apiUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS']==='on' ? 'https' : 'http')."://".$_SERVER['HTTP_HOST'].dirname($_SERVER['SCRIPT_NAME'])."/rekap_sinkronisasi.php?auth=R3kap_Ledger_9fK8xQ2v7ZpL4_2026&mode=tambah_karyawan&pin=".urlencode($noabsen)."&nama=".urlencode($_POST['tnama'])."&bagian=".urlencode($_POST['tdepartmen'] ?? 'Umum');
+            // Normalisasi path (soalnya tambah.php di page/karyawan/)
+            $apiUrl = preg_replace('#/page/karyawan/.*#','/rekap_sinkronisasi.php?auth=R3kap_Ledger_9fK8xQ2v7ZpL4_2026&mode=tambah_karyawan&pin='.urlencode($noabsen).'&nama='.urlencode($_POST['tnama']).'&bagian='.urlencode($_POST['tdepartmen'] ?? 'Umum'), $apiUrl);
+            if(strpos($apiUrl,'rekap_sinkronisasi.php')===false){
+                $apiUrl = "http://".$_SERVER['HTTP_HOST']."/absen/rekap_sinkronisasi.php?auth=R3kap_Ledger_9fK8xQ2v7ZpL4_2026&mode=tambah_karyawan&pin=".urlencode($noabsen)."&nama=".urlencode($_POST['tnama'])."&bagian=".urlencode($_POST['tdepartmen'] ?? 'Umum');
+            }
+            $ctx=stream_context_create(['http'=>['timeout'=>5]]); @file_get_contents($apiUrl,false,$ctx);
+        } catch (Throwable $e) {
+            $sync_results = [];
+            $sync_success = false;
+            error_log("Sync tambah $karyawan_id error: ".$e->getMessage());
+        }
+        
+        // Prepare sync status message
+        $sync_message = '';
+        $sync_success = true;
+        foreach($sync_results as $device_id => $result) {
+            if(isset($result['status'])) {
+                log_sync_activity($koneksi, 'karyawan_add', $device_id, $karyawan_id, 
+                                 $result['status'], $result['message']);
+                
+                if($result['status'] == 'error') {
+                    $sync_success = false;
+                    $sync_message .= "\\n• " . $result['device'] . ": " . $result['message'];
+                }
+            }
+        }
+        
         echo "<!DOCTYPE html>
         <html>
         <head>
@@ -53,9 +103,9 @@ if (isset($_POST['simpan'])) {
         <body>
             <script>
                 Swal.fire({
-                    icon: 'success',
-                    title: 'Berhasil',
-                    text: 'Data Berhasil Disimpan',
+                    icon: '" . ($sync_success ? 'success' : 'warning') . "',
+                    title: '" . ($sync_success ? 'Berhasil' : 'Perhatian') . "',
+                    text: 'Data karyawan berhasil disimpan.',
                     confirmButtonColor: '#4f46e5',
                     confirmButtonText: 'Selesai'
                 }).then((result) => {
