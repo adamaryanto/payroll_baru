@@ -9,6 +9,46 @@
  */
 include_once __DIR__ . '/device_sync_helper.php';
 
+/**
+ * Konfigurasi jadwal auto-sweep (diatur dari web, dibaca script CLI).
+ * Tabel: tb_sweep_config (1 baris, id=1).
+ */
+function sweep_ensure_config($koneksi) {
+    $koneksi->query("CREATE TABLE IF NOT EXISTS tb_sweep_config (
+        id INT PRIMARY KEY,
+        enabled TINYINT(1) NOT NULL DEFAULT 0,
+        interval_jam INT NOT NULL DEFAULT 4,
+        master_id VARCHAR(20) NOT NULL DEFAULT 'auto',
+        last_run DATETIME NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $koneksi->query("INSERT IGNORE INTO tb_sweep_config (id, enabled, interval_jam, master_id, last_run) VALUES (1, 0, 4, 'auto', NULL)");
+}
+
+function sweep_get_config($koneksi) {
+    sweep_ensure_config($koneksi);
+    $r = $koneksi->query("SELECT enabled, interval_jam, master_id, last_run FROM tb_sweep_config WHERE id=1 LIMIT 1");
+    $c = $r ? $r->fetch_assoc() : null;
+    return [
+        'enabled' => !empty($c['enabled']),
+        'interval_jam' => max(1, (int)($c['interval_jam'] ?? 4)),
+        'master_id' => ($c['master_id'] ?? 'auto') === '' ? 'auto' : $c['master_id'],
+        'last_run' => $c['last_run'] ?? null,
+    ];
+}
+
+function sweep_save_config($koneksi, $enabled, $interval_jam, $master_id) {
+    sweep_ensure_config($koneksi);
+    $interval_jam = max(1, min(168, (int)$interval_jam));
+    $master_id = trim((string)$master_id) === '' ? 'auto' : trim((string)$master_id);
+    $sql = "UPDATE tb_sweep_config SET enabled=" . ($enabled ? 1 : 0) . ", interval_jam=$interval_jam, master_id='" . $koneksi->real_escape_string($master_id) . "' WHERE id=1";
+    return $koneksi->query($sql);
+}
+
+function sweep_touch_run($koneksi) {
+    sweep_ensure_config($koneksi);
+    return $koneksi->query("UPDATE tb_sweep_config SET last_run=NOW() WHERE id=1");
+}
+
 function fp_ensure_table($koneksi) {
     $sql = "CREATE TABLE IF NOT EXISTS tb_fingerprint (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -126,6 +166,14 @@ function fp_restore_to_device($koneksi, $device_id, $pin) {
     }
     $rows = fp_get_from_db($koneksi, $pin, false);
     if (empty($rows)) return ['success' => false, 'message' => "PIN $pin belum ada backup di database", 'ok' => 0, 'fail' => 0];
+    // Pastikan akun user ada di target (template butuh user exists), pakai nama dari web
+    $nm = '';
+    $qr = $koneksi->query("SELECT nama_karyawan FROM ms_karyawan WHERE no_absen='" . $koneksi->real_escape_string($pin) . "' LIMIT 1");
+    if ($qr && ($rw = $qr->fetch_assoc())) $nm = $rw['nama_karyawan'];
+    if ($nm === '') $nm = 'User ' . $pin;
+    $safeNm = htmlspecialchars($nm, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+    $ck = $dev['comm_key'] ?? 0;
+    send_soap_request($dev['ip_mesin'], $dev['port'], "<SetUserInfo><ArgComKey xsi:type=\"xsd:integer\">{$ck}</ArgComKey><Arg><PIN xsi:type=\"xsd:integer\">{$pin}</PIN><Name xsi:type=\"xsd:string\">{$safeNm}</Name><Password xsi:type=\"xsd:string\"></Password><Group xsi:type=\"xsd:integer\">1</Group><Privilege xsi:type=\"xsd:integer\">0</Privilege></Arg></SetUserInfo>");
     $ok = 0; $fail = 0;
     // set_fingerprint_template() sudah ada di device_sync_helper.php
     foreach ($rows as $r) {

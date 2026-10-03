@@ -740,6 +740,30 @@ function delete_karyawan_from_devices($koneksi, $nama, $dry_run = true, $force =
                 'message' => $vmsg
             ];
         } else {
+            // Semua varian ditolak — tapi pastikan dulu via baca ulang (firmware kadang
+            // ngerjain tapi balas Result 1, seperti kasus copy template kemarin)
+            sleep(2);
+            $vresp0 = send_soap_request($device['ip_mesin'], $device['port'], $check_soap);
+            $gone = false;
+            if($vresp0){
+                $gone = true;
+                foreach($real_pins as $rp){
+                    $f = function_exists('soap_pin_exists') ? soap_pin_exists($vresp0, $rp) : (strpos($vresp0,"<PIN>{$rp}</PIN>")!==false);
+                    if($f){ $gone = false; break; }
+                }
+            }
+            if($gone){
+                $vmsg0 = 'Karyawan sudah tidak ada di mesin (terverifikasi hilang walau mesin menolak perintah hapus)';
+                log_sync_activity($koneksi, 'delete_verify', $device['id_mesin'], $nama, 'success', $vmsg0);
+                $results[$device['id_mesin']] = [
+                    'device' => $device['nama_mesin'],
+                    'status' => 'success',
+                    'message' => $vmsg0
+                ];
+                send_soap_request($device['ip_mesin'], $device['port'], $refresh ?? "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></RefreshData>");
+                send_soap_request($device['ip_mesin'], $device['port'], $soapEna ?? "<EnableDevice><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></EnableDevice>");
+                continue;
+            }
             $detail = !empty($failReasons) ? ' — ' . implode(' | ', array_unique($failReasons)) : ' (mesin tidak membalas)';
             $results[$device['id_mesin']] = [
                 'device' => $device['nama_mesin'],
@@ -865,8 +889,9 @@ function refresh_device($ip, $port, $comm_key = 0) {
 /**
  * Set a single fingerprint template to target device
  */
-function set_fingerprint_template($target_device_ip, $target_port, $comm_key, $pin, $finger_id, $template_data, $size = 0, $valid = 1) {
+function set_fingerprint_template($target_device_ip, $target_port, $comm_key, $pin, $finger_id, $template_data, $size = 0, $valid = 1, &$reason = null) {
     if (empty($template_data)) {
+        $reason = 'template kosong';
         return false;
     }
     
@@ -879,13 +904,14 @@ function set_fingerprint_template($target_device_ip, $target_port, $comm_key, $p
     $response = send_soap_request($target_device_ip, $target_port, $soap);
 
     // Deteksi longgar seperti operasi lain (X606S sering balas tag kosong + HTTP 200)
-    if(!$response) return false;
-    $fail = (stripos($response,'Fail')!==false || stripos($response,'Error')!==false
-        || preg_match('/<Result>\s*-?[1-9]\d*\s*</', $response));
-    if($fail) return false;
-    return (strpos($response, '<Information>Success') !== false
+    if(!$response){ $reason = 'tanpa balasan (timeout/koneksi putus)'; return false; }
+    if(preg_match('/<Result>\s*(-?\d+)\s*</', $response, $mR) && (int)$mR[1] !== 0){ $reason = "ditolak (Result {$mR[1]})"; return false; }
+    if(stripos($response,'Fail')!==false || stripos($response,'Error')!==false){ $reason = 'ditolak (' . substr(trim(strip_tags($response)),0,60) . ')'; return false; }
+    $ok = (strpos($response, '<Information>Success') !== false
         || strpos($response, '<SetUserTemplateResponse>') !== false
         || (strpos($response, '200 OK') !== false && stripos($response, 'SetUserTemplate') !== false));
+    if(!$ok) $reason = 'balasan tidak dikenali (' . substr(trim(strip_tags($response)),0,60) . ')';
+    return $ok;
 }
 
 function get_attendance_from_device($device_ip, $device_port, $comm_key, $start_date, $end_date) {
@@ -1118,6 +1144,7 @@ function copy_fingerprint_template($koneksi, $no_absen, $source_device_id, $targ
         // Kirim tiap jari satu per satu
         $ok = 0; $failMsg = [];
         foreach($templates as $t){
+            $rsn = '';
             $good = set_fingerprint_template(
                 $target_device['ip_mesin'],
                 $target_device['port'],
@@ -1126,9 +1153,10 @@ function copy_fingerprint_template($koneksi, $no_absen, $source_device_id, $targ
                 (int)$t['finger_id'],
                 $t['template'],
                 (int)($t['size'] ?? 0),
-                (int)($t['valid'] ?? 1)
+                (int)($t['valid'] ?? 1),
+                $rsn
             );
-            if($good) $ok++; else $failMsg[] = 'jari ' . $t['finger_id'];
+            if($good) $ok++; else $failMsg[] = 'jari ' . $t['finger_id'] . ($rsn !== '' ? " ($rsn)" : '');
         }
         // Refresh + verifikasi baca balik di target
         send_soap_request($target_device['ip_mesin'], $target_device['port'], "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey></RefreshData>");
@@ -1139,11 +1167,12 @@ function copy_fingerprint_template($koneksi, $no_absen, $source_device_id, $targ
         $needIds = [];
         foreach($templates as $t) $needIds[] = (int)$t['finger_id'];
         $missing = array_diff($needIds, $cekIds);
-        if($ok > 0 && empty($missing)){
+        // Patokan = baca ulang, BUKAN balasan kirim (firmware kadang ngerjain tapi balas Result 1)
+        if(empty($missing)){
             $results[$target_device_id] = [
                 'device' => $target_device['nama_mesin'],
                 'status' => 'success',
-                'message' => "Copy $ok jari berhasil, terverifikasi di mesin"
+                'message' => "Copy " . count($needIds) . " jari terverifikasi di mesin" . ($ok == 0 ? " (mesin menolak saat kirim tapi template sudah ada)" : "")
             ];
         } elseif($ok > 0){
             $results[$target_device_id] = [

@@ -13,6 +13,10 @@ $qr = $koneksi->query("SELECT id_karyawan, no_absen, nama_karyawan FROM ms_karya
 if ($qr) while ($r = $qr->fetch_assoc()) $karyawan_list[] = $r;
 
 $notice = null;
+if (isset($_POST['sweep_save'])) {
+    $ok = sweep_save_config($koneksi, !empty($_POST['sweep_enabled']), intval($_POST['sweep_interval'] ?? 4), $_POST['sweep_master'] ?? 'auto');
+    $notice = $ok ? ['success' => true, 'message' => 'Jadwal auto-sweep disimpan.'] : ['success' => false, 'message' => 'Gagal simpan jadwal.'];
+}
 if (isset($_POST['fp_pull'])) {
     $notice = fp_pull_and_save($koneksi, $_POST['device_id'] ?? '', trim($_POST['pin'] ?? ''));
 }
@@ -40,6 +44,11 @@ if (isset($_POST['fp_bulk_pull'])) {
 }
 
 $summary = fp_summary($koneksi);
+$sweep_cfg = sweep_get_config($koneksi);
+$next_run = '-';
+if (!empty($sweep_cfg['last_run'])) {
+    $next_run = date('d/m/Y H:i', strtotime($sweep_cfg['last_run']) + $sweep_cfg['interval_jam'] * 3600);
+}
 ?>
 <div class="container-fluid px-2 mt-4 mb-4">
 <div class="card border-0 shadow-sm rounded-xl overflow-hidden bg-white">
@@ -66,6 +75,42 @@ $summary = fp_summary($koneksi);
 <strong class="text-indigo-800">Cara pakai:</strong> karyawan enroll jari <strong>di mesin</strong> dulu → pilih mesin + PIN → <strong>Tarik &amp; Simpan</strong> → template masuk DB.
 Kalau mesin rusak/hilang, pilih PIN yang sudah ada backup → <strong>Restore ke Mesin</strong>. Template X606S proprietary, hanya bisa di-restore ke mesin sejenis (SOAP).
 </div>
+</div>
+
+<!-- Jadwal Auto-Sweep -->
+<div class="mb-8 p-6 bg-gradient-to-r from-slate-50 to-gray-50 rounded-xl border border-gray-200">
+<h4 class="text-lg font-semibold text-gray-800 mb-1"><i class="far fa-clock mr-2"></i>Jadwal Auto-Sweep Sidik</h4>
+<p class="text-sm text-gray-500 mb-4">Sweep otomatis cek sidik baru tiap interval — tanpa klik apa-apa. Syarat: Task Scheduler di PC server jalan tiap 30 menit (<code>auto_fingerprint_sweep.bat</code>).</p>
+<form method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+<div>
+<label class="block text-sm font-semibold text-gray-700 mb-1.5">Status</label>
+<select name="sweep_enabled" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm">
+<option value="0" <?= !$sweep_cfg['enabled'] ? 'selected' : '' ?>>Mati</option>
+<option value="1" <?= $sweep_cfg['enabled'] ? 'selected' : '' ?>>Nyala</option>
+</select>
+</div>
+<div>
+<label class="block text-sm font-semibold text-gray-700 mb-1.5">Tiap berapa jam</label>
+<select name="sweep_interval" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm">
+<?php foreach ([1,2,4,6,12,24] as $h): ?>
+<option value="<?= $h ?>" <?= $sweep_cfg['interval_jam'] == $h ? 'selected' : '' ?>><?= $h ?> jam</option>
+<?php endforeach; ?>
+</select>
+</div>
+<div>
+<label class="block text-sm font-semibold text-gray-700 mb-1.5">Mesin master</label>
+<select name="sweep_master" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm">
+<option value="auto" <?= $sweep_cfg['master_id'] === 'auto' ? 'selected' : '' ?>>Otomatis (online pertama)</option>
+<?php foreach ($devices as $d): if (empty($d['id_mesin'])) continue; ?>
+<option value="<?= $d['id_mesin'] ?>" <?= (string)$sweep_cfg['master_id'] === (string)$d['id_mesin'] ? 'selected' : '' ?>><?= htmlspecialchars($d['nama_mesin']) ?></option>
+<?php endforeach; ?>
+</select>
+</div>
+<div>
+<button type="submit" name="sweep_save" value="1" class="w-full bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm"><i class="fas fa-save mr-2"></i>Simpan Jadwal</button>
+</div>
+</form>
+<p class="text-xs text-gray-400 mt-3 mb-0">Terakhir jalan: <strong><?= htmlspecialchars($sweep_cfg['last_run'] ?? '-') ?></strong> | Berikutnya: <strong><?= htmlspecialchars($next_run) ?></strong></p>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">

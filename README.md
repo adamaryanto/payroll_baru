@@ -204,3 +204,5 @@ Sistem saat ini telah melalui **Modernisasi UI (AdminLTE 3 + Tailwind CSS)**. Be
   - [ ] Solusi jika karyawan diganti staf lain saat jam kerja aktif/sedang berjalan.
 - [ ] **Database Cleanup:** (Akses Backend SQL / `database/db_hr.sql`)
   - [ ] Menghapus dan membersihkan tabel terbengkalai dengan hati-hati **tanpa merusak histori absensi** dan profil pegawai sejauh ini.
+#   p a y r o l l _ n e w  
+ 
