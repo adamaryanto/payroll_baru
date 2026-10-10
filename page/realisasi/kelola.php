@@ -107,6 +107,7 @@ if (isset($_GET['id'])) {
         LEFT JOIN tb_rkk_detail RD ON A.id_rkk_detail = RD.id_rkk_detail
         LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal
         WHERE A.id_realisasi = '$idrealisasi'
+        ORDER BY nama_departmen ASC, nama_tampil ASC
     ");
 
     $tampilrkk = $koneksi->query("SELECT * FROM tb_rkk WHERE id_rkk = '$idrkk'");
@@ -624,47 +625,68 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                 <div class="text-sm font-bold text-blue-600 uppercase tracking-wider mb-3 ml-3 border-l-4 border-blue-600 pl-2"> <i class="fas fa-users mr-1.5"></i> List Karyawan</div>
 
                 <div class="p-0">
-                    <div class="table-responsive px-3 md:px-4 py-4">
-                        <table class="table table-hover table-clean align-middle mb-0 table-modern" id="dataTables-example">
-                            <thead class="bg-gray-50 border-b border-gray-200">
-                                <tr>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">No</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">No Absen</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Nama Karyawan</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Departemen</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Sub Bagian</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">OS/DHK</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Golongan</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Jam Masuk</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Jam Pulang</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Istirahat Keluar</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Istirahat Masuk</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Absen Masuk</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Absen Pulang</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Absen Istirahat Keluar</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Absen Istirahat Masuk</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah Pokok</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Lembur</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Pot. Telat</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Pot. Istirahat (Awal)</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Pot. Istirahat (Telat)</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Denda Pulang</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Denda Tidak Absen</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Pot. Lain</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah Setelah Potongan</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Hasil</th>
-                                    <?php if (strtolower($_SESSION['role']) != 'admin hr') { ?>
-                                        <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Aksi</th>
-                                    <?php } ?>
-                                </tr>
-                            </thead>
+                    <div class="px-3 md:px-4 py-4">
+                        <?php
+                        // Daftar grup (departemen) yang ada di realisasi ini + jumlah orang
+                        $q_gfilter = $koneksi->query("SELECT COALESCE(D.nama_departmen,'') as nm, COUNT(*) as jml
+                            FROM tb_realisasi_detail AD
+                            LEFT JOIN tb_rkk_detail RD ON AD.id_rkk_detail = RD.id_rkk_detail
+                            LEFT JOIN ms_departmen D ON D.id_departmen = COALESCE(NULLIF(AD.id_departmen,0), RD.id_departmen)
+                            WHERE AD.id_realisasi = '$idrealisasi' GROUP BY nm ORDER BY nm ASC");
+                        $grup_list = [];
+                        if ($q_gfilter) while ($gr = $q_gfilter->fetch_assoc()) {
+                            $dn = strtoupper(trim($gr['nm']) ?: 'LAINNYA');
+                            $grup_list[$dn] = ($grup_list[$dn] ?? 0) + (int)$gr['jml'];
+                        }
+                        ksort($grup_list);
+                        ?>
+                        <div class="mb-3 flex flex-col md:flex-row gap-2">
+                            <select id="filterGrup" class="w-full md:max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm font-bold text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">Semua Grup</option>
+                                <?php foreach ($grup_list as $gn => $gj): ?>
+                                    <option value="<?= htmlspecialchars($gn) ?>"><?= htmlspecialchars($gn) ?> (<?= $gj ?>)</option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input id="cariKaryawan" type="text" placeholder="Cari nama / posisi..." autocomplete="off"
+                                class="w-full md:max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div class="table-responsive rounded-lg border border-gray-800">
+                            <table class="table table-hover table-clean align-middle mb-0 table-modern w-full min-w-[1600px]" id="tabel-realisasi">
                             <tbody>
                                 <?php
                                 $no = 1;
                                 $total = 0;
                                 $jml_active = 0;
+                                $last_dept = null;
+                                $ncol = (strtolower($_SESSION['role']) != 'admin hr') ? 16 : 15;
+                                $aksi_th = (strtolower($_SESSION['role']) != 'admin hr') ? '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Aksi</th>' : '';
 
                                 while ($data = $tampil->fetch_assoc()) {
+                                    if (trim((string)($data['nama_tampil'] ?? '')) === '') continue;
+                                    $dept_now = strtoupper(trim((string)($data['nama_departmen'] ?? '')) ?: 'LAINNYA');
+                                    if ($dept_now !== $last_dept) {
+                                        $last_dept = $dept_now;
+                                        $no = 1;
+                                        $dept_esc = htmlspecialchars($dept_now, ENT_QUOTES);
+                                        echo '<tr class="dept-separator" data-dept="' . $dept_esc . '"><td colspan="' . $ncol . '" data-label="Bagian" style="background:#B2A1C6; font-weight:bold; text-align:center; text-transform:uppercase; padding:8px 4px;">' . htmlspecialchars($dept_now) . '</td></tr>';
+                                        echo '<tr class="grp-header d-none d-md-table-row" data-dept="' . $dept_esc . '">'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">No</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Nama Sesuai KTP</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Paraf Pekerja</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">OS/DHK</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Golongan</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Posisi</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Jam Kerja</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Jam Masuk</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Istirahat<br>Masuk</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Jam Pulang</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#EFEFEF;">Hasil Kerja</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Upah</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Potongan</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Lembur</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Upah Dibayar</th>'
+                                            . $aksi_th . '</tr>';
+                                    }
                                     $upah = $data['upahkaryawan'];
 
                                     $isFullMissing = (empty($data['r_jam_masuk']) || strtotime($data['r_jam_masuk']) == strtotime('00:00:00')) &&
@@ -744,10 +766,9 @@ function bulkSavePenalties($koneksi, $id_realisasi)
 
                                     $upah_setelah_potongan = $finalUpah + $finalLembur - $potTelatValue - $potIstirahatKeluarValue - $potIstirahatMasukValue - $potLainnyaValue - $potPulangValue - $potTidakLengkapValue;
                                 ?>
-                                    <tr>
+                                    <tr class="data-row" data-dept="<?= htmlspecialchars($dept_now) ?>">
                                         <td data-label="No"><?php echo $no; ?></td>
-                                        <td data-label="No Absen"><?php echo $data['no_absen_tampil']; ?></td>
-                                        <td data-label="Nama Karyawan">
+                                        <td data-label="Nama Sesuai KTP">
                                             <strong>
                                                 <?php echo $data['nama_tampil']; ?>
                                                 <?php if (!empty($data['menggantikan'])) echo " <span class='text-blue-600 font-bold'>(Menggantikan " . $data['menggantikan'] . ")</span>"; ?>
@@ -771,56 +792,44 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                                 <?php endif; ?>
                                             </div>
                                         </td>
-                                        <td data-label="Departemen"><?php echo $data['nama_departmen']; ?></td>
-                                        <td data-label="Sub Bagian"><?php echo $data['nama_sub_department']; ?></td>
-                                        <td data-label="OS/DHK"><?php echo $data['label_os'] ?: ($data['OS_DHK'] ?? 'MHS'); ?></td>
-                                        <td data-label="Golongan"><?php echo $data['label_gol'] ?: ($data['golongan'] ?? 'Harian'); ?></td>
-                                        <td data-label="Jam Masuk"><?php echo $data['r_jam_masuk'] ?: ''; ?></td>
-                                        <td data-label="Jam Pulang"><?php echo $data['r_jam_keluar'] ?: ''; ?></td>
-                                        <td data-label="Istirahat Keluar"><?php echo $data['r_istirahat_keluar'] ?: ''; ?></td>
-                                        <td data-label="Istirahat Masuk"><?php echo $data['r_istirahat_masuk'] ?: ''; ?></td>
-                                        <td data-label="Absen Masuk" class="<?php
+                                        <td data-label="Paraf Pekerja" align="center"></td>
+                                        <td data-label="OS/DHK" align="center"><?php echo $data['label_os'] ?: ($data['OS_DHK'] ?? 'MHS'); ?></td>
+                                        <td data-label="Golongan" align="center"><?php echo $data['label_gol'] ?: ($data['golongan'] ?? 'Harian'); ?></td>
+                                        <td data-label="Posisi">
+                                            <?php echo $data['nama_sub_department']; ?>
+                                            <div class="text-[11px] text-gray-500"><?php echo $data['nama_departmen']; ?></div>
+                                        </td>
+                                        <td data-label="Jam Kerja" align="center"><?php echo $data['r_jam_masuk'] ?: ''; ?></td>
+                                        <td data-label="Jam Masuk" align="center" class="<?php
                                                                             $isEmptyLog = (empty($data['ra_masuk']) || $data['ra_masuk'] == '00:00:00');
-                                                                            $hasSchedule = !empty($data['r_jam_masuk']); 
+                                                                            $hasSchedule = !empty($data['r_jam_masuk']);
                                                                             echo ($hasSchedule && $isEmptyLog) || $isLate ? 'bg-red-custom' : '';
                                                                             ?>"><?php echo (empty($data['ra_masuk']) || $data['ra_masuk'] == '00:00:00') ? '' : $data['ra_masuk']; ?></td>
-                                        <td data-label="Absen Pulang" class="<?php
-                                                                                $isEmptyLogOut = (empty($data['ra_keluar']) || $data['ra_keluar'] == '00:00:00');
-                                                                                $hasScheduleOut = !empty($data['r_jam_keluar']);
-                                                                                echo ($hasScheduleOut && $isEmptyLogOut) ? 'bg-red-custom' : ($isEarlyOut || $potLainnyaValue > 0 || $potTidakLengkapValue > 0 ? 'bg-yellow-custom' : '');
-                                                                                ?>"><?php echo (empty($data['ra_keluar']) || $data['ra_keluar'] == '00:00:00') ? '' : $data['ra_keluar']; ?></td>
-                                        <td data-label="Absen Istirahat Keluar" class="<?php
-                                                                                        $isEmptyLogIstK = (empty($data['ra_istirahat_keluar']) || $data['ra_istirahat_keluar'] == '00:00:00');
-                                                                                        $hasScheduleIstK = !empty($data['r_istirahat_keluar']) && $data['r_istirahat_keluar'] != '00:00:00';
-                                                                                        echo ($hasScheduleIstK && $isEmptyLogIstK) || $isEarlyBreak ? 'bg-red-custom' : '';
-                                                                                        ?>"><?php echo (empty($data['ra_istirahat_keluar']) || $data['ra_istirahat_keluar'] == '00:00:00') ? '' : $data['ra_istirahat_keluar']; ?></td>
-                                        <td data-label="Absen Istirahat Masuk" class="<?php
+                                        <td data-label="Istirahat Masuk" align="center" class="<?php
                                                                                         $isEmptyLogIstM = (empty($data['ra_istirahat_masuk']) || $data['ra_istirahat_masuk'] == '00:00:00');
                                                                                         $hasScheduleIstM = !empty($data['r_istirahat_masuk']) && $data['r_istirahat_masuk'] != '00:00:00';
                                                                                         echo ($hasScheduleIstM && $isEmptyLogIstM) || $isLateBreak ? 'bg-red-custom' : '';
                                                                                         ?>"><?php echo (empty($data['ra_istirahat_masuk']) || $data['ra_istirahat_masuk'] == '00:00:00') ? '' : $data['ra_istirahat_masuk']; ?></td>
-
-                                        <td data-label="Upah Pokok" class="text-right">
+                                        <td data-label="Jam Pulang" align="center" class="<?php
+                                                                                $isEmptyLogOut = (empty($data['ra_keluar']) || $data['ra_keluar'] == '00:00:00');
+                                                                                $hasScheduleOut = !empty($data['r_jam_keluar']);
+                                                                                echo ($hasScheduleOut && $isEmptyLogOut) ? 'bg-red-custom' : ($isEarlyOut ? 'bg-yellow-custom' : '');
+                                                                                ?>"><?php echo (empty($data['ra_keluar']) || $data['ra_keluar'] == '00:00:00') ? '' : $data['ra_keluar']; ?></td>
+                                        <td data-label="Hasil Kerja"><?php echo $data['hasil_kerja']; ?></td>
+                                        <td data-label="Upah" class="text-right">
                                             <?= rupiah($finalUpah) ?>
                                         </td>
+                                        <?php $potTotal = $potTelatValue + $potIstirahatKeluarValue + $potIstirahatMasukValue + $potPulangValue + $potTidakLengkapValue + $potLainnyaValue; ?>
+                                        <td data-label="Potongan" class="text-right <?php echo ($potTotal > 0) ? 'bg-red-custom' : ''; ?>"><?= rupiah($potTotal) ?></td>
                                         <td data-label="Lembur" class="text-right">
                                             <?= rupiah($finalLembur) ?>
                                         </td>
-                                        <td data-label="Pot. Telat" class="text-right <?php echo ($potTelatValue > 0) ? 'bg-red-custom' : ''; ?>"><?= rupiah($potTelatValue) ?></td>
-                                        <td data-label="Pot. Istirahat (Awal)" class="text-right <?php echo ($potIstirahatKeluarValue > 0) ? 'bg-red-custom' : ''; ?>"><?= rupiah($potIstirahatKeluarValue) ?></td>
-                                        <td data-label="Pot. Istirahat (Telat)" class="text-right <?php echo ($potIstirahatMasukValue > 0) ? 'bg-red-custom' : ''; ?>"><?= rupiah($potIstirahatMasukValue) ?></td>
-                                        <td data-label="Pot. Pulang" class="text-right <?php echo ($potPulangValue > 0) ? 'bg-yellow-custom' : ''; ?>"><?= rupiah($potPulangValue) ?></td>
-                                        <td data-label="Pot. Tidak Absen" class="text-right <?php echo ($potTidakLengkapValue > 0) ? 'bg-yellow-custom' : ''; ?>"><?= rupiah($potTidakLengkapValue) ?></td>
-                                        <td data-label="Pot. Lain" class="text-right <?php echo ($potLainnyaValue > 0) ? 'bg-yellow-custom' : ''; ?>">
-                                            <?= rupiah($potLainnyaValue) ?>
-                                        </td>
                                         <?php if ($data['status_rkk'] != 'Digantikan') $jml_active++; ?>
-                                        <td data-label="Upah Setelah Potongan" class="text-right font-black text-blue-700">
+                                        <td data-label="Upah Dibayar" class="text-right font-black text-blue-700">
                                             <?= rupiah($upah_setelah_potongan) ?>
                                         </td>
                                         <?php $total += $upah_setelah_potongan; ?>
 
-                                        <td data-label="Hasil"><?php echo $data['hasil_kerja']; ?></td>
                                         <?php if (strtolower($_SESSION['role']) != 'admin hr') { ?>
                                             <td data-label="Aksi">
                                                 <div class="flex-action">
@@ -1031,9 +1040,30 @@ function bulkSavePenalties($koneksi, $id_realisasi)
     }
 
     #dataTables-example thead th {
-        padding: 8px 4px !important;
-        font-size: 11px !important;
-    }
+          padding: 8px 4px !important;
+          font-size: 11px !important;
+          white-space: nowrap !important;
+          vertical-align: middle !important;
+          text-align: center !important;
+      }
+
+      /* Grid seperti Excel di layar besar (satu tabel utuh, header ikut geser; di HP tetap mode kartu) */
+      @media screen and (min-width: 769px) {
+          #tabel-realisasi thead th,
+          #tabel-realisasi tbody td {
+              border: 1px solid #1f2937 !important;
+          }
+          #tabel-realisasi tbody td {
+              padding: 6px 6px !important;
+          }
+      }
+
+      /* Matikan ikon & highlight sorting DataTables agar header rata seperti Excel */
+      #dataTables-example thead th.sorting,
+      #dataTables-example thead th.sorting_asc,
+      #dataTables-example thead th.sorting_desc {
+          background-image: none !important;
+      }
 
     .table-clean tbody td {
         vertical-align: middle;
@@ -1307,33 +1337,26 @@ function bulkSavePenalties($koneksi, $id_realisasi)
 
 <script>
     $(document).ready(function() {
-        var isMobile = window.innerWidth <= 768;
-
-        $('#dataTables-example').DataTable({
-            pageLength: 25,
-            autoWidth: false,
-            responsive: false,
-            scrollX: !isMobile,
-            autoWidth: !isMobile,
-            lengthMenu: [
-                [10, 25, 50, -1],
-                [10, 25, 50, "Semua"]
-            ],
-            language: {
-                search: "Cari:",
-                searchPlaceholder: "Cari data...",
-                lengthMenu: "Tampilkan _MENU_ data",
-                info: "Menampilkan _START_ s/d _END_ dari _TOTAL_ data",
-                paginate: {
-                    previous: "Prev",
-                    next: "Next"
-                }
-            }
-        });
-
-        // Dihapus style .css('float') bawaan agar tidak bentrok dengan flexbox pada mobile
-        $('.dataTables_filter').addClass('mb-3');
-        $('.dataTables_length').addClass('mb-3');
+        // Filter grup + cari karyawan
+        function applyTabelFilter() {
+            const q = $('#cariKaryawan').val().toLowerCase();
+            const g = $('#filterGrup').val();
+            const vis = {};
+            $('#tabel-realisasi tbody tr.data-row').each(function() {
+                const $tr = $(this);
+                const okG = (g === '' || $tr.data('dept') === g);
+                const okQ = ($tr.text().toLowerCase().indexOf(q) !== -1);
+                const show = okG && okQ;
+                $tr.toggle(show);
+                if (show) vis[$tr.data('dept')] = true;
+            });
+            $('#tabel-realisasi tbody tr.dept-separator, #tabel-realisasi tbody tr.grp-header').each(function() {
+                const d = $(this).data('dept');
+                $(this).toggle(!!vis[d] && (g === '' || d === g));
+            });
+        }
+        $(document).on('input', '#cariKaryawan', applyTabelFilter);
+        $(document).on('change', '#filterGrup', applyTabelFilter);
 
         // SweetAlert Cleanup (Sync) Confirmation
         $('#btn-cleanup').on('click', function() {

@@ -3,101 +3,75 @@ include "../../koneksi.php";
 
 $id = isset($_GET['id']) ? $_GET['id'] : '';
 
-// 1. Ambil data Header Boneless
 $queryHeader = $koneksi->query("SELECT * FROM tb_boneless WHERE id_boneless = '$id'");
 $header = $queryHeader->fetch_assoc();
-$tgl = $header['tgl'];
+$tgl = $header['tgl'] ?? date('Y-m-d');
+$tgl_file = $tgl ? date('d-m-Y', strtotime($tgl)) : 'TanpaTanggal';
 
-// 2. Ambil data Detail Boneless
-$queryDetail = $koneksi->query("SELECT * FROM tb_boneless_detail WHERE id_boneless = '$id'");
+$queryDetail = $koneksi->query("SELECT * FROM tb_boneless_detail WHERE id_boneless = '$id' ORDER BY id_boneless_detail ASC");
+$details = [];
+while ($r = $queryDetail->fetch_assoc()) $details[] = $r;
 
-// 3. Ambil Biaya Pabrik (Total Upah Realisasi pada tanggal yang sama)
-$queryUpah = $koneksi->query("
-        SUM(RD.r_upah + RD.lembur - RD.r_potongan_lainnya - 
-            IF(RD.r_jam_masuk > J.shift_masuk AND RD.r_jam_masuk != '00:00:00' AND RD.ra_masuk != '00:00:00', (SELECT denda_masuk FROM tb_denda LIMIT 1), 0) -
-            IF(RD.r_istirahat_masuk > J.shift_istirahat_masuk AND RD.r_istirahat_masuk != '00:00:00' AND RD.ra_istirahat_masuk != '00:00:00', (SELECT denda_istirahat FROM tb_denda LIMIT 1), 0)
-        ) as total_upah 
-    FROM tb_realisasi_detail RD
-    LEFT JOIN tb_jadwal J ON RD.id_jadwal = J.id_jadwal
-    WHERE RD.tgl_realisasi_detail = '$tgl'
-");
-$rowUpah = $queryUpah->fetch_assoc();
-$biaya_pabrik = $rowUpah['total_upah'] ?? 0;
+$plus = array_values(array_filter($details, function($x){ return ($x['jenis'] ?? '') != 'minus'; }));
+$item1 = $plus[0] ?? ['nama_item' => 'DADA SP GACOAN', 'qty' => 0, 'harga' => 300];
+$item2 = $plus[1] ?? ['nama_item' => 'BONELESS', 'qty' => 1680, 'harga' => 800];
+
+$f_name = strtoupper($item1['nama_item']);
+$f_qty = (float)($item1['qty'] ?? 0);
+$f_hrg = abs((float)($item1['harga'] ?? 0));
+$h_name = strtoupper($item2['nama_item']);
+$h_qty = (float)($item2['qty'] ?? 0);
+$h_hrg = abs((float)($item2['harga'] ?? 0));
+
+$fmt = function($v){ return $v ? rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.') : '0'; };
+
+$nama_default = ['MULYANTI','EDAH','YUSI HASTUTIK','RUSDIANA','HARNI','CICHA MARYANA','SITI PATONAH','RUTINAH','TIARA VETI FEBRIANA'];
+
+$bd = "border:1px solid #000;";
+$fBase = "font-family:Calibri,sans-serif; font-size:18px;";
+$th = "font-weight:bold; text-align:center; vertical-align:middle;";
+$cWhite = "background:#FFFFFF;";
+$cSection = "background:#B2A1C6;";
+$cHdr = "background:#D9D9D9;";
+$cHdrL = "background:#EFEFEF;";
 
 header("Content-type: application/vnd.ms-excel");
-header("Content-Disposition: attachment; filename=Laporan_Boneless_$tgl.xls");
+header("Content-Disposition: attachment; filename=Boneless_Baru_$tgl_file.xls");
 echo "<meta charset='UTF-8'>";
 ?>
-
 <table border="1" style="border-collapse:collapse;">
-    <thead>
-        <tr>
-            <th colspan="9" style="background-color:#4f81bd; color:white; text-align:center; font-weight:bold; height:30px; font-size:14px;">
-                BAYARAN TIM BONLESS
-            </th>
-        </tr>
-    </thead>
-    <tbody>
-        <?php
-        $no = 1;
-        $total_boneless = 0;
-        while ($item = $queryDetail->fetch_assoc()) {
-            $total_boneless += $item['total'];
-            ?>
-            <tr>
-                <td style="text-align:center; width:40px; font-weight:bold;"><?= $no++ ?></td>
-                <td style="width:100px;"></td>
-                <td style="width:100px;"></td>
-                <td style="width:100px;"></td>
-                <td style="width:100px;"></td>
-                <td style="width:200px; font-weight:bold;"><?= strtoupper($item['nama_item']) ?></td>
-                <td style="text-align:right; width:100px;"><?= number_format($item['qty'], 1, ',', '.') ?></td>
-                <td style="text-align:left; width:100px; border-left:none;">Rp<?= number_format($item['harga'], 0, ',', '.') ?></td>
-                <td style="text-align:right; width:150px; font-weight:bold;">Rp <?= number_format($item['total'], 0, ',', '.') ?></td>
-            </tr>
-            <?php
-        }
-        
-        // Ensure at least 7 rows as in the image for padding if needed, but here we just follow the data
-        ?>
-        <tr style="font-weight:bold;">
-            <td colspan="5" style="text-align:center; height:25px;">TOTAL</td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td style="text-align:right;">Rp <?= number_format($total_boneless, 0, ',', '.') ?></td>
-        </tr>
-    </tbody>
-</table>
-
-<br>
-
-<table border="1" style="border-collapse:collapse;">
-    <thead>
-        <tr style="background-color:yellow; font-weight:bold; text-align:center;">
-            <th style="width:250px; height:25px;">BIAYA PABRIK</th>
-            <th style="width:100px;"></th>
-            <th style="width:100px;"></th>
-            <th style="width:150px;">BONELESS</th>
-            <th style="width:150px;">POTONG</th>
-            <th style="width:200px;">TOTAL</th>
-            <th style="width:250px;">Biaya Per mobil</th>
-        </tr>
-    </thead>
-    <tbody>
-        <?php
-        $potong = $header['jumlah_mobil'];
-        $grand_total = $biaya_pabrik + $total_boneless;
-        $biaya_per_mobil = ($potong > 0) ? ($grand_total / $potong) : 0;
-        ?>
-        <tr style="font-weight:bold; text-align:center; height:30px; font-size:14px;">
-            <td style="text-align:right;"><?= number_format($biaya_pabrik, 0, ',', '.') ?></td>
-            <td></td>
-            <td></td>
-            <td style="text-align:right;"><?= number_format($total_boneless, 0, ',', '.') ?></td>
-            <td><?= $potong ?></td>
-            <td style="text-align:right;"><?= number_format($grand_total, 0, ',', '.') ?></td>
-            <td style="text-align:right; background-color:white;">Rp<?= number_format($biaya_per_mobil, 2, ',', '.') ?></td>
-        </tr>
-    </tbody>
+    <tr><th colspan="4" style="<?php echo $fBase.$th.$cSection.$bd; ?> font-size:18px; height:23px;">BONELESS BARU</th><td style="border:0;"></td><td style="border:0;"></td><td style="border:0;"></td><td style="border:0;"></td><td style="border:0;"></td></tr>
+    <tr style="<?php echo $fBase.$th; ?>">
+        <th style="<?php echo $cHdr.$bd; ?>">No</th>
+        <th style="<?php echo $cHdr.$bd; ?>">NAMA SESUAI KTP</th>
+        <th style="<?php echo $cHdrL.$bd; ?>">HASIL KERJA</th>
+        <th style="<?php echo $cHdrL.$bd; ?>">UPAH DIBAYAR</th>
+        <th style="border:0;"></th>
+        <th style="border:0; font-weight:bold;"><?php echo $f_name; ?></th>
+        <th style="border:0;"></th>
+        <th style="border:0; font-weight:bold; text-align:center;"><?php echo $h_name; ?></th>
+        <th style="border:0;"></th>
+    </tr>
+    <?php
+    foreach ($nama_default as $idx => $nm):
+        $is_first = ($idx === 0);
+        $a_val = $is_first ? '1' : '=+A' . (5 + $idx) . '+1';
+        $c_val = $is_first ? $fmt($h_qty) : '';
+        $f_val = $is_first ? $fmt($f_qty) : '';
+        $g_val = $is_first ? '=+F6*' . $fmt($f_hrg) . '/6' : '';
+        $h_val = $is_first ? $fmt($h_qty) : '';
+        $i_val = $is_first ? '=+H6*' . $fmt($h_hrg) . '/9' : '';
+    ?>
+    <tr style="<?php echo $fBase; ?>">
+        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $a_val; ?></td>
+        <td style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $nm; ?></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $c_val; ?></td>
+        <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;">=+$G$6+$I$6</td>
+        <td style="border:0;"></td>
+        <td align="center" style="border:0;"><?php echo $f_val; ?></td>
+        <td align="right" style="border:0;"><?php echo $g_val; ?></td>
+        <td align="center" style="border:0;"><?php echo $h_val; ?></td>
+        <td align="right" style="border:0;"><?php echo $i_val; ?></td>
+    </tr>
+    <?php endforeach; ?>
 </table>

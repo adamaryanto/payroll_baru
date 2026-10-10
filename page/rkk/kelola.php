@@ -40,6 +40,8 @@ if (isset($_GET['id'])) {
     BB.nama_sub_department, 
     D.nama_departmen, 
     C.tgl_rkk, 
+    O.OS_DHK as label_os,
+    G.golongan as label_gol,
     J.keterangan as nama_shift,
     J.jam_masuk,
     J.jam_keluar,
@@ -72,7 +74,10 @@ LEFT JOIN tb_rkk C ON A.id_rkk = C.id_rkk
 LEFT JOIN ms_departmen D ON A.id_departmen = D.id_departmen
 LEFT JOIN ms_sub_department BB ON A.id_sub_department = BB.id_sub_department 
 LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal 
+LEFT JOIN ms_os_dhk O ON B.id_os_dhk = O.id_os_dhk
+LEFT JOIN ms_golongan G ON B.id_golongan = G.id_golongan
 WHERE A.id_rkk = '$idrkk'
+ORDER BY D.nama_departmen ASC, nama_tampil ASC
 ");
 } else {
   $datatglrkk = "";
@@ -154,27 +159,51 @@ if ($datastatusrkk == 3) {
     </div>
 
     <div class="p-0">
-      <div class="table-responsive px-3 md:px-4 py-4">
-        <table class="w-full text-left border-collapse table-modern" id="dataTables-example">
-          <thead class="bg-gray-100 border-b border-gray-300">
+      <div class="px-3 md:px-4 py-4">
+        <div class="mb-3">
+          <input id="cariKaryawan" type="text" placeholder="Cari nama / posisi..." autocomplete="off"
+            class="w-full md:max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div class="table-responsive rounded-lg border border-gray-800">
+          <table class="w-full text-left border-collapse table-modern min-w-[1600px]" id="tabel-rkk">
+          <thead>
             <tr>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">No</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">Karyawan</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">Penempatan</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">Shift</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">Jam</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">Upah</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">Potongan</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">No</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Nama Sesuai KTP</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Paraf Pekerja</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">OS/DHK</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Golongan</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Posisi</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Jam Kerja</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Jam Masuk</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9; white-space:normal !important; line-height:1.25;">ISTIRAHAT<br>MASUK</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Jam Pulang</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Hasil Kerja</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Upah</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Potongan</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Lembur</th>
+              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Upah Dibayar</th>
               <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase text-center">Aksi</th>
             </tr>
           </thead>
           <tbody>
             <?php
             $no = 1;
-            while ($data = $tampil->fetch_assoc()) : ?>
+            $last_dept = null;
+            while ($data = $tampil->fetch_assoc()) :
+              if (trim((string)($data['nama_tampil'] ?? '')) === '') continue;
+              $dept_now = strtoupper(trim((string)($data['nama_departmen'] ?? '')) ?: 'LAINNYA');
+              if ($dept_now !== $last_dept) :
+                $last_dept = $dept_now;
+                $no = 1;
+            ?>
+              <tr class="dept-separator">
+                <td colspan="16" data-label="Bagian" style="background:#B2A1C6; font-weight:bold; text-align:center; text-transform:uppercase; padding:8px 4px;"><?= $dept_now ?></td>
+              </tr>
+            <?php endif; ?>
               <tr>
                 <td data-label="No"><?= $no++ ?></td>
-                <td data-label="Karyawan">
+                <td data-label="Nama Sesuai KTP">
                   <span class="text-base font-bold text-gray-900"><?= $data['nama_tampil'] ?></span><br>
                   <span class="text-sm text-gray-500"><?= $data['no_absen_tampil'] ?></span>
 
@@ -202,18 +231,23 @@ if ($datastatusrkk == 3) {
                     <?php endif; ?>
                   </div>
                 </td>
-                <td data-label="Penempatan">
-                  <span class="text-base font-medium"><?= $data['nama_departmen'] ?></span><br>
-                  <span class="text-sm text-gray-600"><?= $data['nama_sub_department'] ?></span>
+                <td data-label="Paraf Pekerja" align="center"></td>
+                <td data-label="OS/DHK" align="center"><?= $data['label_os'] ?? '' ?></td>
+                <td data-label="Golongan" align="center"><?= $data['label_gol'] ?? '' ?></td>
+                <td data-label="Posisi">
+                  <span class="text-base font-medium"><?= $data['nama_sub_department'] ?></span><br>
+                  <span class="text-sm text-gray-600"><?= $data['nama_departmen'] ?></span>
                 </td>
-                <td data-label="Shift"><span class="badge bg-gray-200 text-gray-800 px-2 py-1 text-sm rounded"><?= $data['nama_shift'] ?></span></td>
-                <td data-label="Jam"><span class="text-sm font-medium"><?= $data['jam_masuk'] ?> - <?= $data['jam_keluar'] ?></span></td>
+                <td data-label="Jam Kerja" align="center"><span class="text-sm font-medium"><?= $data['jam_masuk'] ?></span></td>
+                <td data-label="Jam Masuk" align="center"></td>
+                <td data-label="Istirahat Masuk" align="center"></td>
+                <td data-label="Jam Pulang" align="center"></td>
+                <td data-label="Hasil Kerja" align="center"></td>
                 <td data-label="Upah"><span class="text-base font-semibold text-emerald-600">Rp <?= number_format($data['upahkaryawan'], 0, ',', '.') ?></span></td>
-                <td data-label="Potongan" class="text-sm leading-relaxed text-amber-700">
-                  <div>Telat: Rp <?= number_format($data['potongan_telat'], 0, ',', '.') ?></div>
-                  <div>Istirahat: Rp <?= number_format($data['potongan_istirahat'], 0, ',', '.') ?></div>
-                  <div>Lain: Rp <?= number_format($data['potongan_lainnya'], 0, ',', '.') ?></div>
-                </td>
+                <?php $potRkk = ($data['potongan_telat'] ?? 0) + ($data['potongan_istirahat'] ?? 0) + ($data['potongan_lainnya'] ?? 0); ?>
+                <td data-label="Potongan" align="right"><?= $potRkk ? 'Rp ' . number_format($potRkk, 0, ',', '.') : '' ?></td>
+                <td data-label="Lembur" align="center"></td>
+                <td data-label="Upah Dibayar"><span class="text-base font-bold text-blue-700">Rp <?= number_format($data['upahkaryawan'] - $potRkk, 0, ',', '.') ?></span></td>
                 <td data-label="Aksi">
                   <div class="aksi-buttons md:flex md:flex-col justify-center items-center">
                     <?php if ($data['status_rkk'] != 'Digantikan' && $datastatusrkk < 2) : ?>
@@ -277,6 +311,19 @@ if ($datastatusrkk == 3) {
     letter-spacing: 0.5px;
     border-bottom: 2px solid #dee2e6 !important;
     vertical-align: middle;
+    white-space: nowrap !important;
+    text-align: center !important;
+  }
+
+  /* Grid seperti Excel di layar besar (satu tabel utuh, header ikut geser; di HP tetap mode kartu) */
+  @media screen and (min-width: 769px) {
+    #tabel-rkk thead th,
+    #tabel-rkk tbody td {
+      border: 1px solid #1f2937 !important;
+    }
+    #tabel-rkk tbody td {
+      padding: 8px 8px !important;
+    }
   }
 
   .table tbody td {
@@ -462,25 +509,20 @@ if ($datastatusrkk == 3) {
 <script>
   $(document).ready(function() {
 
-    var table = $('#dataTables-example').DataTable({
-      pageLength: 10,
-      autoWidth: false,
-      responsive: false,
-      lengthMenu: [
-        [10, 25, 50, -1],
-        [10, 25, 50, "Semua"]
-      ],
-
-      language: {
-        search: "Cari Data:",
-        searchPlaceholder: "Ketik nama/shift...",
-        lengthMenu: "Tampilkan _MENU_ baris",
-        info: "Menampilkan _START_ s/d _END_ dari total _TOTAL_ data",
-        paginate: {
-          previous: "Prev",
-          next: "Next"
-        }
+    // Cari karyawan (pengganti search DataTables)
+    $(document).on('input', '#cariKaryawan', function() {
+      const q = $(this).val().toLowerCase();
+      if (q === '') {
+        $('#tabel-rkk tbody tr').show();
+        return;
       }
+      $('#tabel-rkk tbody tr').each(function() {
+        if ($(this).hasClass('dept-separator')) {
+          $(this).hide();
+          return;
+        }
+        $(this).toggle($(this).text().toLowerCase().indexOf(q) !== -1);
+      });
     });
 
     // SweetAlert Header Action

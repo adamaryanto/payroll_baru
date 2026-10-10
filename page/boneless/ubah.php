@@ -84,7 +84,12 @@ if ($simpan) {
                         </a>
                         <h3 class="text-xl font-bold m-0" style="color: #2563eb;">Ubah Data Boneless</h3>
                     </div>
-                    <span class="text-xs font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded">ID: #<?= $id ?></span>
+                    <div class="flex items-center gap-2">
+                        <a href="page/boneless/excel.php?id=<?= $id ?>" class="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded shadow-sm transition-colors">
+                            <i class="fas fa-file-excel mr-1.5"></i> Download Excel
+                        </a>
+                        <span class="text-xs font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded">ID: #<?= $id ?></span>
+                    </div>
                 </div>
 
                 <div class="p-4 md:p-5">

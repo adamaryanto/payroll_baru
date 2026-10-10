@@ -191,12 +191,21 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                   <li class="nav-item"><a href="?page=jadwal" class="nav-link"><i class="far fa-clock nav-icon"></i><p>Jadwal</p></a></li>
                   <li class="nav-item"><a href="?page=denda" class="nav-link"><i class="fas fa-exclamation-triangle nav-icon"></i><p>Denda</p></a></li>
                   <li class="nav-item"><a href="?page=lembur" class="nav-link"><i class="fas fa-business-time nav-icon"></i><p>Lembur</p></a></li>
+                  <li class="nav-item"><a href="?page=grup_borongan" class="nav-link"><i class="fas fa-boxes nav-icon"></i><p>Grup</p></a></li>
 
                 </ul>
               </li>
               <?php } ?>
 
 
+
+              <li class="nav-item">
+                <a href="?page=rkk" class="nav-link"><i class="nav-icon fas fa-list-alt"></i><p>Rencana</p></a>
+              </li>
+
+              <li class="nav-item">
+                <a href="?page=realisasi" class="nav-link"><i class="nav-icon fas fa-check-circle"></i><p>Realisasi</p></a>
+              </li>
 
               <li class="nav-item">
                 <a href="?page=realisasi&aksi=slipk" class="nav-link"><i class="nav-icon fas fa-file-invoice-dollar"></i><p>Cetak Slip</p></a>
@@ -307,6 +316,11 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     if ($aksi == "") { include "page/denda/denda.php"; }
                   } else if ($page == 'lembur') {
                     if ($aksi == "") { include "page/lembur/lembur.php"; }
+                  } else if ($page == 'grup_borongan') {
+                    if ($aksi == "") { include "page/grup_borongan/grup_borongan.php"; }
+                    elseif ($aksi == "tambah") { include "page/grup_borongan/tambah.php"; }
+                    elseif ($aksi == "ubah") { include "page/grup_borongan/ubah.php"; }
+                    elseif ($aksi == "hapus") { include "page/grup_borongan/hapus.php"; }
                   } else if ($page == 'mesin') {
                     if ($aksi == "") { include "page/mesin/mesin.php"; }
                   } else if ($page == 'generate') {
