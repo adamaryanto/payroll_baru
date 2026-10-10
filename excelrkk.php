@@ -15,10 +15,6 @@ header("Pragma: no-cache");
 header("Expires: 0");
 echo "<meta charset='UTF-8'>";
 
-$is_approved = ($status_rkk >= 2 || strtolower((string)$status_rkk) === 'approved' || strtolower((string)$status_rkk) === 'approve');
-$stamp_text = $is_approved ? "APPROVED" : "UNAPPROVED";
-$stamp_color = $is_approved ? "#008000" : "#FF0000";
-
 $hari_arr = ['MINGGU','SENIN','SELASA','RABU','KAMIS','JUMAT','SABTU'];
 $bulan_arr = ['','JANUARI','FEBRUARI','MARET','APRIL','MEI','JUNI','JULI','AGUSTUS','SEPTEMBER','OKTOBER','NOVEMBER','DESEMBER'];
 $ts = $tanggal_sql ? strtotime($tanggal_sql) : time();
@@ -27,18 +23,27 @@ $judul_tgl = date('d', $ts) . ' ' . $bulan_arr[(int)date('n', $ts)] . ' ' . date
 
 // ---- palet persis contoh ----
 $bd = "border:1px solid #000;";
-$fBase = "font-family:Calibri,sans-serif; font-size:18px;";
-$th = "font-weight:bold; text-align:center; vertical-align:middle;";
+$fB = "font-family:Calibri,sans-serif; font-size:18px; font-weight:bold;";
+$thC = "text-align:center; vertical-align:middle;";
 $cWhite = "background:#FFFFFF;";
 $cSection = "background:#B2A1C6;";
 $cHdr = "background:#D9D9D9;";
 $cHdrL = "background:#EFEFEF;";
 $cRekap = "background:#B4C7E7;";
 $cTotal = "background:#C6D9F0;";
-$cRed = "background:#FF0000; color:#FFFFFF;";
+$cRed = "background:#FF0000;";
 $cYellow = "background:#FFFF00;";
 
-// Data Boneless
+function ex_num($v) {
+    $v = (float)$v;
+    if (abs($v - round($v)) < 1e-9) return (string)(int)round($v);
+    return rtrim(rtrim(number_format($v, 10, '.', ''), '0'), '.');
+}
+function ex_cell($v, $style, $align = 'center') {
+    return "<td align='$align' style='$style'>$v</td>";
+}
+
+// Data Boneless (urut input, seperti contoh)
 $queryBoneless = $koneksi->query("
     SELECT b.*, bm.biaya_mobil
     FROM tb_boneless b
@@ -47,7 +52,7 @@ $queryBoneless = $koneksi->query("
 ");
 $bonelessHeader = $queryBoneless->fetch_assoc();
 $id_boneless = $bonelessHeader['id_boneless'] ?? 0;
-$potong = (float)($bonelessHeader['jumlah_mobil'] ?? 0);
+$potong = (int)($bonelessHeader['jumlah_mobil'] ?? 0);
 
 $boneless_details = [];
 if ($id_boneless > 0) {
@@ -83,150 +88,116 @@ while ($row = $result->fetch_assoc()) {
     $data_per_bagian[$key][] = $row;
 }
 
-$erow = 0; // penghitung baris excel untuk rumus
-$Lrows = [];
-$Orows = [];
+$erow = 0;
+$empty15 = str_repeat("<td style='$cWhite$bd'></td>", 15);
 ?>
 <table border="1" style="border-collapse:collapse;">
-<?php $erow++; ?>
-    <tr><th colspan="15" style="<?php echo $fBase.$th.$cWhite.$bd; ?> font-size:18px; height:23px;">FORMAT ABSENSI KARYAWAN HARI <?php echo $judul_hari . ' ' . $judul_tgl; ?></th></tr>
-<?php $erow++; ?>
-    <tr><td colspan="15" style="<?php echo $fBase.$th.$cWhite.$bd; ?> font-size:18px;">JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000</td></tr>
-<?php $erow++; ?>
-    <tr><td colspan="15" style="<?php echo $fBase.$th.$cWhite.$bd; ?> font-size:18px;">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td></tr>
-<?php foreach ($data_per_bagian as $nama_bagian => $karyawans): $erow++; ?>
-    <tr><td colspan="15" style="<?php echo $fBase.$th.$cSection.$bd; ?> font-size:18px;"><?php echo $nama_bagian; ?></td></tr>
-    <?php $erow++; ?>
-    <tr style="<?php echo $fBase.$th; ?>">
+<?php $erow++; // R1 judul ?>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?> height:23px;">FORMAT ABSENSI KARYAWAN HARI <?= $judul_hari . ' ' . $judul_tgl ?></td></tr>
+<?php $erow++; // R2 aturan ?>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000</td></tr>
+<?php $erow++; // R3 jam ?>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td></tr>
+<?php
+$hdr_gray = "$fB$thC$cHdr$bd";
+$hdr_light = "$fB$thC$cHdrL$bd";
+foreach ($data_per_bagian as $nama_bagian => $karyawans):
+    $erow++; // bar ungu
+?>
+    <tr><td colspan="15" style="<?= $fB ?> <?= $thC ?> <?= $cSection ?><?= $bd ?>"><?= $nama_bagian ?></td></tr>
+    <?php $erow++; // header baris 1 ?>
+    <tr>
         <?php
-        $hdrs = ['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','ISTIRAHAT MASUK','JAM PULANG'];
-        foreach ($hdrs as $h) echo "<th style=\"$fBase$th$cHdr$bd\">$h</th>";
-        $hdrs2 = ['HASIL KERJA','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'];
-        foreach ($hdrs2 as $h) echo "<th style=\"$fBase$th$cHdrL$bd\">$h</th>";
+        foreach (['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK'] as $h) echo "<th rowspan='2' style='$hdr_gray'>$h</th>";
+        echo "<th style='$hdr_gray'>ISTIRAHAT</th>";
+        foreach (['JAM PULANG'] as $h) echo "<th rowspan='2' style='$hdr_gray'>$h</th>";
+        foreach (['HASIL KERJA','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'] as $h) echo "<th rowspan='2' style='$hdr_light'>$h</th>";
         ?>
     </tr>
-    <?php
-    $no = 1;
-    foreach ($karyawans as $k):
+    <?php $erow++; // header baris 2: MASUK di kolom I ?>
+    <tr><?= str_repeat("<td style='$cWhite$bd'></td>", 8) ?><th style="<?= $hdr_gray ?>">MASUK</th><?= str_repeat("<td style='$cWhite$bd'></td>", 6) ?></tr>
+    <?php foreach ($karyawans as $k):
         $erow++;
-        $Lrows[] = "L$erow";
-        $Orows[] = "O$erow";
         $upah = (float)($k['upah'] ?? 0);
     ?>
-    <tr style="<?php echo $fBase; ?>">
-        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $no++; ?></td>
-        <td style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo strtoupper($k['nama_karyawan'] ?? ''); ?></td>
-        <td style="<?php echo $cWhite.$bd; ?>"></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $k['label_os'] ?? ''; ?></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $k['label_gol'] ?? ''; ?></td>
-        <td style="<?php echo $cWhite.$bd; ?>"><?php echo $k['posisi'] ?? ''; ?></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $k['j_masuk'] ?? ''; ?></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?>"></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?>"></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?>"></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?>"></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo number_format($upah, 0, ',', '.'); ?></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>"></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>"></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;">=L<?php echo $erow; ?>-M<?php echo $erow; ?>+N<?php echo $erow; ?></td>
+    <tr style="<?= $fB ?>">
+        <?= ex_cell('=+A' . ($erow - 1) . '+1', "$cWhite$bd") ?>
+        <td align="left" style="<?= $cWhite ?><?= $bd ?>"><?= strtoupper($k['nama_karyawan'] ?? '') ?></td>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell($k['label_os'] ?? '', "$cWhite$bd") ?>
+        <?= ex_cell($k['label_gol'] ?? '', "$cWhite$bd") ?>
+        <td align="left" style="<?= $cWhite ?><?= $bd ?>"><?= $k['posisi'] ?? '' ?></td>
+        <?= ex_cell($k['j_masuk'] ?? '', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>"><?= ex_num($upah) ?></td>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>">=L<?= $erow ?>-M<?= $erow ?>+N<?= $erow ?></td>
     </tr>
     <?php endforeach; ?>
 <?php endforeach; ?>
 <?php
 $erow++;
 $total_row = $erow;
-$sumL = $Lrows ? '=SUM(' . implode(',', $Lrows) . ')' : '0';
-$sumO = $Orows ? '=SUM(' . implode(',', $Orows) . ')' : '0';
+$first_data_row = 4;
+$last_data_row = $total_row - 1;
 ?>
-    <tr style="<?php echo $fBase; ?> font-weight:bold;">
-        <td colspan="11" align="center" style="<?php echo $cWhite.$bd; ?>">TOTAL</td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>"><?php echo $sumL; ?></td>
-        <td style="<?php echo $cWhite.$bd; ?>"></td><td style="<?php echo $cWhite.$bd; ?>"></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>"><?php echo $sumO; ?></td>
+    <tr style="<?= $fB ?>">
+        <?= str_repeat("<td style='$cWhite$bd'></td>", 11) ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>">=SUM(L<?= $first_data_row ?>:L<?= $last_data_row ?>)</td>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>">=SUM(O<?= $first_data_row ?>:O<?= $last_data_row ?>)</td>
     </tr>
 <?php
-$erow++;
-$rekap_row = $erow;
-?>
-    <tr><td colspan="15" style="<?php echo $fBase.$th.$cRekap.$bd; ?> font-size:18px;">REALISASI TOTAL REKAP BIAYA PABRIK CIKUPA <?php echo $judul_tgl; ?></td></tr>
-<?php $erow++; $biaya_row = $erow; ?>
-    <tr style="<?php echo $fBase; ?> font-weight:bold; font-size:16px;">
-        <td colspan="7" align="center" style="<?php echo $cRekap.$bd; ?>">Biaya <?php echo (int)$potong; ?> mobil</td>
-        <td colspan="8" align="center" style="<?php echo $cRekap.$bd; ?>">=O<?php echo $total_row; ?></td>
-    </tr>
-<?php $erow++; $permobil_row = $erow; $sum_row_fwd = $permobil_row + count($boneless_details) + 5; ?>
-    <tr style="<?php echo $fBase; ?> font-weight:bold; font-size:16px;">
-        <td colspan="7" align="center" style="<?php echo $cRekap.$bd; ?>">Biaya permobil</td>
-        <td colspan="8" align="center" style="<?php echo $cRekap.$bd; ?>">=E<?php echo $sum_row_fwd; ?></td>
-    </tr>
-<?php $erow++; ?>
-    <tr><td colspan="15" style="<?php echo $fBase.$th.$cRekap.$bd; ?> font-size:18px;">BAYARAN TIM BONLESS</td></tr>
-<?php
-$Jplus = [];
-$Jminus = [];
-$Jrows_all = [];
+$erow++; // R300 rekap title
+echo "<tr><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='center' style='$fB$thC$cRekap$bd'>REALISASI TOTAL REKAP BIAYA PABRIK CIKUPA $judul_tgl</td>" . str_repeat("<td style='$cWhite$bd'></td>", 12) . "</tr>";
+$erow++; $biaya_row = $erow; // R301
+echo "<tr><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='center' style='$fB$thC$cRekap$bd'>Biaya $potong mobil</td><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='center' style='$fB$thC$cRekap$bd'>=O$total_row</td>" . str_repeat("<td style='$cWhite$bd'></td>", 7) . "</tr>";
+$sum_row_fwd = 0; // diisi setelah tahu baris summary
+$erow++; $permobil_row = $erow; // R302
+$sum_row_fwd = $permobil_row + count($boneless_details) + 5; // R304(+1), item(n), R310, R311, R312, R313
+echo "<tr><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='center' style='$fB$thC$cRekap$bd'>Biaya permobil</td><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='center' style='$fB$thC$cRekap$bd'>=I$sum_row_fwd</td>" . str_repeat("<td style='$cWhite$bd'></td>", 7) . "</tr>";
+$erow++; // R304
+echo "<tr><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='center' style='$fB$thC$cRekap$bd'>BAYARAN TIM BONLESS</td>" . str_repeat("<td style='$cWhite$bd'></td>", 12) . "</tr>";
+
+$Jplus = []; $Jminus = []; $nb = 0;
 foreach ($boneless_details as $item):
-    $erow++;
+    $erow++; $nb++;
     $qty = (float)($item['qty'] ?? 0);
     $hrg = abs((float)($item['harga'] ?? 0));
     $is_minus = (($item['jenis'] ?? '') == 'minus');
-    $Jrows_all[] = "F$erow";
-    if ($is_minus) $Jminus[] = "F$erow"; else $Jplus[] = "F$erow";
-    $qty_disp = $qty ? number_format($qty, 0, ',', '.') : '';
+    $Jrows = "J$erow";
+    if ($is_minus) $Jminus[] = $Jrows; else $Jplus[] = $Jrows;
+    $qty_disp = ($qty != 0) ? ex_num($qty) : '';
 ?>
-    <tr style="<?php echo $fBase; ?>">
-        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo count($Jrows_all); ?></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $is_minus ? 'PENGURANGAN' : ''; ?></td>
-        <td style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo strtoupper($item['nama_item'] ?? ''); ?></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?>"><?php echo $qty_disp; ?></td>
-        <td align="left" style="<?php echo $cWhite.$bd; ?>">Rp<?php echo number_format($hrg, 0, ',', '.'); ?></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>">=D<?php echo $erow; ?>*E<?php echo $erow; ?></td>
-        <td colspan="9" style="<?php echo $cWhite; ?> border:0;"></td>
+    <tr style="<?= $fB ?>">
+        <td style="<?= $cWhite ?><?= $bd ?>"></td>
+        <td style="<?= $cWhite ?><?= $bd ?>"></td>
+        <?= ex_cell($nb, "$cWhite$bd") ?>
+        <td style="<?= $cWhite ?><?= $bd ?>"></td>
+        <td style="<?= $cWhite ?><?= $bd ?>"></td>
+        <?= ex_cell($is_minus ? 'PENGURANGAN' : '', "$cWhite$bd") ?>
+        <td align="left" style="<?= $cWhite ?><?= $bd ?>"><?= strtoupper($item['nama_item'] ?? '') ?></td>
+        <?= ex_cell($qty_disp, "$cWhite$bd") ?>
+        <?= ex_cell(ex_num($hrg), "$cWhite$bd") ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>">=H<?= $erow ?>*I<?= $erow ?></td>
+        <?= str_repeat("<td style='$cWhite$bd'></td>", 5) ?>
     </tr>
 <?php endforeach; ?>
 <?php
-$erow++;
-$bon_total_row = $erow;
+$erow++; $bontot_row = $erow; // R310 TOTAL
 $parts = array_merge($Jplus, array_map(function($x){ return "-$x"; }, $Jminus));
-$bon_total_f = $parts ? '=' . implode('', $parts) : '0';
-$bon_total_f = ltrim($bon_total_f, '=+');
-$bon_total_f = '=' . $bon_total_f;
+$bon_f = $parts ? '=' . ltrim(implode('', $parts), '+') : '0';
+echo "<tr style='$fB'><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td colspan='7' align='center' style='$cTotal$bd'>TOTAL</td><td align='right' style='$cWhite$bd'>$bon_f</td>" . str_repeat("<td style='$cWhite$bd'></td>", 5) . "</tr>";
+$erow++; // R311 red title
+echo "<tr><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td colspan='8' align='center' style='$fB$thC$cRed$bd'>DENGAN MESIN BONLES</td>" . str_repeat("<td style='$cWhite$bd'></td>", 5) . "</tr>";
+$erow++; // R312 yellow header
+echo "<tr><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='center' style='$fB$thC$cYellow$bd'>BIAYA PABRIK</td><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='center' style='$fB$thC$cYellow$bd'>BONLESS</td><td align='center' style='$fB$thC$cYellow$bd'>POTONG</td><td align='center' style='$fB$thC$cYellow$bd'>TOTAL</td><td align='center' style='$fB$thC$cYellow$bd'>Biaya Per mobil</td>" . str_repeat("<td style='$cWhite$bd'></td>", 6) . "</tr>";
+$erow++; $sum_row = $erow; // R313 values
+echo "<tr style='$fB'><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='right' style='$cWhite$bd'>=H$biaya_row</td><td style='$cWhite$bd'></td><td style='$cWhite$bd'></td><td align='right' style='$cWhite$bd'>=J$bontot_row</td><td align='center' style='$cWhite$bd'>$potong</td><td align='right' style='$cWhite$bd'>=C$sum_row+F$sum_row</td><td align='right' style='$cWhite$bd'>=H$sum_row/G$sum_row</td>" . str_repeat("<td style='$cWhite$bd'></td>", 6) . "</tr>";
 ?>
-    <tr style="<?php echo $fBase; ?> font-weight:bold; font-size:16px;">
-        <td colspan="5" align="center" style="<?php echo $cTotal.$bd; ?>">TOTAL</td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>"><?php echo $bon_total_f; ?></td>
-        <td colspan="9" style="<?php echo $cWhite; ?> border:0;"></td>
-    </tr>
-<?php $erow++; ?>
-    <tr><td colspan="15" style="<?php echo $fBase.$th.$cRed.$bd; ?> font-size:18px;">DENGAN MESIN BONLES</td></tr>
-<?php $erow++; ?>
-    <tr style="<?php echo $fBase.$th; ?> background:#FFFF00; font-size:16px;">
-        <th style="<?php echo $cYellow.$bd; ?>">BIAYA PABRIK</th><th style="<?php echo $cYellow.$bd; ?>">BONLESS</th><th style="<?php echo $cYellow.$bd; ?>">POTONG</th><th style="<?php echo $cYellow.$bd; ?>">TOTAL</th><th style="<?php echo $cYellow.$bd; ?>">Biaya Per mobil</th>
-        <th colspan="10" style="<?php echo $cWhite; ?> border:0;"></th>
-    </tr>
-<?php
-$erow++;
-$sum_row = $erow;
-// isi permobil forward-ref seperti contoh (=I313)
-?>
-    <tr style="<?php echo $fBase; ?> font-weight:bold; font-size:16px; text-align:center;">
-        <td align="right" style="<?php echo $cWhite.$bd; ?>">=H<?php echo $biaya_row; ?></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>">=F<?php echo $bon_total_row; ?></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?>"><?php echo (int)$potong; ?></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>">=A<?php echo $sum_row; ?>+B<?php echo $sum_row; ?></td>
-        <td align="right" style="<?php echo $cWhite.$bd; ?>">=D<?php echo $sum_row; ?>/C<?php echo $sum_row; ?></td>
-        <td colspan="10" style="<?php echo $cWhite; ?> border:0;"></td>
-    </tr>
-</table>
-<table border="0"><tr><td>Tabel di atas memakai rumus Excel (=L-M+N, =SUM, =D*E, =A+B, =D/C) seperti file contoh, jadi ikut hitung otomatis kalau Qty/Harga diedit.</td></tr></table>
-<br><br>
-<table border="0">
-    <tr>
-        <td width="30"></td>
-        <td style="padding: 20px;">
-            <table border="1" style="border-collapse:collapse; border: 4px solid <?php echo $stamp_color; ?>;">
-                <tr><td align="center" style="font-size:24px; font-weight:bold; color:<?php echo $stamp_color; ?>; padding:5px 30px;"><?php echo $stamp_text; ?></td></tr>
-            </table>
-        </td>
-    </tr>
 </table>

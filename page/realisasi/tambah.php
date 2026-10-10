@@ -1,6 +1,8 @@
 
 
 <?php
+include_once __DIR__ . '/../grup_borongan/_setup.php';
+
  $id = $_GET ['id'];
 $ttgl1 = date("Y-m-d");
 $ttgl2 = date("Y-m-d H:i:s");
@@ -48,7 +50,7 @@ $tglreal = $data_tgl['tgl_realisasi'];
             nama_karyawan_manual, id_departmen, id_sub_department,
             r_upah, 
             r_jam_masuk, r_jam_keluar, r_istirahat_masuk, r_istirahat_keluar, 
-            id_jadwal, r_potongan_telat, r_potongan_istirahat_awal, 
+            id_jadwal, id_grup, r_potongan_telat, r_potongan_istirahat_awal, 
             r_potongan_istirahat_telat, r_potongan_lainnya, r_potongan_pulang, 
             r_potongan_tidak_lengkap, r_status, r_update, ra_masuk, ra_keluar, 
             ra_istirahat_masuk, ra_istirahat_keluar, status_realisasi_detail, 
@@ -61,7 +63,7 @@ $tglreal = $data_tgl['tgl_realisasi'];
                COALESCE(B.jam_keluar, '00:00:00'), 
                COALESCE(B.istirahat_masuk, '00:00:00'), 
                COALESCE(B.istirahat_keluar, '00:00:00'), 
-               A.id_jadwal, 0, 0, 0, 0, 0, 0, 
+               A.id_jadwal, A.id_grup, 0, 0, 0, 0, 0, 0, 
                'Hadir', '', '00:00:00', '00:00:00', '00:00:00', '00:00:00', 
                0, '', 0, '$tglreal' 
         from tb_rkk_detail A

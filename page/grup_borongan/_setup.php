@@ -31,4 +31,14 @@ $colH = $ckNull ? $ckNull->fetch_assoc() : null;
 if ($colH && strtoupper($colH['Null'] ?? '') === 'NO') {
     $koneksi->query("ALTER TABLE ms_grup_borongan MODIFY harga INT NULL DEFAULT NULL");
 }
+
+// Relasi detail RKK/Realisasi -> master grup (opsional, NULL = tanpa grup)
+foreach (['tb_rkk_detail' => 'fk_rkk_grup', 'tb_realisasi_detail' => 'fk_realisasi_grup'] as $tbl => $fk) {
+    $ckG = $koneksi->query("SHOW COLUMNS FROM `$tbl` LIKE 'id_grup'");
+    if ($ckG && $ckG->num_rows == 0) {
+        $koneksi->query("ALTER TABLE `$tbl` ADD COLUMN id_grup INT NULL DEFAULT NULL, ADD KEY idx_grup (id_grup)");
+        // FK bila tabel master InnoDB (abaikan bila gagal, relasi tetap jalan di kode)
+        @$koneksi->query("ALTER TABLE `$tbl` ADD CONSTRAINT `$fk` FOREIGN KEY (id_grup) REFERENCES ms_grup_borongan (id_grup) ON DELETE SET NULL");
+    }
+}
 ?>

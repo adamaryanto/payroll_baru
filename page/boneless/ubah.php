@@ -3,6 +3,20 @@ $ref = $_GET['ref'] ?? 'boneless';
 $view_param = isset($_GET['view']) ? '&view=1' : '';
 $id = $_GET['id'] ?? '';
 
+// Pastikan tabel & kolom satuan ada (sama seperti tambah.php)
+$koneksi->query("CREATE TABLE IF NOT EXISTS tb_boneless_satuan (
+  id_satuan INT AUTO_INCREMENT PRIMARY KEY,
+  id_boneless INT NOT NULL,
+  nama VARCHAR(255) NOT NULL,
+  hasil DECIMAL(12,2) NOT NULL DEFAULT 0,
+  upah INT NOT NULL DEFAULT 0,
+  KEY idx_boneless (id_boneless)
+) ENGINE=InnoDB");
+$ckHS = $koneksi->query("SHOW COLUMNS FROM tb_boneless LIKE 'harga_satuan'");
+if ($ckHS && $ckHS->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_boneless ADD COLUMN harga_satuan INT NULL DEFAULT NULL");
+}
+
 // 1. Ambil Data Header
 if ($id) {
     $sql_header = $koneksi->query("SELECT * FROM tb_boneless WHERE id_boneless = '$id'");
@@ -22,6 +36,15 @@ $details = [];
 while ($row = $sql_detail->fetch_assoc()) {
     $details[] = $row;
 }
+
+// 3b. Ambil Data Karyawan Satuan
+$sql_sat = $koneksi->query("SELECT * FROM tb_boneless_satuan WHERE id_boneless = '$id' ORDER BY id_satuan ASC");
+$satuan = [];
+if ($sql_sat) while ($row = $sql_sat->fetch_assoc()) {
+    $satuan[] = $row;
+}
+$harga_satuan_saved = $header['harga_satuan'] ?? 800;
+if ($harga_satuan_saved === null || $harga_satuan_saved === '') $harga_satuan_saved = 800;
 
 // 4. Proses Simpan Perubahan
 $simpan = @$_POST['simpan'];
@@ -58,10 +81,33 @@ if ($simpan) {
                 // MODIFIKASI: Simpan total selalu POSITIF (Absolute)
                 $ttl = abs($qty * $hrg);
 
-                $koneksi->query("INSERT INTO tb_boneless_detail (id_boneless, nama_item, qty, harga, total, jenis) 
+                $koneksi->query("INSERT INTO tb_boneless_detail (id_boneless, nama_item, qty, harga, total, jenis)
                                  VALUES ('$id', '$item', '$qty', '$hrg', '$ttl', '$type')");
             }
         }
+    }
+
+    // Sync Karyawan Satuan: hapus lama, masukkan baru (upah dibagi rata)
+    $koneksi->query("DELETE FROM tb_boneless_satuan WHERE id_boneless = '$id'");
+    $hrg_sat = (float)($_POST['harga_satuan'] ?? 800);
+    $koneksi->query("UPDATE tb_boneless SET harga_satuan = '$hrg_sat' WHERE id_boneless = '$id'");
+    $sat_nama = $_POST['sat_nama'] ?? [];
+    $sat_hasil = $_POST['sat_hasil'] ?? [];
+    $sat_rows = [];
+    $sat_total = 0;
+    for ($i = 0; $i < count($sat_nama); $i++) {
+        $nm = trim($sat_nama[$i] ?? '');
+        if ($nm === '') continue;
+        $q = (float)($sat_hasil[$i] ?? 0);
+        $sat_rows[] = [$nm, $q];
+        $sat_total += $q;
+    }
+    $sat_n = count($sat_rows);
+    foreach ($sat_rows as $sr) {
+        $nm_esc = $koneksi->real_escape_string($sr[0]);
+        $up_sat = ($sat_n > 0) ? (int)round($sat_total * $hrg_sat / $sat_n) : 0;
+        $koneksi->query("INSERT INTO tb_boneless_satuan (id_boneless, nama, hasil, upah)
+                         VALUES ('$id', '$nm_esc', '{$sr[1]}', '$up_sat')");
     }
 
     echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body>
@@ -202,6 +248,56 @@ if ($simpan) {
                             </div>
                         </div>
 
+                        <hr class="my-5 border-gray-200">
+
+                        <div class="mt-4">
+                            <label class="text-xs font-bold text-indigo-700 uppercase mb-3 block">Karyawan Satuan (upah dibagi rata)</label>
+                            <div class="row mb-3">
+                                <div class="col-md-6 form-group">
+                                    <label class="text-xs font-bold text-gray-700 uppercase mb-1">Harga /Kg (Rp)</label>
+                                    <input type="number" name="harga_satuan" id="harga_satuan" class="form-control h-[42px]" value="<?= (float)$harga_satuan_saved ?>">
+                                </div>
+                                <div class="col-md-6 form-group">
+                                    <label class="text-xs font-bold text-gray-700 uppercase mb-1">Upah / Orang (otomatis)</label>
+                                    <div class="h-[42px] flex items-center px-3 bg-indigo-50 border border-indigo-200 rounded-lg font-black text-indigo-700" id="satPerOrang">Rp 0</div>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 italic mb-3">Rumus: total kg &times; harga &divide; jumlah orang.</p>
+                            <div class="table-responsive">
+                                <table class="table table-bordered" id="tableSatuan">
+                                    <thead class="bg-indigo-50">
+                                        <tr>
+                                            <th class="text-center" style="width: 50px;">#</th>
+                                            <th>Nama Sesuai KTP</th>
+                                            <th style="width: 150px;">Hasil Kerja</th>
+                                            <th style="width: 180px;">Upah Dibayar</th>
+                                            <th style="width: 60px;"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php
+                                        $sat_prefill = $satuan;
+                                        if (empty($sat_prefill)) {
+                                            foreach (["MULYANTI", "EDAH", "YUSI HASTUTIK", "RUSDIANA", "HARNI", "CICHA MARYANA", "SITI PATONAH", "RUTINAH", "TIARA VETI FEBRIANA"] as $dn) {
+                                                $sat_prefill[] = ['nama' => $dn, 'hasil' => ''];
+                                            }
+                                        }
+                                        $sn = 1;
+                                        foreach ($sat_prefill as $sr): ?>
+                                            <tr class="sat-row">
+                                                <td class="text-center font-bold text-gray-400"><?= $sn++ ?></td>
+                                                <td><input type="text" name="sat_nama[]" class="form-control" value="<?= htmlspecialchars($sr['nama']) ?>"></td>
+                                                <td><input type="number" step="any" name="sat_hasil[]" class="form-control text-center sat-qty" value="<?= htmlspecialchars($sr['hasil']) ?>"></td>
+                                                <td><input type="text" class="form-control text-right font-bold text-indigo-600 bg-indigo-50 sat-upah-view" readonly value="Rp 0"></td>
+                                                <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger remove-row"><i class="fas fa-times"></i></button></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                                <button type="button" id="addSatRow" class="btn btn-sm btn-outline-primary font-bold"><i class="fas fa-plus mr-1"></i> Tambah Karyawan</button>
+                            </div>
+                        </div>
+
                         <div class="mt-6 p-4 bg-gray-50 rounded-xl border border-gray-200">
                             <div class="flex justify-between items-center">
                                 <span class="text-lg font-extrabold text-gray-800 uppercase">Grand Total Akhir</span>
@@ -267,6 +363,50 @@ if ($simpan) {
             if (e.target.closest('.remove-row')) {
                 e.target.closest('tr').remove();
                 calculate();
+                calcSatuan();
+            }
+        });
+
+        window.calcSatuan = function() {
+            let totalKg = 0, n = 0;
+            document.querySelectorAll('#tableSatuan .sat-row').forEach(row => {
+                const nm = row.querySelector('input[name="sat_nama[]"]').value.trim();
+                if (nm === '') return;
+                n++;
+                totalKg += parseFloat(row.querySelector('.sat-qty').value) || 0;
+            });
+            const hargaEl = document.getElementById('harga_satuan');
+            const harga = hargaEl ? (parseFloat(hargaEl.value) || 0) : 0;
+            const per = n > 0 ? Math.round(totalKg * harga / n) : 0;
+            document.querySelectorAll('#tableSatuan .sat-row').forEach(row => {
+                const nm = row.querySelector('input[name="sat_nama[]"]').value.trim();
+                row.querySelector('.sat-upah-view').value = (nm === '') ? 'Rp 0' : 'Rp ' + per.toLocaleString('id-ID');
+            });
+            const spo = document.getElementById('satPerOrang');
+            if (spo) spo.innerText = 'Rp ' + per.toLocaleString('id-ID');
+        };
+
+        document.getElementById('addSatRow').addEventListener('click', function() {
+            const tbody = document.querySelector('#tableSatuan tbody');
+            const tr = document.createElement('tr');
+            tr.className = 'sat-row';
+            tr.innerHTML = `
+                <td class="text-center font-bold text-gray-400">-</td>
+                <td><input type="text" name="sat_nama[]" class="form-control"></td>
+                <td><input type="number" step="any" name="sat_hasil[]" class="form-control text-center sat-qty" value=""></td>
+                <td><input type="text" class="form-control text-right font-bold text-indigo-600 bg-indigo-50 sat-upah-view" readonly value="Rp 0"></td>
+                <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger remove-row w-full"><i class="fas fa-times"></i></button></td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // Input Listener (plus satuan)
+        document.addEventListener('input', e => {
+            if (e.target.classList.contains('qty-input') || e.target.classList.contains('harga-input') || e.target === jmlMobilInput) {
+                calculate();
+            }
+            if (e.target.classList.contains('sat-qty') || e.target.id === 'harga_satuan' || e.target.getAttribute('name') === 'sat_nama[]') {
+                calcSatuan();
             }
         });
 
@@ -293,5 +433,6 @@ if ($simpan) {
         document.getElementById('addRowMinus').addEventListener('click', () => addNewRow('tableMinus', 'row-minus', 'text-red-600 bg-red-50', 'minus'));
 
         calculate(); // Initial load calculation
+        calcSatuan();
     });
 </script>

@@ -42,6 +42,7 @@ if (isset($_GET['id'])) {
     C.tgl_rkk, 
     O.OS_DHK as label_os,
     G.golongan as label_gol,
+    GB.nama_grup as label_grup,
     J.keterangan as nama_shift,
     J.jam_masuk,
     J.jam_keluar,
@@ -76,8 +77,9 @@ LEFT JOIN ms_sub_department BB ON A.id_sub_department = BB.id_sub_department
 LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal 
 LEFT JOIN ms_os_dhk O ON B.id_os_dhk = O.id_os_dhk
 LEFT JOIN ms_golongan G ON B.id_golongan = G.id_golongan
+LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
 WHERE A.id_rkk = '$idrkk'
-ORDER BY D.nama_departmen ASC, nama_tampil ASC
+ORDER BY (GB.nama_grup IS NULL), GB.nama_grup ASC, nama_tampil ASC
 ");
 } else {
   $datatglrkk = "";
@@ -85,6 +87,19 @@ ORDER BY D.nama_departmen ASC, nama_tampil ASC
   $datadetailrkk   = "";
   $datajamkerja   = "";
   $datastatusrkk   = 3;
+}
+
+// HAPUS BANYAK (checkbox) — hanya bila belum approve
+if ($idrkk > 0 && $datastatusrkk < 2 && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pilih'])) {
+    $ids = array_filter(array_map('intval', (array)$_POST['pilih']));
+    if (!empty($ids)) {
+        $in = implode(',', $ids);
+        $koneksi->query("DELETE FROM tb_rkk_detail WHERE id_rkk = '$idrkk' AND id_rkk_detail IN ($in)");
+        echo "<script>window.location.href='?page=rkk&aksi=kelola&id=$idrkk&msg=deleted';</script>";
+    } else {
+        echo "<script>window.location.href='?page=rkk&aksi=kelola&id=$idrkk';</script>";
+    }
+    exit;
 }
 
 if ($datastatusrkk == 3) {
@@ -164,44 +179,66 @@ if ($datastatusrkk == 3) {
           <input id="cariKaryawan" type="text" placeholder="Cari nama / posisi..." autocomplete="off"
             class="w-full md:max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
         </div>
+        <form method="POST" id="formBulk">
+        <?php if ($datastatusrkk < 2) : ?>
+        <div class="mb-3 flex items-center gap-3 flex-wrap">
+          <label class="text-sm font-bold text-gray-700 flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="checkAll" style="width:16px;height:16px;cursor:pointer;"> Pilih semua
+          </label>
+          <span id="pilihCount" class="text-sm font-bold text-gray-500">0 dipilih</span>
+          <button type="button" id="btnHapusPilih" class="px-3 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded shadow-sm">Hapus yang Dipilih</button>
+        </div>
+        <?php endif; ?>
         <div class="table-responsive rounded-lg border border-gray-800">
           <table class="w-full text-left border-collapse table-modern min-w-[1600px]" id="tabel-rkk">
-          <thead>
-            <tr>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">No</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Nama Sesuai KTP</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Paraf Pekerja</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">OS/DHK</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Golongan</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Posisi</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Jam Kerja</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Jam Masuk</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9; white-space:normal !important; line-height:1.25;">ISTIRAHAT<br>MASUK</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#D9D9D9;">Jam Pulang</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Hasil Kerja</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Upah</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Potongan</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Lembur</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase" style="background:#EFEFEF;">Upah Dibayar</th>
-              <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase text-center">Aksi</th>
-            </tr>
-          </thead>
           <tbody>
             <?php
             $no = 1;
             $last_dept = null;
+            $show_bulk = ($datastatusrkk < 2);
+            $ncol = $show_bulk ? 12 : 11;
+            function rkk_grp_th($t, $bg, $extra = '') {
+              return "<th class=\"py-3 px-2 text-sm font-bold text-gray-700 uppercase$extra\" style=\"background:$bg;\">$t</th>";
+            }
             while ($data = $tampil->fetch_assoc()) :
               if (trim((string)($data['nama_tampil'] ?? '')) === '') continue;
-              $dept_now = strtoupper(trim((string)($data['nama_departmen'] ?? '')) ?: 'LAINNYA');
+              $dept_now = !empty($data['label_grup']) ? strtoupper($data['label_grup']) : 'TANPA GRUP';
               if ($dept_now !== $last_dept) :
                 $last_dept = $dept_now;
                 $no = 1;
+                $dept_esc = htmlspecialchars($dept_now, ENT_QUOTES);
             ?>
-              <tr class="dept-separator">
-                <td colspan="16" data-label="Bagian" style="background:#B2A1C6; font-weight:bold; text-align:center; text-transform:uppercase; padding:8px 4px;"><?= $dept_now ?></td>
+              <tr class="dept-separator" data-dept="<?= $dept_esc ?>">
+                <td colspan="<?= $ncol ?>" data-label="Bagian" style="background:#B2A1C6; font-weight:bold; text-transform:uppercase; padding:8px 4px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="flex:1;text-align:center;"><?= $dept_now ?></span>
+                    <?php if ($show_bulk) : ?>
+                    <button type="button" class="btn-hapus-grup" data-g="<?= $dept_esc ?>" style="background:#fff;color:#be123c;border:1px solid #be123c;border-radius:6px;padding:2px 10px;font-size:11px;font-weight:bold;cursor:pointer;white-space:nowrap;text-transform:none;">Hapus grup</button>
+                    <?php endif; ?>
+                  </div>
+                </td>
+              </tr>
+              <tr class="grp-header d-none d-md-table-row" data-dept="<?= $dept_esc ?>">
+                <?php if ($show_bulk) : ?>
+                <?= rkk_grp_th('', '#D9D9D9') ?>
+                <?php endif; ?>
+                <?= rkk_grp_th('No', '#D9D9D9') ?>
+                <?= rkk_grp_th('Nama Sesuai KTP', '#D9D9D9') ?>
+                <?= rkk_grp_th('Paraf Pekerja', '#D9D9D9') ?>
+                <?= rkk_grp_th('OS/DHK', '#D9D9D9') ?>
+                <?= rkk_grp_th('Golongan', '#D9D9D9') ?>
+                <?= rkk_grp_th('Posisi', '#D9D9D9') ?>
+                <?= rkk_grp_th('Jam Kerja', '#D9D9D9') ?>
+                <?= rkk_grp_th('Jam Masuk', '#D9D9D9') ?>
+                <?= rkk_grp_th('Istirahat<br>Masuk', '#D9D9D9') ?>
+                <?= rkk_grp_th('Jam Pulang', '#D9D9D9') ?>
+                <?= rkk_grp_th('Aksi', '#FFFFFF', ' text-center') ?>
               </tr>
             <?php endif; ?>
-              <tr>
+              <tr class="data-row" data-dept="<?= htmlspecialchars($dept_now) ?>">
+                <?php if ($show_bulk) : ?>
+                <td data-label="Pilih" align="center"><input type="checkbox" name="pilih[]" value="<?= (int)$data['id_rkk_detail'] ?>" class="row-check" style="width:16px;height:16px;cursor:pointer;"></td>
+                <?php endif; ?>
                 <td data-label="No"><?= $no++ ?></td>
                 <td data-label="Nama Sesuai KTP">
                   <span class="text-base font-bold text-gray-900"><?= $data['nama_tampil'] ?></span><br>
@@ -219,10 +256,9 @@ if ($datastatusrkk == 3) {
                     </div>
                   <?php endif; ?>
 
+                  <?php if ($data['status_rkk'] != 'Hadir') : ?>
                   <div class="mt-2">
-                    <?php if ($data['status_rkk'] == 'Hadir') : ?>
-                      <span class="bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded-full">Hadir</span>
-                    <?php elseif ($data['status_rkk'] == 'Tidak Hadir') : ?>
+                    <?php if ($data['status_rkk'] == 'Tidak Hadir') : ?>
                       <span class="bg-rose-100 text-rose-800 text-xs font-bold px-2 py-1 rounded-full">Tidak Hadir</span>
                     <?php elseif ($data['status_rkk'] == 'Digantikan') : ?>
                       <span class="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded-full">Digantikan</span>
@@ -230,6 +266,7 @@ if ($datastatusrkk == 3) {
                       <span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded-full">Pengganti</span>
                     <?php endif; ?>
                   </div>
+                  <?php endif; ?>
                 </td>
                 <td data-label="Paraf Pekerja" align="center"></td>
                 <td data-label="OS/DHK" align="center"><?= $data['label_os'] ?? '' ?></td>
@@ -242,29 +279,23 @@ if ($datastatusrkk == 3) {
                 <td data-label="Jam Masuk" align="center"></td>
                 <td data-label="Istirahat Masuk" align="center"></td>
                 <td data-label="Jam Pulang" align="center"></td>
-                <td data-label="Hasil Kerja" align="center"></td>
-                <td data-label="Upah"><span class="text-base font-semibold text-emerald-600">Rp <?= number_format($data['upahkaryawan'], 0, ',', '.') ?></span></td>
-                <?php $potRkk = ($data['potongan_telat'] ?? 0) + ($data['potongan_istirahat'] ?? 0) + ($data['potongan_lainnya'] ?? 0); ?>
-                <td data-label="Potongan" align="right"><?= $potRkk ? 'Rp ' . number_format($potRkk, 0, ',', '.') : '' ?></td>
-                <td data-label="Lembur" align="center"></td>
-                <td data-label="Upah Dibayar"><span class="text-base font-bold text-blue-700">Rp <?= number_format($data['upahkaryawan'] - $potRkk, 0, ',', '.') ?></span></td>
                 <td data-label="Aksi">
-                  <div class="aksi-buttons md:flex md:flex-col justify-center items-center">
+                  <div class="flex flex-row flex-nowrap gap-1 justify-center items-center">
                     <?php if ($data['status_rkk'] != 'Digantikan' && $datastatusrkk < 2) : ?>
                       <a href="?page=rkk&aksi=karyawanupdate&id=<?= $data['id_rkk_detail']; ?>"
-                        class="px-3 py-2 text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-600 hover:text-white rounded border border-amber-300 transition-colors text-center w-full md:w-auto mb-1">
-                        <i class="fas fa-sync-alt mr-1"></i> Ganti
+                        class="px-2 py-1 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-600 hover:text-white rounded border border-amber-300 transition-colors text-center whitespace-nowrap">
+                        <i class="fas fa-sync-alt mr-1"></i>Ganti
                       </a>
                     <?php endif; ?>
                     <?php if (strtolower($_SESSION['role']) != 'admin hr') : ?>
                       <a href="?page=rkk&aksi=detail&id=<?= $data['id_rkk_detail']; ?>"
-                        class="px-3 py-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-600 hover:text-white rounded border border-blue-300 transition-colors text-center w-full md:w-auto mb-1">
-                        <i class="fas fa-eye mr-1"></i> Detail
+                        class="px-2 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-600 hover:text-white rounded border border-blue-300 transition-colors text-center whitespace-nowrap">
+                        <i class="fas fa-eye mr-1"></i>Detail
                       </a>
                     <?php endif; ?>
                     <?php if ($datastatusrkk < 2) : ?>
                       <button type="button"
-                        class="px-3 py-2 text-sm font-bold text-rose-700 bg-rose-50 hover:bg-rose-600 hover:text-white rounded border border-rose-300 transition-colors text-center w-full md:w-auto mb-1 btn-delete-detail"
+                        class="px-2 py-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-600 hover:text-white rounded border border-rose-300 transition-colors text-center whitespace-nowrap btn-delete-detail"
                         data-id="<?= $idrkk; ?>"
                         data-detail-id="<?= $data['id_rkk_detail']; ?>"
                         data-name="<?= $data['nama_tampil']; ?>">
@@ -277,7 +308,8 @@ if ($datastatusrkk == 3) {
             <?php endwhile; ?>
           </tbody>
         </table>
-      </div>
+        </div>
+        </form>
     </div>
   </div>
 </div>
@@ -303,7 +335,8 @@ if ($datastatusrkk == 3) {
   }
 
   /* Table Styling Default */
-  .table thead th {
+  .table thead th,
+  #tabel-rkk tbody tr.grp-header th {
     background-color: #f8f9fa;
     color: #333;
     text-transform: uppercase;
@@ -322,7 +355,13 @@ if ($datastatusrkk == 3) {
       border: 1px solid #1f2937 !important;
     }
     #tabel-rkk tbody td {
+      padding: 6px 8px !important;
+      white-space: nowrap !important;
+      vertical-align: middle !important;
+    }
+    #tabel-rkk thead th {
       padding: 8px 8px !important;
+      font-size: 12px !important;
     }
   }
 
@@ -509,19 +548,73 @@ if ($datastatusrkk == 3) {
 <script>
   $(document).ready(function() {
 
-    // Cari karyawan (pengganti search DataTables)
-    $(document).on('input', '#cariKaryawan', function() {
-      const q = $(this).val().toLowerCase();
-      if (q === '') {
-        $('#tabel-rkk tbody tr').show();
+    // Cari karyawan + grup ikut tersaring
+    function applyTabelFilter() {
+      const q = $('#cariKaryawan').val().toLowerCase();
+      const vis = {};
+      $('#tabel-rkk tbody tr.data-row').each(function() {
+        const $tr = $(this);
+        const show = ($tr.text().toLowerCase().indexOf(q) !== -1);
+        $tr.toggle(show);
+        if (show) vis[$tr.data('dept')] = true;
+      });
+      $('#tabel-rkk tbody tr.dept-separator, #tabel-rkk tbody tr.grp-header').each(function() {
+        $(this).toggle(!!vis[$(this).data('dept')]);
+      });
+    }
+    $(document).on('input', '#cariKaryawan', applyTabelFilter);
+
+    // Pilih banyak + hapus
+    function updateCount() {
+      const n = $('#tabel-rkk tbody tr.data-row .row-check:checked').length;
+      $('#pilihCount').text(n + ' dipilih');
+    }
+    $(document).on('change', '#checkAll', function() {
+      $('#tabel-rkk tbody tr.data-row:visible .row-check').prop('checked', this.checked);
+      updateCount();
+    });
+    $(document).on('change', '.row-check', updateCount);
+    $(document).on('click', '#btnHapusPilih', function() {
+      const n = $('#tabel-rkk tbody tr.data-row .row-check:checked').length;
+      if (!n) {
+        Swal.fire({ icon: 'info', title: 'Belum ada yang dipilih', text: 'Centang dulu baris yang mau dihapus.', confirmButtonColor: '#2563eb' });
         return;
       }
-      $('#tabel-rkk tbody tr').each(function() {
-        if ($(this).hasClass('dept-separator')) {
-          $(this).hide();
-          return;
+      Swal.fire({
+        title: 'Hapus ' + n + ' data?',
+        text: 'Data yang dipilih akan dihapus permanen!',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e11d48',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Ya, Hapus!',
+        cancelButtonText: 'Batal',
+        reverseButtons: true
+      }).then((result) => { if (result.isConfirmed) $('#formBulk').submit(); });
+    });
+    $(document).on('click', '.btn-hapus-grup', function() {
+      const g = $(this).data('g');
+      const rows = $('#tabel-rkk tbody tr.data-row').filter(function() { return $(this).data('dept') === g && $(this).is(':visible'); });
+      if (!rows.length) {
+        Swal.fire({ icon: 'info', title: 'Kosong', text: 'Tidak ada baris tampil di grup ini.', confirmButtonColor: '#2563eb' });
+        return;
+      }
+      Swal.fire({
+        title: 'Hapus grup ' + g + '?',
+        text: rows.length + ' nama di grup ini akan dihapus permanen!',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e11d48',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Ya, Hapus Semua!',
+        cancelButtonText: 'Batal',
+        reverseButtons: true
+      }).then((result) => {
+        if (result.isConfirmed) {
+          rows.find('.row-check').prop('checked', true);
+          updateCount();
+          $('#formBulk').submit();
         }
-        $(this).toggle($(this).text().toLowerCase().indexOf(q) !== -1);
       });
     });
 

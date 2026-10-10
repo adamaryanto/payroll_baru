@@ -308,6 +308,15 @@ if (strtolower($_SESSION['role']) == "owner") {
         font-size: 13px !important;
     }
 
+    /* Tombol aksi sejajar ke samping (desktop & mobile) */
+    .action-btn-group {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+        align-items: center !important;
+    }
+
     /* =========================================
        KHUSUS TAMPILAN MOBILE DIPERBAIKI DI SINI
        ========================================= */

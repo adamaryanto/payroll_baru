@@ -35,10 +35,39 @@ $cSection = "background:#B2A1C6;";
 $cHdr = "background:#D9D9D9;";
 $cHdrL = "background:#EFEFEF;";
 
+// Karyawan satuan yang sudah disimpan (kalau ada, itu yang ditampilkan)
+$q_sat = $koneksi->query("SELECT * FROM tb_boneless_satuan WHERE id_boneless = '$id' ORDER BY id_satuan ASC");
+$satuan = [];
+if ($q_sat) while ($r = $q_sat->fetch_assoc()) $satuan[] = $r;
+$hrg_sat_saved = isset($header['harga_satuan']) ? $header['harga_satuan'] : null;
+
 header("Content-type: application/vnd.ms-excel");
 header("Content-Disposition: attachment; filename=Boneless_Baru_$tgl_file.xls");
 echo "<meta charset='UTF-8'>";
 ?>
+<?php if (!empty($satuan)): ?>
+<table border="1" style="border-collapse:collapse;">
+    <tr><th colspan="4" style="<?php echo $fBase.$th.$cSection.$bd; ?> height:23px;">BONELESS BARU</th></tr>
+    <tr style="<?php echo $fBase.$th; ?>">
+        <th style="<?php echo $cHdr.$bd; ?>">No</th>
+        <th style="<?php echo $cHdr.$bd; ?>">NAMA SESUAI KTP</th>
+        <th style="<?php echo $cHdrL.$bd; ?>">HASIL KERJA</th>
+        <th style="<?php echo $cHdrL.$bd; ?>">UPAH DIBAYAR</th>
+    </tr>
+    <?php $sn = 1; $sat_tot = 0; foreach ($satuan as $sr): $sat_tot += (int)$sr['upah']; ?>
+    <tr style="<?php echo $fBase; ?>">
+        <td align="center" style="<?php echo $cWhite.$bd; ?>"><?= $sn++ ?></td>
+        <td style="<?php echo $cWhite.$bd; ?>"><?= htmlspecialchars(strtoupper($sr['nama'])) ?></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?>"><?= rtrim(rtrim(number_format((float)$sr['hasil'], 2, '.', ''), '0'), '.') ?></td>
+        <td align="right" style="<?php echo $cWhite.$bd; ?>">Rp <?= number_format($sr['upah'], 0, ',', '.') ?></td>
+    </tr>
+    <?php endforeach; ?>
+    <tr style="<?php echo $fBase; ?>">
+        <td colspan="3" align="center" style="<?php echo $cWhite.$bd; ?>">TOTAL (<?= count($satuan) ?> orang<?= ($hrg_sat_saved !== null && $hrg_sat_saved !== '') ? ', Rp ' . number_format($hrg_sat_saved, 0, ',', '.') . '/kg' : '' ?>)</td>
+        <td align="right" style="<?php echo $cWhite.$bd; ?>">Rp <?= number_format($sat_tot, 0, ',', '.') ?></td>
+    </tr>
+</table>
+<?php else: ?>
 <table border="1" style="border-collapse:collapse;">
     <tr><th colspan="4" style="<?php echo $fBase.$th.$cSection.$bd; ?> font-size:18px; height:23px;">BONELESS BARU</th><td style="border:0;"></td><td style="border:0;"></td><td style="border:0;"></td><td style="border:0;"></td><td style="border:0;"></td></tr>
     <tr style="<?php echo $fBase.$th; ?>">
@@ -75,3 +104,4 @@ echo "<meta charset='UTF-8'>";
     </tr>
     <?php endforeach; ?>
 </table>
+<?php endif; ?>

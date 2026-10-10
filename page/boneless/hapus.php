@@ -4,6 +4,9 @@ $id = $_GET['id'];
 // Hapus Detail Terlebih Dahulu
 $koneksi->query("DELETE FROM tb_boneless_detail WHERE id_boneless = '$id'");
 
+// Hapus Karyawan Satuan
+$koneksi->query("DELETE FROM tb_boneless_satuan WHERE id_boneless = '$id'");
+
 // Hapus Header
 $sql = $koneksi->query("DELETE FROM tb_boneless WHERE id_boneless = '$id'");
 

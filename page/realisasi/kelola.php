@@ -69,6 +69,7 @@ if (isset($_GET['id'])) {
         O.OS_DHK as label_os,
         G.golongan as label_gol,
         RD.status_rkk,
+        GB.nama_grup as label_grup,
         RD.upah as upah_rkk,
         J.jam_masuk as shift_masuk,
         J.jam_keluar as shift_keluar,
@@ -106,8 +107,9 @@ if (isset($_GET['id'])) {
         LEFT JOIN ms_golongan G ON B.id_golongan = G.id_golongan
         LEFT JOIN tb_rkk_detail RD ON A.id_rkk_detail = RD.id_rkk_detail
         LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal
+        LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
         WHERE A.id_realisasi = '$idrealisasi'
-        ORDER BY nama_departmen ASC, nama_tampil ASC
+        ORDER BY (GB.nama_grup IS NULL), GB.nama_grup ASC, nama_tampil ASC
     ");
 
     $tampilrkk = $koneksi->query("SELECT * FROM tb_rkk WHERE id_rkk = '$idrkk'");
@@ -627,15 +629,14 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                 <div class="p-0">
                     <div class="px-3 md:px-4 py-4">
                         <?php
-                        // Daftar grup (departemen) yang ada di realisasi ini + jumlah orang
-                        $q_gfilter = $koneksi->query("SELECT COALESCE(D.nama_departmen,'') as nm, COUNT(*) as jml
+                        // Daftar grup (master) yang ada di realisasi ini + jumlah orang
+                        $q_gfilter = $koneksi->query("SELECT G.nama_grup as nm, COUNT(*) as jml
                             FROM tb_realisasi_detail AD
-                            LEFT JOIN tb_rkk_detail RD ON AD.id_rkk_detail = RD.id_rkk_detail
-                            LEFT JOIN ms_departmen D ON D.id_departmen = COALESCE(NULLIF(AD.id_departmen,0), RD.id_departmen)
+                            LEFT JOIN ms_grup_borongan G ON AD.id_grup = G.id_grup
                             WHERE AD.id_realisasi = '$idrealisasi' GROUP BY nm ORDER BY nm ASC");
                         $grup_list = [];
                         if ($q_gfilter) while ($gr = $q_gfilter->fetch_assoc()) {
-                            $dn = strtoupper(trim($gr['nm']) ?: 'LAINNYA');
+                            $dn = !empty($gr['nm']) ? strtoupper($gr['nm']) : 'TANPA GRUP';
                             $grup_list[$dn] = ($grup_list[$dn] ?? 0) + (int)$gr['jml'];
                         }
                         ksort($grup_list);
@@ -663,7 +664,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
 
                                 while ($data = $tampil->fetch_assoc()) {
                                     if (trim((string)($data['nama_tampil'] ?? '')) === '') continue;
-                                    $dept_now = strtoupper(trim((string)($data['nama_departmen'] ?? '')) ?: 'LAINNYA');
+                                    $dept_now = !empty($data['label_grup']) ? strtoupper($data['label_grup']) : 'TANPA GRUP';
                                     if ($dept_now !== $last_dept) {
                                         $last_dept = $dept_now;
                                         $no = 1;
@@ -791,6 +792,11 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                                     <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Pengganti</span>
                                                 <?php endif; ?>
                                             </div>
+                                            <?php if (!empty($data['label_grup'])) : ?>
+                                                <div class="mt-1">
+                                                    <span class="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Grup: <?= htmlspecialchars($data['label_grup']) ?></span>
+                                                </div>
+                                            <?php endif; ?>
                                         </td>
                                         <td data-label="Paraf Pekerja" align="center"></td>
                                         <td data-label="OS/DHK" align="center"><?php echo $data['label_os'] ?: ($data['OS_DHK'] ?? 'MHS'); ?></td>
