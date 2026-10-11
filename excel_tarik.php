@@ -17,6 +17,8 @@ if ($Key == "") $Key = "";
 header("Content-type: application/vnd.ms-excel");
 header("Content-Disposition: attachment; filename=Log_Tarik_Data_" . $TanggalAwal . "_to_" . $TanggalAkhir . ".xls");
 echo "<meta charset='UTF-8'>";
+echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">';
+echo '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Laporan</x:Name><x:WorksheetOptions><x:PageSetup><x:Layout x:Orientation="Landscape"/><x:PaperSizeIndex>9</x:PaperSizeIndex><x:FitToWidth>1</x:FitToWidth><x:FitToHeight>0</x:FitToHeight></x:PageSetup><x:Print><x:FitToPage/></x:Print><x:PageMargins x:Left="0.25" x:Right="0.25" x:Top="0.4" x:Bottom="0.4" x:Header="0.2" x:Footer="0.2"/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->';
 
 if (!function_exists('get_closest_shift')) {
 	function get_closest_shift($koneksi, $time_str) {
@@ -156,6 +158,12 @@ if ($Connect) {
 // Query and group data from tb_record for Date Range
 $db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' ORDER BY tgl ASC, id_record ASC");
 $grouped = [];
+// Roster per-tanggal: tgl|pin => shift (acuan utama; master cuma fallback)
+$rosterMap = [];
+if (!empty($TanggalAwal) && !empty($TanggalAkhir)) {
+	$qr_roster = $koneksi->query("SELECT h.tgl_rkk AS tgl, TRIM(k.no_absen) AS pin, j.* FROM tb_rkk_detail rd JOIN tb_rkk h ON h.id_rkk=rd.id_rkk JOIN ms_karyawan k ON k.id_karyawan=rd.id_karyawan LEFT JOIN tb_jadwal j ON j.id_jadwal=rd.id_jadwal WHERE h.tgl_rkk BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+	if ($qr_roster) while ($rw_roster = $qr_roster->fetch_assoc()) $rosterMap[$rw_roster['tgl'] . '|' . trim((string)$rw_roster['pin'])] = $rw_roster;
+}
 
 while ($row_rec = $db_records->fetch_assoc()) {
 	$PIN = $row_rec['userid'];
@@ -241,6 +249,22 @@ while ($row_rec = $db_records->fetch_assoc()) {
 	}
 }
 
+// Inject baris PENGGANTI (tb_ganti) — sama seperti tabel tarik-data.php
+$qganti = $koneksi->query("SELECT g.tgl, g.id_karyawan_absen, g.id_karyawan_ganti, g.upah_bayar, TRIM(k.no_absen) AS pin_ganti, k2.nama_karyawan AS nama_absen FROM tb_ganti g LEFT JOIN ms_karyawan k ON k.id_karyawan=g.id_karyawan_ganti LEFT JOIN ms_karyawan k2 ON k2.id_karyawan=g.id_karyawan_absen WHERE g.tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+if ($qganti) while ($rg = $qganti->fetch_assoc()) {
+	$pin_g = trim((string)($rg['pin_ganti'] ?? ''));
+	if ($pin_g === '') continue;
+	$tgl_g = $rg['tgl'];
+	$real_k = $pin_g . '_' . $tgl_g;
+	if (isset($grouped[$real_k])) {
+		$grouped[$real_k]['ganti_absen_nama'] = $rg['nama_absen'] ?? '';
+		continue;
+	}
+	$gk = 'GANTI_' . $tgl_g . '_' . (int)$rg['id_karyawan_ganti'] . '_' . (int)$rg['id_karyawan_absen'];
+	if (isset($grouped[$gk])) continue;
+	$grouped[$gk] = ['pin' => $pin_g, 'date' => $tgl_g, 'masuk' => '', 'istirahat_keluar' => '', 'istirahat_masuk' => '', 'pulang' => '', 'raw_times' => [], 'is_pengganti' => true, 'ganti_absen_nama' => $rg['nama_absen'] ?? '', 'ganti_upah' => (float)$rg['upah_bayar']];
+}
+
 $grouped_by_dept = [];
 foreach ($grouped as $key => $row) {
 	if (empty($row['masuk']) && !empty($row['raw_times'])) {
@@ -310,7 +334,16 @@ ksort($grouped_by_dept);
     </tr>
 </table>
 
-<table border="1" style="border-collapse:collapse;">
+<table border="1" style="border-collapse:collapse;table-layout:fixed;font-size:9pt;">
+    <colgroup>
+        <col style="width:28px"><col style="width:62px"><col style="width:42px"><col style="width:105px">
+        <col style="width:65px"><col style="width:65px"><col style="width:42px"><col style="width:52px">
+        <col style="width:42px"><col style="width:42px"><col style="width:42px"><col style="width:42px">
+        <col style="width:42px"><col style="width:42px"><col style="width:52px"><col style="width:52px">
+        <col style="width:65px"><col style="width:75px"><col style="width:58px"><col style="width:58px">
+        <col style="width:58px"><col style="width:58px"><col style="width:58px"><col style="width:58px">
+        <col style="width:75px"><col style="width:48px">
+    </colgroup>
     <tbody>
         <?php
         $grand_total = 0;
@@ -368,42 +401,47 @@ ksort($grouped_by_dept);
                 $upah = $row['upah'];
                 $nama_departmen = $row['nama_departmen'];
 
-                // Cari Shift Terdekat atau gunakan shift terdaftar jika sesuai
+                // Acuan shift: roster tanggal ini bila ada, else master (fallback).
                 $assigned_shift = null;
-                if (!empty($row['id_jadwal'])) {
-                    $q_ass = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '{$row['id_jadwal']}'");
-                    if ($q_ass && $q_ass->num_rows > 0) {
-                        $assigned_shift = $q_ass->fetch_assoc();
-                    }
+                $use_roster = false;
+                $roster_key = $date . '|' . trim((string)$PIN);
+                if (isset($rosterMap[$roster_key]) && !empty($rosterMap[$roster_key]['id_jadwal'])) {
+                	$assigned_shift = $rosterMap[$roster_key];
+                	$use_roster = true;
+                } elseif (!empty($row['id_jadwal'])) {
+                	$q_ass = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '{$row['id_jadwal']}'");
+                	if ($q_ass && $q_ass->num_rows > 0) {
+                		$assigned_shift = $q_ass->fetch_assoc();
+                	}
                 }
                 
-                $use_assigned = false;
-                if ($assigned_shift) {
-                    if (strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false) {
-                        $use_assigned = true;
-                    } else {
-                        if (!empty($masuk) && $masuk != '00:00' && $masuk != '00:00:00') {
-                            $in_time = strtotime("1970-01-01 " . $masuk);
-                            $shift_time = strtotime("1970-01-01 " . $assigned_shift['jam_masuk']);
-                            $diff = abs($in_time - $shift_time);
-                            if ($diff > 43200) {
-                                $diff = 86400 - $diff;
-                            }
-                            // Jika jam masuk riil selisihnya dalam batas 2 jam (7200 detik) dari jam masuk shift terdaftar
-                            if ($diff <= 7200) {
-                                $use_assigned = true;
-                            }
-                        } else {
-                            // Jika tidak absen masuk, gunakan shift terdaftar
-                            $use_assigned = true;
-                        }
-                    }
+                $use_assigned = $use_roster;
+                if (!$use_roster && $assigned_shift) {
+                	if (strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false) {
+                		$use_assigned = true;
+                	} else {
+                		if (!empty($masuk) && $masuk != '00:00' && $masuk != '00:00:00') {
+                			$in_time = strtotime("1970-01-01 " . $masuk);
+                			$shift_time = strtotime("1970-01-01 " . $assigned_shift['jam_masuk']);
+                			$diff = abs($in_time - $shift_time);
+                			if ($diff > 43200) {
+                				$diff = 86400 - $diff;
+                			}
+                			// Jika jam masuk riil selisihnya dalam batas 2 jam (7200 detik) dari jam masuk shift terdaftar
+                			if ($diff <= 7200) {
+                				$use_assigned = true;
+                			}
+                		} else {
+                			// Jika tidak absen masuk, gunakan shift terdaftar
+                			$use_assigned = true;
+                		}
+                	}
                 }
                 
                 if ($use_assigned) {
-                    $shift = $assigned_shift;
+                	$shift = $assigned_shift;
                 } else {
-                    $shift = get_closest_shift($koneksi, $masuk);
+                	$shift = get_closest_shift($koneksi, $masuk);
                 }
                 $s_masuk = '-';
                 $s_keluar = '-';
@@ -502,10 +540,20 @@ ksort($grouped_by_dept);
                 $upah_dibayar = $upah - $total_potongan + $lembur_money;
                 if ($upah_dibayar < 0) $upah_dibayar = 0;
 
+                if (!empty($row['is_pengganti'])) {
+                    $upah = (float)($row['ganti_upah'] ?? 0);
+                    $upah_dibayar = $upah;
+                    $hasil_kerja = 'HADIR';
+                    $nama_karyawan .= ' (PENGGANTI' . (!empty($row['ganti_absen_nama']) ? ' - ' . $row['ganti_absen_nama'] : '') . ')';
+                } elseif (!empty($row['ganti_absen_nama'])) {
+                    $nama_karyawan .= ' (Juga menggantikan ' . $row['ganti_absen_nama'] . ')';
+                    $hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
+                } else {
+                    $hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
+                }
+
                 $grand_total += $upah_dibayar;
                 $grand_karyawan++;
-
-                $hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
 
                 echo "<tr>
                     <td align='center'>$no</td>

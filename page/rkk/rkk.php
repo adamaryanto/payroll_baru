@@ -39,6 +39,9 @@ if (strtolower($_SESSION['role']) == "owner") {
                 <a href="?page=rkk&aksi=tambah" class="flex-1 md:flex-none justify-center inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white text-[15px] font-medium py-2.5 px-5 rounded shadow-sm transition-colors">
                     <i class="fas fa-plus mr-1.5"></i> Tambah Data
                 </a>
+                <a href="?page=rkk&aksi=import" class="flex-1 md:flex-none justify-center inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white text-[15px] font-medium py-2.5 px-5 rounded shadow-sm transition-colors">
+                    <i class="fas fa-file-excel mr-1.5"></i> Import Excel
+                </a>
                 <a href="?page=rkk&aksi=hapus_massal" class="flex-1 md:flex-none justify-center inline-flex items-center bg-rose-600 hover:bg-rose-700 text-white text-[15px] font-medium py-2.5 px-5 rounded shadow-sm transition-colors">
                     <i class="fas fa-trash mr-1.5"></i> Hapus Masal
                 </a>

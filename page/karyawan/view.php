@@ -27,6 +27,7 @@ if (isset($_GET['id'])) {
     $jeniskelamin = $data['jenis_kelamin'];
     $noktp = $data['no_ktp'];
     $nobpjs = $data['no_bpjs'];
+    $notelp = $data['no_telp'] ?? '';
     $alamatktp = $data['alamat_ktp'];
     $alamattinggal = $data['alamat_tinggal'];
     $statuskaryawan = $data['status_karyawan'];
@@ -47,6 +48,7 @@ if (isset($_GET['id'])) {
     $jeniskelamin = "";
     $noktp = "";
     $nobpjs = "";
+    $notelp = "";
     $alamatktp = "";
     $alamattinggal = "";
     $statuskaryawan = "";
@@ -212,6 +214,12 @@ if (isset($_GET['id'])) {
                         <label class="block text-sm font-semibold text-gray-500 mb-2">No. BPJS</label>
                         <div class="px-4 py-3 bg-gray-50 rounded-lg border border-gray-200 text-gray-800 font-medium font-mono text-lg tracking-wider">
                             <?php echo $nobpjs ? $nobpjs : '-'; ?>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="block text-sm font-semibold text-gray-500 mb-2">No. Telp / Whatsapp</label>
+                        <div class="px-4 py-3 bg-gray-50 rounded-lg border border-gray-200 text-gray-800 font-medium font-mono text-lg tracking-wider">
+                            <?php echo $notelp ? $notelp : '-'; ?>
                         </div>
                     </div>
 

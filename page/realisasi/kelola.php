@@ -70,6 +70,8 @@ if (isset($_GET['id'])) {
         G.golongan as label_gol,
         RD.status_rkk,
         GB.nama_grup as label_grup,
+        GA.is_borongan as is_borongan_orang,
+        GB.is_borongan as is_borongan_grup,
         RD.upah as upah_rkk,
         J.jam_masuk as shift_masuk,
         J.jam_keluar as shift_keluar,
@@ -108,6 +110,7 @@ if (isset($_GET['id'])) {
         LEFT JOIN tb_rkk_detail RD ON A.id_rkk_detail = RD.id_rkk_detail
         LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal
         LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
+        LEFT JOIN ms_grup_borongan_anggota GA ON GA.id_grup = A.id_grup AND GA.id_karyawan = A.id_karyawan AND A.id_karyawan <> 0
         WHERE A.id_realisasi = '$idrealisasi'
         ORDER BY (GB.nama_grup IS NULL), GB.nama_grup ASC, nama_tampil ASC
     ");
@@ -653,13 +656,26 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                         </div>
                         <div class="table-responsive rounded-lg border border-gray-800">
                             <table class="table table-hover table-clean align-middle mb-0 table-modern w-full min-w-[1600px]" id="tabel-realisasi">
-                            <tbody>
-                                <?php
+                              <tbody>
+                                  <?php
                                 $no = 1;
                                 $total = 0;
                                 $jml_active = 0;
+                                // Peta rincian borongan per detail (satu query untuk semua baris)
+                                $koneksi->query("CREATE TABLE IF NOT EXISTS tb_realisasi_borongan (
+                                  id_borongan INT AUTO_INCREMENT PRIMARY KEY,
+                                  id_realisasi_detail INT NOT NULL,
+                                  nama_pekerjaan VARCHAR(100) NOT NULL,
+                                  qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+                                  tarif INT NOT NULL DEFAULT 0,
+                                  KEY idx_detail (id_realisasi_detail)
+                                ) ENGINE=InnoDB");
+                                $bor_map = [];
+                                $qb_all = $koneksi->query("SELECT b.* FROM tb_realisasi_borongan b JOIN tb_realisasi_detail d ON b.id_realisasi_detail = d.id_realisasi_detail WHERE d.id_realisasi = '$idrealisasi' ORDER BY b.id_borongan ASC");
+                                while ($qb_all && ($rb_map = $qb_all->fetch_assoc())) $bor_map[$rb_map['id_realisasi_detail']][] = $rb_map;
+                                $jml_active = 0;
                                 $last_dept = null;
-                                $ncol = (strtolower($_SESSION['role']) != 'admin hr') ? 16 : 15;
+                                $ncol = (strtolower($_SESSION['role']) != 'admin hr') ? 17 : 16;
                                 $aksi_th = (strtolower($_SESSION['role']) != 'admin hr') ? '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Aksi</th>' : '';
 
                                 while ($data = $tampil->fetch_assoc()) {
@@ -681,6 +697,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Jam Masuk</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Istirahat<br>Masuk</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Jam Pulang</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Detail Borongan</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#EFEFEF;">Hasil Kerja</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Upah</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Potongan</th>'
@@ -689,6 +706,11 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                             . $aksi_th . '</tr>';
                                     }
                                     $upah = $data['upahkaryawan'];
+
+                                    // Total borongan tersimpan (dipakai override upah di bawah + sel harga)
+                                    $bor_lines = $bor_map[$data['id_realisasi_detail']] ?? [];
+                                    $bor_total = 0;
+                                    foreach ($bor_lines as $ln0) $bor_total += (int)round((float)$ln0['qty'] * (int)$ln0['tarif']);
 
                                     $isFullMissing = (empty($data['r_jam_masuk']) || strtotime($data['r_jam_masuk']) == strtotime('00:00:00')) &&
                                         (empty($data['r_jam_keluar']) || strtotime($data['r_jam_keluar']) == strtotime('00:00:00'));
@@ -765,6 +787,18 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                             $potLainnyaValue = 0;
                                         }
 
+                                     if ($bor_total > 0) {
+                                         // Borongan: upah & upah dibayar ikut total borongan, bukan gaji master
+                                         $finalUpah = $bor_total;
+                                         $finalLembur = 0;
+                                         $potTelatValue = 0;
+                                         $potIstirahatKeluarValue = 0;
+                                         $potIstirahatMasukValue = 0;
+                                         $potPulangValue = 0;
+                                         $potTidakLengkapValue = 0;
+                                         $potLainnyaValue = 0;
+                                     }
+
                                     $upah_setelah_potongan = $finalUpah + $finalLembur - $potTelatValue - $potIstirahatKeluarValue - $potIstirahatMasukValue - $potLainnyaValue - $potPulangValue - $potTidakLengkapValue;
                                 ?>
                                     <tr class="data-row" data-dept="<?= htmlspecialchars($dept_now) ?>">
@@ -777,25 +811,17 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                                 <?php if (!empty($data['digantikan_oleh'])) echo " <span class='text-red-600 font-bold'>(Digantikan oleh " . $data['digantikan_oleh'] . ")</span>"; ?>
                                             </strong>
 
+                                            <?php $show_badge = !(($data['status_rkk'] ?? '') == 'Hadir' && $attendanceStatus != 'TIDAK HADIR'); ?>
+                                            <?php if ($show_badge) : ?>
                                             <div class="mt-1">
-                                                <?php if ($data['status_rkk'] == 'Hadir') : ?>
-                                                    <?php if ($attendanceStatus == 'TIDAK HADIR') : ?>
-                                                        <span class="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Tidak Hadir </span>
-                                                    <?php else : ?>
-                                                        <span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Hadir</span>
-                                                    <?php endif; ?>
-                                                <?php elseif ($data['status_rkk'] == 'Tidak Hadir') : ?>
+                                                <?php if ($attendanceStatus == 'TIDAK HADIR' || ($data['status_rkk'] ?? '') == 'Tidak Hadir') : ?>
                                                     <span class="bg-rose-100 text-rose-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Tidak Hadir</span>
-                                                <?php elseif ($data['status_rkk'] == 'Digantikan') : ?>
+                                                <?php elseif (($data['status_rkk'] ?? '') == 'Digantikan') : ?>
                                                     <span class="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Digantikan</span>
-                                                <?php elseif ($data['status_rkk'] == 'Pengganti') : ?>
+                                                <?php elseif (($data['status_rkk'] ?? '') == 'Pengganti') : ?>
                                                     <span class="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Pengganti</span>
                                                 <?php endif; ?>
                                             </div>
-                                            <?php if (!empty($data['label_grup'])) : ?>
-                                                <div class="mt-1">
-                                                    <span class="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded-full">Grup: <?= htmlspecialchars($data['label_grup']) ?></span>
-                                                </div>
                                             <?php endif; ?>
                                         </td>
                                         <td data-label="Paraf Pekerja" align="center"></td>
@@ -821,7 +847,22 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                                                                 $hasScheduleOut = !empty($data['r_jam_keluar']);
                                                                                 echo ($hasScheduleOut && $isEmptyLogOut) ? 'bg-red-custom' : ($isEarlyOut ? 'bg-yellow-custom' : '');
                                                                                 ?>"><?php echo (empty($data['ra_keluar']) || $data['ra_keluar'] == '00:00:00') ? '' : $data['ra_keluar']; ?></td>
-                                        <td data-label="Hasil Kerja"><?php echo $data['hasil_kerja']; ?></td>
+                                        <?php
+                                        $bor_detail_html = '-';
+                                        $bor_hasil_sum = 0;
+                                        $bor_lines = $bor_map[$data['id_realisasi_detail']] ?? [];
+                                        if (!empty($bor_lines)) {
+                                            $parts_b = [];
+                                            foreach ($bor_lines as $ln_b) {
+                                                $bor_hasil_sum += (float)$ln_b['qty'];
+                                                $lt_b = (int)round((float)$ln_b['qty'] * (int)$ln_b['tarif']);
+                                                $parts_b[] = htmlspecialchars(strtoupper($ln_b['nama_pekerjaan'])) . ' : ' . rtrim(rtrim(number_format((float)$ln_b['qty'], 2, '.', ''), '0'), '.') . ' kg x ' . number_format($ln_b['tarif'], 0, ',', '.') . ' = Rp' . number_format($lt_b, 0, ',', '.');
+                                            }
+                                            $bor_detail_html = implode(', ', $parts_b);
+                                        }
+                                        ?>
+                                        <td data-label="Detail Borongan" class="text-left"><?= $bor_detail_html ?></td>
+                                        <td data-label="Hasil Kerja"><?php echo !empty($bor_lines) ? rtrim(rtrim(number_format($bor_hasil_sum, 2, '.', ''), '0'), '.') : $data['hasil_kerja']; ?></td>
                                         <td data-label="Upah" class="text-right">
                                             <?= rupiah($finalUpah) ?>
                                         </td>
@@ -838,12 +879,19 @@ function bulkSavePenalties($koneksi, $id_realisasi)
 
                                         <?php if (strtolower($_SESSION['role']) != 'admin hr') { ?>
                                             <td data-label="Aksi">
-                                                <div class="flex-action">
+                                                <div class="flex-action" style="display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center;">
                                                     <?php if (strtolower($_SESSION['role']) != 'admin hr') { ?>
                                                         <a href="?page=realisasi&aksi=detail&id=<?php echo $data['id_realisasi_detail']; ?>"
                                                             class="btn btn-xs btn-info" style="background-color: #3498DB; border:none; border-radius:4px; padding:4px 10px;">
                                                             <i class="fa fa-eye"></i> Detail
                                                         </a>
+                                                        <?php if (!empty($data['is_borongan_orang'])) { ?>
+                                                        <button type="button"
+                                                            class="btn btn-xs btn-borongan" style="background-color: #8b5cf6; color: #fff; border:none; border-radius:4px; padding:4px 10px; margin-left:4px;"
+                                                            data-id="<?php echo $data['id_realisasi_detail']; ?>">
+                                                            <i class="fa fa-list"></i> Borongan
+                                                        </button>
+                                                        <?php } ?>
                                                     <?php } ?>
                                                 </div>
                                             </td>
@@ -856,6 +904,29 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                 ?>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+
+                <div class="modal fade" id="modalBorongan" tabindex="-1" role="dialog">
+                    <div class="modal-dialog modal-lg" role="document">
+                        <div class="modal-content">
+                            <div class="modal-header" style="background:#8b5cf6; color:#fff;">
+                                <h5 class="modal-title font-bold" id="borJudul">Detail Borongan</h5>
+                                <button type="button" class="close text-white" data-dismiss="modal"><span>&times;</span></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="hidden" id="borIdDetail" value="">
+                                <div style="overflow-x:auto;">
+                                    <div id="borRows"></div>
+                                </div>
+                                <button type="button" id="borModalAdd" class="btn btn-sm btn-success mt-2">+ Tambah Pekerjaan</button>
+                                <div class="mt-2 text-right">Total borongan: <b id="borModalGrand">Rp 0</b></div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-dismiss="modal">Tutup</button>
+                                <button type="button" id="borModalSave" class="btn btn-primary" style="background:#8b5cf6; border:none;">Simpan</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1404,5 +1475,133 @@ function bulkSavePenalties($koneksi, $id_realisasi)
             });
         });
     });
+</script>
+<script>
+$(document).ready(function() {
+    let borDefaultTarif = 0, borGrupOpt = '', borNamesOpt = '', borCurId = null, borCurCell = null;
+
+    function borEsc(s) {
+        return String(s === null || s === undefined ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function borSel2(sel) {
+        if ($.fn.select2) $(sel).select2({ theme: 'bootstrap4', tags: true, width: '100%', dropdownParent: $('#modalBorongan'), placeholder: '-- Pilih / ketik baru --' });
+    }
+    function borModalCalc() {
+        let grand = 0;
+        $('#borRows .bor-row').each(function() {
+            const q = parseFloat($(this).find('.bor-qty').val()) || 0;
+            const t = parseFloat($(this).find('.bor-tarif').val()) || 0;
+            const line = Math.round(q * t);
+            grand += line;
+            $(this).find('.bor-total').val(line ? 'Rp ' + line.toLocaleString('id-ID') : '');
+        });
+        $('#borModalGrand').text('Rp ' + grand.toLocaleString('id-ID'));
+    }
+    function borAllOpt() {
+        return '<option value="">-- Pilih / ketik baru --</option>' + borGrupOpt + borNamesOpt;
+    }
+    function borRowHtml(nama, qty, tarif) {
+        return '<div class="bor-row" style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin-bottom:8px;">'
+            + '<select class="form-control bor-nama" style="min-width:170px;flex:1 1 auto;">' + borAllOpt() + '</select>'
+            + '<span style="white-space:nowrap;">:</span>'
+            + '<input type="number" step="any" class="form-control text-center bor-qty" style="width:90px;flex:0 0 auto;" value="' + borEsc(qty) + '">'
+            + '<span style="white-space:nowrap;">kg x</span>'
+            + '<input type="number" class="form-control text-right bor-tarif" style="width:130px;flex:0 0 auto;" value="' + borEsc(tarif) + '">'
+            + '<span>=</span>'
+            + '<input type="text" class="form-control text-right bor-total" style="width:150px;flex:0 0 auto;" readonly>'
+            + '<button type="button" class="btn btn-sm btn-danger bor-del" style="flex:0 0 auto;">X</button>'
+            + '</div>';
+    }
+
+    $(document).on('click', '.btn-borongan', function() {
+        borCurId = $(this).data('id');
+        borCurCell = $(this).closest('tr').find('td[data-label="Detail Borongan"]');
+        $.getJSON('page/realisasi/borongan_ajax.php', { id_detail: borCurId }, function(res) {
+            if (!res.ok) {
+                Swal.fire({ icon: 'error', title: 'Gagal', text: res.msg || 'Tidak bisa memuat data', confirmButtonColor: '#8b5cf6' });
+                return;
+            }
+            $('#borJudul').text('Detail Borongan — ' + res.nama + (res.grup ? ' (' + res.grup + ')' : ''));
+            borDefaultTarif = res.default_tarif || 0;
+            const seenBor = {};
+            borGrupOpt = '';
+            (res.grups || []).forEach(function(g) {
+                const nm = g.nama || '';
+                if (!nm || seenBor[nm]) return;
+                seenBor[nm] = true;
+                const rt = (g.harga !== null && g.harga !== '') ? g.harga : '';
+                borGrupOpt += '<option value="' + borEsc(nm) + '" data-rate="' + borEsc(rt) + '">' + borEsc(nm) + (rt !== '' ? ' (Rp' + Number(rt).toLocaleString('id-ID') + '/kg)' : '') + '</option>';
+            });
+            borNamesOpt = '';
+            (res.names || []).forEach(function(n) {
+                if (!n || seenBor[n]) return;
+                seenBor[n] = true;
+                borNamesOpt += '<option>' + borEsc(n) + '</option>';
+            });
+            const tb = $('#borRows');
+            tb.empty();
+            (res.lines || []).forEach(function(l) {
+                const tr = $(borRowHtml(l.nama_pekerjaan, l.qty, l.tarif));
+                tr.find('.bor-nama').val(l.nama_pekerjaan);
+                tb.append(tr);
+            });
+            tb.find('.bor-nama').each(function() { borSel2(this); });
+            borModalCalc();
+            $('#modalBorongan').modal('show');
+        }).fail(function() {
+            Swal.fire({ icon: 'error', title: 'Gagal', text: 'Tidak bisa menghubungi server', confirmButtonColor: '#8b5cf6' });
+        });
+    });
+
+    $('#borModalAdd').on('click', function() {
+        const tr = $(borRowHtml('', '', borDefaultTarif));
+        $('#borRows').append(tr);
+        borSel2(tr.find('.bor-nama'));
+        borModalCalc();
+    });
+
+    // Pilih grup dari dropdown -> tarif otomatis ikut (masih bisa diedit)
+    $(document).on('change', '.bor-nama', function() {
+        const r = $(this).find(':selected').data('rate');
+        if (r !== undefined && r !== null && String(r) !== '') $(this).closest('.bor-row').find('.bor-tarif').val(r);
+    });
+
+    $(document).on('click', '.bor-del', function() {
+        $(this).closest('.bor-row').remove();
+        borModalCalc();
+    });
+    $(document).on('input change', '.bor-qty, .bor-tarif, .bor-nama', borModalCalc);
+
+    $('#borModalSave').on('click', function() {
+        const lines = [];
+        $('#borRows .bor-row').each(function() {
+            const nm = $(this).find('.bor-nama').val();
+            if (!nm || !String(nm).trim()) return;
+            lines.push({ nama: String(nm).trim(), qty: $(this).find('.bor-qty').val() || 0, tarif: $(this).find('.bor-tarif').val() || 0 });
+        });
+        $.post('page/realisasi/borongan_ajax.php', { id_detail: borCurId, lines: lines }, function(res) {
+            if (res.ok) {
+                if (res.n > 0 && res.total > 0) {
+                    const $tr = borCurCell.closest('tr');
+                    borCurCell.html(res.html_detail);
+                    $tr.find('td[data-label="Hasil Kerja"]').text(res.hasil_sum);
+                    $tr.find('td[data-label="Upah"]').text(res.upah_rp);
+                    $tr.find('td[data-label="Upah Dibayar"]').text(res.upah_rp);
+                    $tr.find('td[data-label="Potongan"]').text('Rp 0');
+                    $tr.find('td[data-label="Lembur"]').text('Rp 0');
+                    $('#modalBorongan').modal('hide');
+                    Swal.fire({ icon: 'success', title: 'Tersimpan', text: res.n + ' baris rincian', confirmButtonColor: '#8b5cf6' });
+                } else {
+                    location.reload();
+                }
+            } else {
+                Swal.fire({ icon: 'error', title: 'Gagal', text: res.msg || 'Gagal menyimpan', confirmButtonColor: '#8b5cf6' });
+            }
+        }, 'json').fail(function() {
+            Swal.fire({ icon: 'error', title: 'Gagal', text: 'Tidak bisa menghubungi server', confirmButtonColor: '#8b5cf6' });
+        });
+    });
+});
 </script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>

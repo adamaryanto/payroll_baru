@@ -309,7 +309,7 @@ if (isset($_POST['bulk_copy_selected'])) {
                 <p class="text-[12px] text-gray-400 mt-0.5 mb-0">Kelola informasi detail dan upah seluruh karyawan</p>
             </div>
             <div class="w-full md:w-auto mt-2 md:mt-0 flex flex-col md:flex-row gap-2 flex-wrap">
-                <form method="POST" id="formSyncAll">
+                 <form method="POST" id="formSyncAll">
                     <button type="button" id="btnSyncAll" class="flex md:inline-flex justify-center items-center bg-amber-500 hover:bg-amber-600 text-white text-[15px] font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto">
                         <i class="fas fa-cloud-upload-alt mr-1.5"></i> Sync Semua ke Mesin
                     </button>
@@ -336,13 +336,13 @@ if (isset($_POST['bulk_copy_selected'])) {
                                 return;
                             }
                             var pins = res.missing.map(function(m){ return m.pin; });
-                            var nm = res.missing.map(function(m){ return '• ' + esc(m.pin) + ' - ' + esc(m.nama); }).join('<br>');
+                            var nm = res.missing.map(function(m){ return '• ' + esc(m.pin) + ' - ' + esc(m.nama) + ((m.kurang_di && m.kurang_di.length) ? ' <span style="color:#6b7280;">(kurang di: ' + esc(m.kurang_di.join(', ')) + ')</span>' : ''); }).join('<br>');
                             var on = (res.online||[]).map(function(d){ return '• ' + esc(d); }).join('<br>') || '-';
                             var off = (res.offline||[]).map(function(d){ return '• ' + esc(d); }).join('<br>');
                             Swal.fire({
                                 title: 'Sync ke Mesin?',
                                 html: '<div style="text-align:left;font-size:14px;">' +
-                                      'Belum ada di mesin SOAP yang dicek (' + res.missing.length + '):<br>' +
+                                       'Belum lengkap di mesin (kurang di sebagian/seluruh mesin online) (' + res.missing.length + '):<br>' +
                                       '<div style="max-height:180px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;">' + nm + '</div>' +
                                       '<br>Mesin online:<br>' + on +
                                       (off !== '-' ? '<br><br><span style="color:#6b7280;">Tidak dicek (offline/IP kosong):<br>' + off + '</span>' : '') +
@@ -381,15 +381,20 @@ if (isset($_POST['bulk_copy_selected'])) {
                 <a href="?page=karyawan&aksi=tambah" class="flex md:inline-flex justify-center items-center bg-indigo-600 hover:bg-indigo-700 text-white text-[15px] font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto">
                     <i class="fas fa-plus mr-1.5"></i> Tambah Karyawan
                 </a>
-                <a href="?page=karyawan&aksi=debug_mesin" class="flex md:inline-flex justify-center items-center bg-slate-500 hover:bg-slate-600 text-white text-[15px] font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto">
-                    <i class="fas fa-stethoscope mr-1.5"></i> Debug Mesin
-                </a>
+                <!-- Tombol Debug Mesin disembunyikan (halaman tetap bisa dibuka via URL langsung) -->
+                <?php if (strtolower($role ?? '') == 'admin master'): ?>
                 <a href="?page=karyawan&aksi=cek_pin" class="flex md:inline-flex justify-center items-center bg-teal-600 hover:bg-teal-700 text-white text-[15px] font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto">
                     <i class="fas fa-search mr-1.5"></i> Cek PIN Mesin
                 </a>
+                <?php endif; ?>
+                <a href="?page=karyawan&aksi=jadwal_excel" class="flex md:inline-flex justify-center items-center bg-amber-600 hover:bg-amber-700 text-white text-[15px] font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto">
+                    <i class="fas fa-calendar-alt mr-1.5"></i> Ubah Jadwal Excel
+                </a>
+                <?php if (strtolower($role ?? '') == 'admin master'): ?>
                 <a href="?page=karyawan&aksi=fingerprint_backup" class="flex md:inline-flex justify-center items-center bg-cyan-600 hover:bg-cyan-700 text-white text-[15px] font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto">
                     <i class="fas fa-database mr-1.5"></i> Backup Sidik Jari
                 </a>
+                <?php endif; ?>
             </div>
         </div>
         <?php if(!empty($tarik_results)): ?>
@@ -566,6 +571,7 @@ if (isset($_POST['bulk_copy_selected'])) {
             <div class="flex gap-2">
                 <button type="button" id="btnBulkCopy" class="hidden bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded shadow-sm"><i class="fas fa-copy mr-1.5"></i> Copy Sidik Terpilih</button>
                 <button type="button" id="btnBulkDelete" class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium py-2 px-4 rounded shadow-sm"><i class="fas fa-trash mr-1.5"></i> Hapus Terpilih</button>
+                <span id="swMini" class="text-xs text-gray-500 self-center" title="Jadwal auto-sweep sidik jari">Sweep: …</span>
             </div>
         </div>
         <form method="POST" id="bulkForm">
@@ -573,8 +579,83 @@ if (isset($_POST['bulk_copy_selected'])) {
         $__enr = [];
         $__qdev = $koneksi->query("SELECT id_mesin, nama_mesin, ip_mesin FROM tb_mesin ORDER BY no_mesin");
         while ($__qdev && ($__dd = $__qdev->fetch_assoc())) { if (!empty($__dd['ip_mesin'])) $__enr[] = ['id' => $__dd['id_mesin'], 'nama' => $__dd['nama_mesin'], 'ip' => $__dd['ip_mesin']]; }
+        if (!function_exists('sweep_get_config')) { @include_once __DIR__ . '/../../fingerprint_db_helper.php'; }
+        $__swm = ['enabled' => false, 'label' => '-', 'remain' => 0];
+        if (function_exists('sweep_get_config') && isset($koneksi)) {
+            $__swc2 = sweep_get_config($koneksi);
+            $__swm['enabled'] = !empty($__swc2['enabled']);
+            $__iv = (int)$__swc2['interval_jam'];
+            $__swm['label'] = $__iv === -1 ? '1 menit' : ($__iv === 0 ? '5 menit' : $__iv . ' jam');
+            if ($__swm['enabled'] && !empty($__swc2['last_run'])) {
+                $__swm['remain'] = max(0, strtotime($__swc2['last_run']) + sweep_interval_seconds($__iv) - time());
+            }
+        }
         ?>
         <script type="application/json" id="enroll-machines-data"><?= json_encode($__enr) ?></script>
+        <script type="application/json" id="sweep-mini-data"><?= json_encode($__swm) ?></script>
+        <script>
+        // Indikator + pemicu sweep di halaman karyawan (mandiri, tanpa reload).
+        // Hitung mundur habis -> panggil endpoint sweep via background XHR.
+        // Server yang menilai due/lock/cooldown, jadi aman dobel dengan runner global.
+        (function(){
+          var D = null;
+          try { D = JSON.parse(document.getElementById('sweep-mini-data').textContent); } catch(e){ D = null; }
+          var el = document.getElementById('swMini');
+          if (!el || !D) return;
+          function pad(n){ return (n<10?'0':'')+n; }
+          function fmt(sec){ var h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60; return pad(h)+':'+pad(m)+':'+pad(s); }
+          if (!D.enabled) { el.textContent = 'Sweep: Mati'; return; }
+          var EP = 'page/karyawan/ajax_sweep_run.php';
+          var cdTimer = null;
+          function stopCountdown(){ try { if (cdTimer) clearInterval(cdTimer); } catch(e){} cdTimer = null; }
+          function countdown(sec){
+            stopCountdown();
+            var total = Math.max(0, sec), t0 = performance.now(), label = D.label, fired = false;
+            var fire = function(){
+              if (fired) return; fired = true;
+              stopCountdown();
+              el.textContent = 'Sweep: Nyala • tiap ' + label + ' • waktunya tiba…';
+              runSweep();
+            };
+            var tick = function(){
+              var d = Math.max(0, total - Math.floor((performance.now() - t0)/1000));
+              if (d <= 0) { fire(); return; }
+              el.textContent = 'Sweep: Nyala • tiap ' + label + ' • jalan ' + fmt(d);
+            };
+            tick();
+            if (total > 0) cdTimer = setInterval(tick, 1000);
+          }
+          function runSweep(){
+            el.textContent = 'Sweep: jalan…';
+            var xhr = new XMLHttpRequest();
+            var done = false;
+            function finish(ok, msg, nextIn){
+              if (done) return; done = true;
+              if (ok) {
+                el.textContent = 'Sweep: selesai. Berikutnya ' + fmt(Math.max(0, nextIn)) + '.';
+                countdown(Math.max(30, nextIn));
+              } else {
+                el.textContent = 'Sweep: ' + msg + '. Coba lagi 60 detik.';
+                countdown(60);
+              }
+            }
+            xhr.open('POST', EP, true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onload = function(){
+              var m = xhr.responseText.match(/__RESULT__(\{.*\})/);
+              var info = null;
+              try { info = m ? JSON.parse(m[1]) : null; } catch(e){}
+              if (info && info.ran) finish(true, '', info.next_in || 0);
+              else if (info && info.reason) finish(false, 'dilewati (' + info.reason + ')');
+              else finish(false, 'gagal');
+            };
+            xhr.onerror = function(){ finish(false, 'koneksi gagal'); };
+            xhr.send('start=1');
+          }
+          if (!D.remain) countdown(3); else countdown(D.remain);
+        })();
+        </script>
+        <!-- Auto-sweep global dipegang index.php (assets/js/sweep-auto.js): berlaku di semua halaman termasuk ini. -->
         <div class="p-0">
             <div class="table-responsive px-3 py-3">
                 <table class="w-full text-left border-collapse table-modern" id="dataTables-example">
@@ -621,6 +702,16 @@ if (isset($_POST['bulk_copy_selected'])) {
                                     <div class="block">
                                         <span class="inline-block w-12 text-gray-400 font-medium">BPJS:</span>
                                         <span class="text-gray-700 font-semibold"><?= $datakaryawan['no_bpjs'] ?></span>
+                                    </div>
+
+                                    <div class="block">
+                                        <span class="inline-block w-12 text-gray-400 font-medium">Telp:</span>
+                                        <span class="text-gray-700 font-semibold"><?= $datakaryawan['no_telp'] ?? '-' ?></span>
+                                    </div>
+                                    
+                                    <div class="block">
+                                        <span class="inline-block w-12 text-gray-400 font-medium">WA:</span>
+                                        <span class="text-gray-700 font-semibold"><?= $datakaryawan['whatsapp'] ?? '-' ?></span>
                                     </div>
                                 </td>
                                 <td data-label="Finger" class="md:text-center finger-cell" data-id="<?= $datakaryawan['id_karyawan'] ?>"><span class="text-xs text-gray-400">-</span><button type="button" class="hidden btn-cek-finger" data-id="<?= $datakaryawan['id_karyawan'] ?>"></button></td>
@@ -979,18 +1070,35 @@ if (isset($_POST['bulk_copy_selected'])) {
             const nama = $(this).data('nama');
             
             Swal.fire({
-                title: 'Apakah anda yakin?',
-                text: "Data karyawan " + nama + " akan dihapus! Daftar user di mesin ditampilkan dulu untuk dipilih.",
+                title: 'Hapus karyawan?',
+                html: 'Hapus <b>'+nama+'</b> dari <b>semua mesin + database</b>?<br><span class="text-xs text-gray-500">Mesin yang offline akan dilewati. Tidak bisa dibatalkan.</span>',
                 icon: 'warning',
                 showCancelButton: true,
+                confirmButtonText: 'Ya, Hapus',
+                cancelButtonText: 'Batal',
                 confirmButtonColor: '#e11d48',
                 cancelButtonColor: '#64748b',
-                confirmButtonText: 'Lanjut',
-                cancelButtonText: 'Batal',
                 reverseButtons: true
             }).then((result) => {
-                if (result.isConfirmed) {
-                    Swal.fire({title:'Mengecek mesin...', allowOutsideClick:false, showConfirmButton:false, showCancelButton:false, didOpen:()=>Swal.showLoading()});
+                if (!result.isConfirmed) return;
+                Swal.fire({title:'Menghapus...', allowOutsideClick:false, showConfirmButton:false, showCancelButton:false, didOpen:()=>Swal.showLoading()});
+                $.post('page/karyawan/ajax_hapus.php',{action:'delete_direct',id:id},function(ex){
+                    if(!ex.success){ Swal.fire({title:'Gagal',text:ex.msg,icon:'error'}); return; }
+                    let h='<div class="text-left text-sm">'+ex.msg+'<div class="mt-2">';
+                    for(const did in (ex.results||{})){ const x=ex.results[did]; if(!x.device) continue; h+='<div class="p-2 border rounded mb-1"><b>'+x.device+'</b>: '+x.message+'</div>'; }
+                    h+='</div></div>';
+                    Swal.fire({title:'Berhasil',html:h,icon:'success',confirmButtonColor:'#4f46e5'}).then(()=>location.reload());
+                },'json');
+            });
+            return;
+        });
+
+        // Catatan: alur hapus lama (preview cek mesin per user) tidak dipakai lagi di tombol ini.
+        // Kalau sesekali perlu hapus selektif per mesin / nama dobel, pakai Hapus Massal (masih pakai preview).
+        $(document).on('click', '.btn-delete-karyawan-legacy', function() {
+            const id = $(this).data('id');
+            const nama = $(this).data('nama');
+            Swal.fire({title:'Mengecek mesin...', allowOutsideClick:false, showConfirmButton:false, showCancelButton:false, didOpen:()=>Swal.showLoading()});
                     $.post('page/karyawan/ajax_hapus.php',{action:'preview',id:id},function(pv){
                         if(!pv.success){ Swal.fire({title:'Gagal',text:pv.msg,icon:'warning'}); return; }
                         let n=0, html='<div class="text-left text-sm">';
@@ -1038,8 +1146,6 @@ if (isset($_POST['bulk_copy_selected'])) {
                             },'json');
                         });
                     },'json');
-                }
-            });
         });
 
         $(document).on('click', '.btn-regis-copy', function(){
@@ -1077,14 +1183,15 @@ if (isset($_POST['bulk_copy_selected'])) {
                     },'json');
                 } else if(r.isDenied){
                     // Enroll + auto-sebar langsung di popup: pilih master -> mulai -> pantau -> sebar otomatis
-                    const opts = ENROLL_MACHINES.map(d=>`<option value="${d.id}">${d.nama} (${d.ip})</option>`).join('');
-                    if(!opts){ Swal.fire({title:'Gagal', text:'Tidak ada mesin ber-IP di Setting Device.', icon:'warning'}); return; }
+                    let opts = '<option value="auto" style="font-weight:bold;">🔍 AUTO-DETECT (scan semua mesin)</option>';
+                    opts += ENROLL_MACHINES.map(d=>`<option value="${d.id}">${d.nama} (${d.ip})</option>`).join('');
+                    if(ENROLL_MACHINES.length === 0){ Swal.fire({title:'Gagal', text:'Tidak ada mesin ber-IP di Setting Device.', icon:'warning'}); return; }
                     Swal.fire({
                         title: 'Enroll + Auto-sebar',
                         html: `<div class="text-left text-sm">PIN <b>${pin}</b> - ${nama}<br>
                             <label class="block mt-2 mb-1 font-semibold">Mesin master (tempat tempel jari)</label>
                             <select id="swMaster" class="w-full border border-gray-300 rounded px-2 py-1.5">${opts}</select>
-                            <div class="text-xs text-gray-500 mt-1">Sesudah mulai, tempel jari 3x di mesin itu — sidik yang jadi otomatis disebar.</div></div>`,
+                            <div class="text-xs text-gray-500 mt-1">Pilih mesin spesifik atau <b>AUTO-DETECT</b>. Sesudah mulai, tempel jari 3x di mesin — sidik yang jadi otomatis disebar.</div></div>`,
                         showCancelButton: true,
                         confirmButtonText: 'Mulai Enroll',
                         cancelButtonText: 'Tutup',
@@ -1107,7 +1214,9 @@ if (isset($_POST['bulk_copy_selected'])) {
                         $.post('page/karyawan/ajax_enroll_auto.php',{action:'start',karyawan_id:id,master_id:mid},function(res){
                             if(enrollCancelled) return;
                             if(!res.success){ Swal.fire({title:'Gagal',text:res.msg,icon:'warning',confirmButtonColor:'#7c3aed'}); return; }
+                            const isAutoMode = mid === 'auto';
                             const base = res.baseline||[];
+                            const baselines = isAutoMode ? (res.baselines || {}) : null;
                             let n = 0;
                             Swal.fire({
                                 title:'Tempel Jari Sekarang',
@@ -1119,13 +1228,19 @@ if (isset($_POST['bulk_copy_selected'])) {
                                 const el=document.getElementById('swPoll');
                                 if(el) el.textContent='memantau… (cek ke-'+n+' / 36)';
                                 if(n>36){ clearInterval(window._enrollTimer); window._enrollTimer=null; Swal.update({html:'<p class="text-sm text-amber-600">Waktu habis (3 menit). Pakai Copy ke Mesin Lain.</p>'}); return; }
-                                $.post('page/karyawan/ajax_enroll_auto.php',{action:'poll',pin:res.pin,master_id:mid,baseline:base},function(pr){
+                                const pollData = isAutoMode 
+                                    ? {action:'poll', pin:res.pin, master_id:'auto', baselines_json:JSON.stringify(baselines)}
+                                    : {action:'poll', pin:res.pin, master_id:mid, baseline:base};
+                                $.post('page/karyawan/ajax_enroll_auto.php',pollData,function(pr){
                                     if(!pr.success){ clearInterval(window._enrollTimer); window._enrollTimer=null; Swal.fire({title:'Gagal',text:pr.msg,icon:'warning'}); return; }
                                     if(pr.done){
                                         clearInterval(window._enrollTimer); window._enrollTimer=null;
                                         const box=document.getElementById('swRes');
-                                        if(box) box.innerHTML='<p class="text-sm text-green-700 font-semibold">Sidik terdeteksi (jari: '+pr.new.join(', ')+') — menyebar...</p>';
-                                        $.post('page/karyawan/ajax_enroll_auto.php',{action:'spread',pin:res.pin,master_id:mid},function(sr){
+                                        if(box) box.innerHTML = isAutoMode 
+                                            ? '<p class="text-sm text-green-700 font-semibold">✅ Sidik terdeteksi di <b>'+pr.detected_device_name+' ('+pr.detected_device_ip+')</b> (jari: '+pr.new.join(', ')+') — menyebar...</p>'
+                                            : '<p class="text-sm text-green-700 font-semibold">Sidik terdeteksi (jari: '+pr.new.join(', ')+') — menyebar...</p>';
+                                        const spreadMid = isAutoMode ? pr.detected_device_id : mid;
+                                        $.post('page/karyawan/ajax_enroll_auto.php',{action:'spread',pin:res.pin,master_id:spreadMid},function(sr){
                                             let html='<div class="text-left text-sm mt-2">';
                                             if(sr.success){ for(const did in (sr.results||{})){ const x=sr.results[did]; html+='<div class="p-2 border rounded mb-1">'+x.device+': '+x.message+'</div>'; } }
                                             else html+='<p class="text-red-600">'+sr.msg+'</p>';

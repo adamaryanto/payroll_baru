@@ -46,9 +46,30 @@ if (isset($_POST['fp_bulk_pull'])) {
 $summary = fp_summary($koneksi);
 $sweep_cfg = sweep_get_config($koneksi);
 $next_run = '-';
+$next_ts = 0;
 if (!empty($sweep_cfg['last_run'])) {
-    $next_run = date('d/m/Y H:i', strtotime($sweep_cfg['last_run']) + $sweep_cfg['interval_jam'] * 3600);
+    $next_ts = strtotime($sweep_cfg['last_run']) + sweep_interval_seconds($sweep_cfg['interval_jam']);
+    $next_run = date('d/m/Y H:i', $next_ts);
 }
+// Ekor sweep.log buat diagnosa (kapan script terakhir dieksekusi scheduler)
+$sweep_log_lines = [];
+$sweep_log_mtime = null;
+$sweep_log_path = __DIR__ . '/../../sweep.log';
+if (is_file($sweep_log_path)) {
+    $sweep_log_mtime = filemtime($sweep_log_path);
+    $all = @file($sweep_log_path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (is_array($all)) $sweep_log_lines = array_slice($all, -5);
+}
+// Keputusan jalan/tidak DITENTUKAN DI SINI (awal) karena timer auto-refresh
+// di bawah butuh tahu: jangan pasang timer kalau request ini mau jalanin sweep
+// (timer bisa reload di tengah sweep dan ngebunuh prosesnya).
+$sweep_should_run = false;
+$sweep_run_mode = ''; // manual | sebar-ulang | jadwal-baru (tombol di halaman ini)
+// Auto terjadwal dipegang runner global (index.php -> assets/js/sweep-auto.js)
+// yang jalan di SEMUA halaman, jadi tidak ada auto inline di sini (biar tidak dobel).
+if (isset($_POST['sweep_save'])) { $sweep_should_run = true; $sweep_run_mode = 'jadwal-baru'; }
+elseif (isset($_POST['spread_all_now'])) { $sweep_should_run = true; $sweep_run_mode = 'sebar-ulang'; }
+elseif (isset($_POST['sweep_run_now'])) { $sweep_should_run = true; $sweep_run_mode = 'manual'; }
 ?>
 <div class="container-fluid px-2 mt-4 mb-4">
 <div class="card border-0 shadow-sm rounded-xl overflow-hidden bg-white">
@@ -80,7 +101,7 @@ Kalau mesin rusak/hilang, pilih PIN yang sudah ada backup → <strong>Restore ke
 <!-- Jadwal Auto-Sweep -->
 <div class="mb-8 p-6 bg-gradient-to-r from-slate-50 to-gray-50 rounded-xl border border-gray-200">
 <h4 class="text-lg font-semibold text-gray-800 mb-1"><i class="far fa-clock mr-2"></i>Jadwal Auto-Sweep Sidik</h4>
-<p class="text-sm text-gray-500 mb-4">Sweep otomatis cek sidik baru tiap interval — tanpa klik apa-apa. Syarat: Task Scheduler di PC server jalan tiap 30 menit (<code>auto_fingerprint_sweep.bat</code>).</p>
+<p class="text-sm text-gray-500 mb-4">Sweep otomatis berjalan sendiri dari <strong>halaman mana pun</strong> yang dibuka (jika sudah tiba waktunya) — tanpa klik apa-apa. Tombol <strong>Jalankan Sekarang</strong> untuk paksa jalan kapan saja. Tidak perlu Task Scheduler / .bat.</p>
 <form method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
 <div>
 <label class="block text-sm font-semibold text-gray-700 mb-1.5">Status</label>
@@ -90,10 +111,12 @@ Kalau mesin rusak/hilang, pilih PIN yang sudah ada backup → <strong>Restore ke
 </select>
 </div>
 <div>
-<label class="block text-sm font-semibold text-gray-700 mb-1.5">Tiap berapa jam</label>
+<label class="block text-sm font-semibold text-gray-700 mb-1.5">Interval</label>
 <select name="sweep_interval" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm">
+<option value="-1" <?= (int)$sweep_cfg['interval_jam'] === -1 ? 'selected' : '' ?>>1 menit (testing)</option>
+<option value="0" <?= (int)$sweep_cfg['interval_jam'] === 0 ? 'selected' : '' ?>>5 menit (testing)</option>
 <?php foreach ([1,2,4,6,12,24] as $h): ?>
-<option value="<?= $h ?>" <?= $sweep_cfg['interval_jam'] == $h ? 'selected' : '' ?>><?= $h ?> jam</option>
+<option value="<?= $h ?>" <?= (int)$sweep_cfg['interval_jam'] === $h ? 'selected' : '' ?>><?= $h ?> jam</option>
 <?php endforeach; ?>
 </select>
 </div>
@@ -108,9 +131,109 @@ Kalau mesin rusak/hilang, pilih PIN yang sudah ada backup → <strong>Restore ke
 </div>
 <div>
 <button type="submit" name="sweep_save" value="1" class="w-full bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2.5 px-4 rounded-lg text-sm"><i class="fas fa-save mr-2"></i>Simpan Jadwal</button>
+<button type="submit" name="sweep_run_now" value="1" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-lg text-sm mt-2"><i class="fas fa-play mr-2"></i>Jalankan Sekarang</button>
+<button type="submit" name="spread_all_now" value="1" class="w-full bg-amber-600 hover:bg-amber-700 text-white font-semibold py-2.5 px-4 rounded-lg text-sm mt-2"><i class="fas fa-share-alt mr-2"></i>Sebar Ulang Semua</button>
+<p class="text-[11px] text-gray-400 mt-1 mb-0">Jalankan/Sebar Ulang bisa beberapa menit, jangan tutup halaman. Sebar Ulang = paksa sebar semua isi DB ke semua mesin (buat mesin yang ketinggalan).</p>
 </div>
 </form>
-<p class="text-xs text-gray-400 mt-3 mb-0">Terakhir jalan: <strong><?= htmlspecialchars($sweep_cfg['last_run'] ?? '-') ?></strong> | Berikutnya: <strong><?= htmlspecialchars($next_run) ?></strong></p>
+<p class="text-xs text-gray-400 mt-3 mb-1">Terakhir jalan: <strong><?= htmlspecialchars($sweep_cfg['last_run'] ?? '-') ?></strong> | Berikutnya: <strong><?= htmlspecialchars($next_run) ?></strong> <span id="swCountdown" class="font-semibold text-indigo-500"></span> <span class="text-[10px] text-gray-300" title="Versi file halaman ini (buat mastiin deploy)">ui-<?= date('Ymd-His', filemtime(__FILE__)) ?></span></p>
+<?php if ($next_ts <= 0): ?>
+<p class="text-xs text-amber-600 mt-0 mb-1">Belum pernah jalan — pastikan Task Scheduler di PC server aktif, lalu refresh halaman ini.</p>
+<?php else: ?>
+<script>
+(function(){
+  // Sisa detik DIHITUNG SERVER saat render; browser tinggal hitung mundur
+  // pakai performance.now() (monotonik: kebal jam browser ngaco / NTP / sleep).
+  var remaining0 = <?= max(0, (int)$next_ts - time()) ?>;
+  var t0 = performance.now();
+  var el = document.getElementById('swCountdown');
+  if (!el) return;
+  try { el.title = 'berikutnya(server): <?= date('d/m/Y H:i:s', (int)$next_ts) ?>'; } catch(e){}
+  function pad(n){ return (n<10?'0':'')+n; }
+  function tick(){
+    var diff = remaining0 - Math.floor((performance.now() - t0)/1000);
+    if (diff <= 0) { el.textContent = '(waktunya tiba — refresh halaman)'; return; }
+    var h = Math.floor(diff/3600), m = Math.floor((diff%3600)/60), s = diff%60;
+    el.textContent = '(mundur: ' + pad(h)+':'+pad(m)+':'+pad(s) + ')';
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
+<?php endif; ?>
+<?php if (!empty($sweep_cfg['enabled']) && $next_ts > time() && !$sweep_should_run): ?>
+<script>
+(function(){
+  // Auto-refresh tab saat jadwal tiba biar sweep jalan sendiri.
+  // Boleh minimize (jangan tutup tab/browser, PC jangan sleep).
+  // Monotonik: tidak tergantung jam browser.
+  var waitMs = (<?= max(0, (int)$next_ts - time()) ?> * 1000) + 15000;
+  setTimeout(function(){ location.reload(); }, waitMs);
+})();
+</script>
+<p class="text-[11px] text-gray-400 mt-1 mb-0">Tab ini refresh otomatis saat waktunya tiba (boleh minimize, jangan tutup tab/browser).</p>
+<?php endif; ?>
+<?php if ($sweep_log_mtime): ?>
+<details class="mt-2 text-xs text-gray-500">
+<summary class="cursor-pointer hover:text-gray-700">Log sweep terakhir (<?= date('d/m/Y H:i:s', $sweep_log_mtime) ?>) — klik untuk lihat</summary>
+<pre class="bg-gray-50 border border-gray-200 rounded-lg p-2 mt-1 overflow-x-auto whitespace-pre-wrap max-h-40 overflow-y-auto"><?php foreach ($sweep_log_lines as $ln): ?><?= htmlspecialchars($ln) ?>&#10;<?php endforeach; ?></pre>
+</details>
+<?php else: ?>
+<p class="text-xs text-gray-400 mt-1 mb-0">Belum ada sweep.log — script belum pernah dieksekusi di server ini.</p>
+<?php endif; ?>
+
+<?php
+// Eksekusi sweep (keputusan sudah ditentukan di atas, sebelum timer auto-refresh).
+if ($sweep_should_run):
+    @set_time_limit(0);
+    $sw_log_path = __DIR__ . '/../../sweep.log'; // run via web juga nulis sweep.log
+    while (ob_get_level() > 0) { @ob_end_flush(); }
+    @ob_implicit_flush(true);
+    $lock_fp = @fopen(__DIR__ . '/../../sweep.lock', 'c');
+    $locked = $lock_fp && @flock($lock_fp, LOCK_EX | LOCK_NB);
+    if (!$locked):
+?>
+<div class="mt-2 p-3 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800">Sweep sedang berjalan di proses lain — dilewati. Refresh halaman untuk update.</div>
+<?php else:
+    $sweep_master_opt = $_POST['sweep_master'] ?? $sweep_cfg['master_id'];
+?>
+<div class="mt-2 border rounded-xl overflow-hidden <?= $sweep_run_mode === 'manual' ? 'border-indigo-200' : 'border-gray-200' ?>">
+<div class="px-4 py-2 font-bold text-sm <?= ($sweep_run_mode === 'manual' || $sweep_run_mode === 'jadwal-baru') ? 'bg-indigo-50 text-indigo-800' : ($sweep_run_mode === 'sebar-ulang' ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-700') ?> flex justify-between items-center gap-2">
+<span><?= $sweep_run_mode === 'manual' ? 'Sweep manual sedang berjalan — jangan tutup halaman…' : ($sweep_run_mode === 'jadwal-baru' ? 'Jadwal disimpan — sweep langsung berjalan…' : ($sweep_run_mode === 'sebar-ulang' ? 'Sebar ulang dari DB sedang berjalan — jangan tutup halaman…' : 'Sweep otomatis sedang berjalan — jangan tutup halaman…')) ?></span>
+<button type="button" onclick="window.stop();var n=document.getElementById('swStopNote');if(n)n.style.display='block';this.disabled=true;this.textContent='Dihentikan';" class="shrink-0 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white text-xs font-bold py-1.5 px-3 rounded-lg">■ Stop</button>
+</div>
+<div id="swStopNote" style="display:none" class="px-4 py-2 text-xs bg-amber-50 text-amber-800">Dihentikan. Sebagian mesin mungkin sudah ke-update — aman, sweep berikutnya membereskan sisanya. Refresh halaman untuk kembali.</div>
+<pre class="p-3 text-xs overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto bg-white m-0"><?php
+    echo str_repeat(' ', 4096);
+    @flush();
+    if ($sweep_run_mode === 'sebar-ulang') {
+        $swres = spread_all_from_db($koneksi, function($line) use ($sw_log_path) {
+            @file_put_contents($sw_log_path, $line . "\n", FILE_APPEND);
+            echo htmlspecialchars($line) . "\n" . str_repeat(' ', 1024);
+            @flush();
+        });
+    } else {
+        $swres = sweep_execute($koneksi, $sweep_master_opt, false, 0, true, function($line) use ($sw_log_path) {
+            @file_put_contents($sw_log_path, $line . "\n", FILE_APPEND);
+            echo htmlspecialchars($line) . "\n" . str_repeat(' ', 1024);
+            @flush();
+        });
+    }
+?></pre>
+<div class="px-4 py-2 text-xs <?= !empty($swres['ran']) ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800' ?>">
+<?= !empty($swres['ran']) ? (isset($swres['total']) ? ("Selesai: {$swres['total']} karyawan, {$swres['baru']} ada jari baru, sebar ok={$swres['sebar_ok']} gagal={$swres['sebar_gagal']}, repair ok={$swres['repair_ok']} gagal={$swres['repair_fail']}, mesh ok={$swres['mesh_ok']} gagal={$swres['mesh_fail']}, {$swres['seconds']} detik.") : ("Selesai sebar ulang: ok={$swres['ok']} gagal={$swres['fail']}.")) : 'Tidak jalan penuh — lihat log di atas.' ?>
+Refresh halaman untuk update countdown.</div>
+<?php if (!empty($swres['ran']) && $sweep_run_mode !== 'sebar-ulang'): ?>
+<script>setTimeout(function(){ location.reload(); }, 8000);</script>
+<div class="px-4 py-2 text-xs text-gray-500">Refresh otomatis dalam 8 detik…</div>
+<?php endif; ?>
+</div>
+<?php
+    @flock($lock_fp, LOCK_UN);
+    @fclose($lock_fp);
+    endif;
+endif;
+?>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
@@ -131,11 +254,11 @@ Kalau mesin rusak/hilang, pilih PIN yang sudah ada backup → <strong>Restore ke
 </select>
 </div>
 <div>
-<label class="block text-sm font-semibold text-gray-700 mb-1.5">PIN / No. Absen</label>
-<input list="pinList" name="pin" required placeholder="cth: 45" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm">
-<datalist id="pinList">
-<?php foreach ($karyawan_list as $k): ?><option value="<?= htmlspecialchars($k['no_absen']) ?>"><?= htmlspecialchars($k['nama_karyawan']) ?></option><?php endforeach; ?>
-</datalist>
+<label class="block text-sm font-semibold text-gray-700 mb-1.5">Karyawan (nama — no. absen)</label>
+<select name="pin" required class="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm">
+<option value="">- Pilih Karyawan -</option>
+<?php foreach ($karyawan_list as $k): ?><option value="<?= htmlspecialchars($k['no_absen']) ?>"><?= htmlspecialchars($k['nama_karyawan']) ?> — <?= htmlspecialchars($k['no_absen']) ?></option><?php endforeach; ?>
+</select>
 </div>
 <button type="submit" name="fp_pull" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-6 rounded-lg text-sm"><i class="fas fa-download mr-2"></i>Tarik &amp; Simpan</button>
 </form>

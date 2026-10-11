@@ -90,6 +90,47 @@ if (isset($_SESSION['delete_success'])) {
 	$delete_success_msg = "Data absensi karyawan berhasil dihapus.";
 	unset($_SESSION['delete_success']); // Hapus langsung dari session agar tidak muncul lagi saat refresh
 }
+
+// Tabel pengganti (tidak masuk) — dibuat otomatis bila belum ada
+$koneksi->query("CREATE TABLE IF NOT EXISTS tb_ganti (
+	id INT AUTO_INCREMENT PRIMARY KEY,
+	tgl DATE NOT NULL,
+	id_karyawan_absen INT NOT NULL DEFAULT 0,
+	id_karyawan_ganti INT NOT NULL DEFAULT 0,
+	upah_bayar DOUBLE NOT NULL DEFAULT 0,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE KEY uq_ganti (tgl, id_karyawan_absen)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+// Simpan pengganti (idempotent: UNIQUE cegah dobel submit/refresh)
+$ganti_msg = "";
+if (isset($_POST['ganti_simpan']) && !empty($_POST['ganti_tgl']) && !empty($_POST['ganti_absen']) && !empty($_POST['ganti_oleh'])) {
+	$gtgl = $koneksi->real_escape_string($_POST['ganti_tgl']);
+	$gabs = (int)$_POST['ganti_absen'];
+	$goleh = (int)$_POST['ganti_oleh'];
+	$qk = $koneksi->query("SELECT id_karyawan, upah FROM ms_karyawan WHERE id_karyawan='$gabs' LIMIT 1");
+	$qk2 = $koneksi->query("SELECT id_karyawan, nama_karyawan, upah FROM ms_karyawan WHERE id_karyawan='$goleh' AND status_karyawan='Aktif' LIMIT 1");
+	if ($qk && $qk->num_rows > 0 && $qk2 && $qk2->num_rows > 0) {
+		$rw2 = $qk2->fetch_assoc();
+		$ub = (float)$rw2['upah'];
+		$koneksi->query("INSERT INTO tb_ganti (tgl, id_karyawan_absen, id_karyawan_ganti, upah_bayar) VALUES ('$gtgl', '$gabs', '$goleh', '$ub') ON DUPLICATE KEY UPDATE id_karyawan_ganti='$goleh', upah_bayar='$ub'");
+		$ganti_msg = "Tersimpan: digantikan oleh " . $rw2['nama_karyawan'] . ".";
+	} else {
+		$ganti_msg = "Gagal: data karyawan tidak valid.";
+	}
+}
+
+// Batalkan pengganti (baris PENGGANTI di tabel masuk ikut hilang otomatis)
+if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST['ganti_absen'])) {
+	$gtgl = $koneksi->real_escape_string($_POST['ganti_tgl']);
+	$gabs = (int)$_POST['ganti_absen'];
+	$koneksi->query("DELETE FROM tb_ganti WHERE tgl='$gtgl' AND id_karyawan_absen='$gabs'");
+	if ($koneksi->affected_rows > 0) {
+		$ganti_msg = "Dibatalkan: data pengganti dihapus.";
+	} else {
+		$ganti_msg = "Gagal: data pengganti tidak ditemukan.";
+	}
+}
 ?>
 <html>
 
@@ -119,7 +160,7 @@ if (isset($_SESSION['delete_success'])) {
 		}
 
 		/* 3. Membuat container fleksibel untuk Length (kiri) dan Filter (kanan) */
-		#dataTables-example_wrapper .row:first-child {
+		#tabel-tarik-data_wrapper .row:first-child {
 			display: flex !important;
 			justify-content: space-between !important;
 			align-items: center !important;
@@ -247,11 +288,11 @@ if (isset($_SESSION['delete_success'])) {
 				margin: 0 !important;
 			}
 
-			#dataTables-example_wrapper {
+			#tabel-tarik-data_wrapper {
 				padding: 0 10px;
 			}
 
-			#dataTables-example_wrapper .row:first-child {
+			#tabel-tarik-data_wrapper .row:first-child {
 				display: flex !important;
 				flex-direction: column !important;
 				align-items: flex-start !important;
@@ -277,7 +318,7 @@ if (isset($_SESSION['delete_success'])) {
 				flex-wrap: wrap;
 			}
 
-			#dataTables-example {
+			#tabel-tarik-data {
 				width: 100% !important;
 				margin: 0 !important;
 			}
@@ -437,6 +478,15 @@ if (isset($_SESSION['delete_success'])) {
 				}
 			}
 
+			if (!function_exists('mangkir_tgl_aktif')) {
+				// Periode tanggal aturan mangkir (kosong = tanpa batas sisi itu)
+				function mangkir_tgl_aktif($dari, $sampai, $tglYmd) {
+					if (!empty($dari) && strcmp($tglYmd, $dari) < 0) return false;
+					if (!empty($sampai) && strcmp($tglYmd, $sampai) > 0) return false;
+					return true;
+				}
+			}
+
 			// Tetap mempertahankan variabel asli dan komentar Anda
 			//include "koneksi.php";
 			//$IP= $HTTP_GET_VARS["121.0.0.144"];
@@ -447,6 +497,20 @@ if (isset($_SESSION['delete_success'])) {
 			$TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 			if ($IP == "") $IP = "192.168.110.201";
 			if ($Key == "") $Key = "";
+			// Param pagination bar atas (diparse awal agar dropdown & input Cari tampil benar)
+			$per_hal_opts = [10, 25, 50, 100];
+			$per_halaman_raw = $_GET['per_hal'] ?? 25;
+			$show_all = ((string)$per_halaman_raw === '-1' || strtolower((string)$per_halaman_raw) === 'semua');
+			$per_halaman = $show_all ? 0 : (int)$per_halaman_raw;
+			if (!$show_all && !in_array($per_halaman, $per_hal_opts, true)) $per_halaman = 25;
+			$cari_tarik = trim((string)($_GET['cari'] ?? ''));
+			// Param pagination tabel TIDAK ABSEN (dibedakan: hal_ns / per_hal_ns / cari_ns)
+			$per_hal_ns_opts = [10, 25, 50, 100];
+			$per_hal_ns_raw = $_GET['per_hal_ns'] ?? 25;
+			$show_all_ns = ((string)$per_hal_ns_raw === '-1' || strtolower((string)$per_hal_ns_raw) === 'semua');
+			$per_hal_ns = $show_all_ns ? 0 : (int)$per_hal_ns_raw;
+			if (!$show_all_ns && !in_array($per_hal_ns, $per_hal_ns_opts, true)) $per_hal_ns = 25;
+			$cari_ns = trim((string)($_GET['cari_ns'] ?? ''));
 			?>
 
 			<form action="" method="GET">
@@ -620,7 +684,34 @@ if (isset($_SESSION['delete_success'])) {
 								<i class="fas fa-file-pdf mr-2"></i> Download PDF
 							</a>
 						</div>
-						<table class="w-full text-left border-collapse table-modern" id="dataTables-example">
+						<!-- Bar atas pagination: Tampilkan (per halaman) + Cari (server-side) -->
+						<div class="d-flex justify-content-between align-items-center flex-wrap mb-3 px-1" style="gap:10px;">
+							<div class="d-flex align-items-center" style="gap:8px;font-size:14px;color:#334155;">
+								<label class="m-0" for="per-hal-select">Tampilkan</label>
+								<select id="per-hal-select" class="form-control" style="width:auto;display:inline-block;padding:5px 10px;border:1px solid #e0e6ed;border-radius:8px;">
+									<option value="10" <?php echo (!$show_all && $per_halaman == 10) ? 'selected' : ''; ?>>10</option>
+									<option value="25" <?php echo (!$show_all && $per_halaman == 25) ? 'selected' : ''; ?>>25</option>
+									<option value="50" <?php echo (!$show_all && $per_halaman == 50) ? 'selected' : ''; ?>>50</option>
+									<option value="100" <?php echo (!$show_all && $per_halaman == 100) ? 'selected' : ''; ?>>100</option>
+									<option value="-1" <?php echo $show_all ? 'selected' : ''; ?>>Semua</option>
+								</select>
+								<span>data</span>
+							</div>
+							<div class="d-flex align-items-center" style="gap:8px;font-size:14px;color:#334155;">
+								<label class="m-0" for="cari-tarik-input">Cari:</label>
+								<input type="text" id="cari-tarik-input" value="<?php echo htmlspecialchars($cari_tarik); ?>" placeholder="Cari nama / no absen..." class="form-control" style="width:200px;padding:6px 12px;border:1px solid #e0e6ed;border-radius:8px;" />
+								<button type="button" id="cari-tarik-btn" class="btn btn-primary btn-sm shadow-sm">Cari</button>
+								<?php if ($cari_tarik !== '') :
+									$reset_params = $_GET;
+									$reset_params['page'] = 'generate';
+									$reset_params['aksi'] = 'tarik';
+									unset($reset_params['cari'], $reset_params['hal']);
+								?>
+								<a href="?<?php echo htmlspecialchars(http_build_query($reset_params)); ?>" class="btn btn-default btn-sm" style="border:1px solid #e0e6ed;">Reset</a>
+								<?php endif; ?>
+							</div>
+						</div>
+						<table class="w-full text-left border-collapse table-modern" id="tabel-tarik-data">
 							<thead class="bg-gray-50 border-b border-gray-200">
 								<tr>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center w-[40px]">
@@ -770,6 +861,12 @@ if (isset($_SESSION['delete_success'])) {
 								$TanggalAwalMinus1 = date('Y-m-d', strtotime($TanggalAwal.' -1 day'));
 								$db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl BETWEEN '$TanggalAwalMinus1' AND '$TanggalAkhir' ORDER BY tgl ASC, id_record ASC");
 								$grouped = [];
+								// Roster per-tanggal: tgl|pin => shift (acuan utama; master cuma fallback)
+								$rosterMap = [];
+								if (!empty($TanggalAwalMinus1) && !empty($TanggalAkhir)) {
+									$qr_roster = $koneksi->query("SELECT h.tgl_rkk AS tgl, TRIM(k.no_absen) AS pin, j.* FROM tb_rkk_detail rd JOIN tb_rkk h ON h.id_rkk=rd.id_rkk JOIN ms_karyawan k ON k.id_karyawan=rd.id_karyawan LEFT JOIN tb_jadwal j ON j.id_jadwal=rd.id_jadwal WHERE h.tgl_rkk BETWEEN '$TanggalAwalMinus1' AND '$TanggalAkhir'");
+									if ($qr_roster) while ($rw_roster = $qr_roster->fetch_assoc()) $rosterMap[$rw_roster['tgl'] . '|' . trim((string)$rw_roster['pin'])] = $rw_roster;
+								}
 
 								while ($row_rec = $db_records->fetch_assoc()) {
 									$PIN = $row_rec['userid'];
@@ -906,14 +1003,96 @@ if (isset($_SESSION['delete_success'])) {
 									}
 								}
 
-								$no = 1;
-								foreach ($grouped as $key => $row) :
+								// Fix: tap tunggal berstatus pulang = anggap MASUK.
+								// Mesin toggle in/out sendiri (kemarin masuk -> hari ini dianggap pulang),
+								// padahal 1 tap sendirian hampir pasti check-in. (Merge malam di atas sudah selesai.)
+								foreach ($grouped as $key => &$row) {
+									if (empty($row['masuk']) && !empty($row['pulang']) && count($row['raw_times'] ?? []) <= 1) {
+										$row['masuk'] = $row['pulang'];
+										$row['pulang'] = '';
+									}
+								}
+								unset($row);
+
+								// Fix: mesin kirim semua status IN (default in) -> pulang tidak terisi.
+								// Kalau sudah ada masuk tapi pulang kosong dan tap >1, pulang = tap terakhir.
+								foreach ($grouped as $key => &$row) {
+									if (!empty($row['masuk']) && empty($row['pulang']) && count($row['raw_times'] ?? []) > 1) {
+										$times = array_column($row['raw_times'], 'time');
+										rsort($times);
+										if ($times[0] !== $row['masuk']) $row['pulang'] = $times[0];
+									}
+								}
+								unset($row);
+
+								// Saring tampilan sesuai rentang tanggal (H-1 hanya untuk merge shift malam, jangan tampil).
+								foreach ($grouped as $gkf => $grf) {
+									$dkf = $grf['date'] ?? '';
+									if ($dkf === '' || $dkf < $TanggalAwal || $dkf > $TanggalAkhir) unset($grouped[$gkf]);
+								}
+
+								// ===== INJECT BARIS PENGGANTI (tb_ganti) ke tabel masuk =====
+								// Pengganti yg disimpan di panel Tidak Absen tampil sbg baris PENGGANTI + upahnya.
+								$qganti = $koneksi->query("SELECT g.tgl, g.id_karyawan_absen, g.id_karyawan_ganti, g.upah_bayar, TRIM(k.no_absen) AS pin_ganti, k2.nama_karyawan AS nama_absen FROM tb_ganti g LEFT JOIN ms_karyawan k ON k.id_karyawan=g.id_karyawan_ganti LEFT JOIN ms_karyawan k2 ON k2.id_karyawan=g.id_karyawan_absen WHERE g.tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+								if ($qganti) while ($rg = $qganti->fetch_assoc()) {
+									$pin_g = trim((string)($rg['pin_ganti'] ?? ''));
+									if ($pin_g === '') continue;
+									$tgl_g = $rg['tgl'];
+									$real_k = $pin_g . '_' . $tgl_g;
+									if (isset($grouped[$real_k])) {
+										// Penggantinya memang tap hari itu: baris aslinya tetap, cukup tambah nota.
+										$grouped[$real_k]['ganti_absen_nama'] = $rg['nama_absen'] ?? '';
+										continue;
+									}
+									$gk = 'GANTI_' . $tgl_g . '_' . (int)$rg['id_karyawan_ganti'] . '_' . (int)$rg['id_karyawan_absen'];
+									if (isset($grouped[$gk])) continue;
+									$grouped[$gk] = ['pin' => $pin_g, 'date' => $tgl_g, 'masuk' => '', 'istirahat_keluar' => '', 'istirahat_masuk' => '', 'pulang' => '', 'raw_times' => [], 'is_pengganti' => true, 'ganti_absen_nama' => $rg['nama_absen'] ?? '', 'ganti_upah' => (float)$rg['upah_bayar']];
+								}
+								uasort($grouped, function($ag, $bg) { $cg = strcmp($ag['date'], $bg['date']); return $cg !== 0 ? $cg : strcmp($ag['pin'], $bg['pin']); });
+
+								// ===== PAGINATION PHP (server-side): filter + slice (param diparse di atas) =====
+								$filtered_grouped = $grouped;
+								if ($cari_tarik !== '') {
+									// Peta karyawan (1x query) agar Cari bisa temukan nama/departemen
+									$emp_map_cari = [];
+									$qm_cari = $koneksi->query("SELECT k.no_absen, k.nama_karyawan, d.nama_departmen, sd.nama_sub_department FROM ms_karyawan k LEFT JOIN ms_departmen d ON k.id_departmen=d.id_departmen LEFT JOIN ms_sub_department sd ON k.id_sub_department=sd.id_sub_department");
+									if ($qm_cari) while ($rm_cari = $qm_cari->fetch_assoc()) {
+										$emp_map_cari[trim((string)$rm_cari['no_absen'])] = $rm_cari;
+									}
+									$filtered_grouped = [];
+									$cari_lower = strtolower($cari_tarik);
+									foreach ($grouped as $gk_cari => $gr_cari) {
+										$em_cari = $emp_map_cari[trim((string)$gr_cari['pin'])] ?? null;
+										$hay = strtolower($gr_cari['pin'] . ' ' . $gr_cari['date'] . ' ' . date('d-m-Y', strtotime($gr_cari['date'])) . ' ' . ($em_cari['nama_karyawan'] ?? '') . ' ' . ($em_cari['nama_departmen'] ?? '') . ' ' . ($em_cari['nama_sub_department'] ?? ''));
+										if (strpos($hay, $cari_lower) !== false) $filtered_grouped[$gk_cari] = $gr_cari;
+									}
+								}
+								$total_data = count($filtered_grouped);
+								if ($show_all || $total_data === 0) {
+									$total_hal = 1; $hal_aktif = 1; $offset_hal = 0;
+									$paged_grouped = $filtered_grouped;
+									$per_halaman_eff = $total_data > 0 ? $total_data : 25;
+								} else {
+									$per_halaman_eff = $per_halaman;
+									$total_hal = max(1, (int)ceil($total_data / $per_halaman_eff));
+									$hal_aktif = isset($_GET['hal']) ? max(1, (int)$_GET['hal']) : 1;
+									if ($hal_aktif > $total_hal) $hal_aktif = $total_hal;
+									$offset_hal = ($hal_aktif - 1) * $per_halaman_eff;
+									$paged_grouped = array_slice($filtered_grouped, $offset_hal, $per_halaman_eff, true);
+								}
+
+								$no = $offset_hal + 1;
+								foreach ($paged_grouped as $key => $row) :
 									$PIN = $row['pin'];
 									$date = $row['date'];
 									$masuk = $row['masuk'];
 									$istirahat_keluar = $row['istirahat_keluar'];
 									$istirahat_masuk = $row['istirahat_masuk'];
 									$pulang = $row['pulang'];
+									$is_pengganti = !empty($row['is_pengganti']);
+									$ganti_absen_nama = $row['ganti_absen_nama'] ?? '';
+									$ganti_upah = (float)($row['ganti_upah'] ?? 0);
+									$pengganti_note = '';
 
 									// Cari karyawan di database lengkap dengan Departemen, Sub Departemen, OS/DHK, dan Golongan
 									$empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, k.id_jadwal, d.nama_departmen, sd.nama_sub_department, o.OS_DHK as label_os, g.golongan as label_gol 
@@ -931,17 +1110,23 @@ if (isset($_SESSION['delete_success'])) {
 									$golongan = $emp['label_gol'] ?? 'Harian';
 									$upah = $emp['upah'] ?? 0;
 
-									// Cari Shift Terdekat atau gunakan shift terdaftar jika sesuai
+									// Acuan shift: roster tanggal ini bila ada, else master (fallback).
+									// Jadi ubah roster tgl 8 tidak merembet ke tgl 7.
 									$assigned_shift = null;
-									if (!empty($emp['id_jadwal'])) {
+									$use_roster = false;
+									$roster_key = $date . '|' . trim((string)$PIN);
+									if (isset($rosterMap[$roster_key]) && !empty($rosterMap[$roster_key]['id_jadwal'])) {
+										$assigned_shift = $rosterMap[$roster_key];
+										$use_roster = true;
+									} elseif (!empty($emp['id_jadwal'])) {
 										$q_ass = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '{$emp['id_jadwal']}'");
 										if ($q_ass && $q_ass->num_rows > 0) {
 											$assigned_shift = $q_ass->fetch_assoc();
 										}
 									}
 									
-									$use_assigned = false;
-									if ($assigned_shift) {
+									$use_assigned = $use_roster;
+									if (!$use_roster && $assigned_shift) {
 										if (strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false) {
 											$use_assigned = true;
 										} else {
@@ -1017,7 +1202,24 @@ if (isset($_SESSION['delete_success'])) {
 									$has_ist_masuk = !empty($istirahat_masuk) && $istirahat_masuk != '00:00';
 									$has_ist_keluar = !empty($istirahat_keluar) && $istirahat_keluar != '00:00';
 
-									if ($shift && ($has_masuk || $has_keluar)) {
+									// *** DETEKSI ABSEN TANPA JADWAL YANG VALID ***
+									$no_valid_schedule = false;
+									$schedule_warning = '';
+									
+									// Jika karyawan tidak terdaftar di database (nama = "Karyawan Tidak Dikenal")
+									if (($has_masuk || $has_keluar) && ($nama_karyawan == 'Karyawan Tidak Dikenal' || !$emp)) {
+										$no_valid_schedule = true;
+										$schedule_warning = 'KARYAWAN TIDAK TERDAFTAR - TIDAK DAPAT GAJI';
+										$upah = 0; // Set upah jadi 0
+									}
+								// Jika ada absensi tapi tidak ada shift yang cocok sama sekali
+								elseif (($has_masuk || $has_keluar) && !$shift) {
+									$no_valid_schedule = true;
+									$schedule_warning = 'ABSEN TANPA JADWAL - TIDAK DAPAT GAJI';
+									$upah = 0; // Set upah jadi 0
+								}
+
+								if ($shift && ($has_masuk || $has_keluar) && !$no_valid_schedule) {
 										if ($is_flexible) {
 											if ($has_masuk && $has_keluar) {
 												$expected_keluar_time = date('H:i', strtotime($masuk) + ($expected_hours * 3600));
@@ -1079,13 +1281,28 @@ if (isset($_SESSION['delete_success'])) {
 									$lembur_money = $final_lembur_jam * $globalLemburPerJam;
 									
 									$total_potongan = $p_telat + $p_pulang + $p_ist_awal + $p_ist_telat + $p_tidak_lengkap;
-									$upah_bersih = $upah - $total_potongan + $lembur_money;
-									if ($upah_bersih < 0) $upah_bersih = 0;
+									
+									// *** APPLY PERINGATAN JADWAL ***
+									if ($no_valid_schedule) {
+										$upah_bersih = 0; // Tidak dapat gaji sama sekali
+									} else {
+										$upah_bersih = $upah - $total_potongan + $lembur_money;
+										if ($upah_bersih < 0) $upah_bersih = 0;
+									}
 
 									$hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
+									
+									// Tambah warning ke hasil kerja jika ada masalah jadwal
+									if ($no_valid_schedule && ($has_masuk || $has_keluar)) {
+										$hasil_kerja = 'HADIR - ' . $schedule_warning;
+									}
 
-									// Merah pakai toleransi tb_toleransi (page=denda) — telat 10 menit baru merah
-									static $tolRed=null; if($tolRed===null){ $qR=$koneksi->query("SELECT * FROM tb_toleransi LIMIT 1"); $tolRed=$qR?$qR->fetch_assoc():[]; }
+								// Merah pakai toleransi tb_toleransi (page=denda) — telat 10 menit baru merah
+								static $tolRed=null; if($tolRed===null){ $qR=$koneksi->query("SELECT * FROM tb_toleransi LIMIT 1"); $tolRed=$qR?$qR->fetch_assoc():[]; }
+								// Batas mangkir: telat >= N menit dihitung tidak masuk (display only, angka tidak diubah)
+								static $mangkirMenit=null; static $mangkirDari=''; static $mangkirSampai='';
+								if($mangkirMenit===null){ $qM=$koneksi->query("SHOW COLUMNS FROM tb_denda LIKE 'mangkir_menit'"); if($qM&&$qM->num_rows>0){ $qD=$koneksi->query("SELECT mangkir_menit FROM tb_denda LIMIT 1"); $rD=$qD?$qD->fetch_assoc():[]; $mangkirMenit=max(0,(int)($rD['mangkir_menit']??0)); $qDt=$koneksi->query("SHOW COLUMNS FROM tb_denda LIKE 'mangkir_dari_tgl'"); if($qDt&&$qDt->num_rows==0){ $koneksi->query("ALTER TABLE tb_denda ADD COLUMN mangkir_dari_tgl DATE NULL DEFAULT NULL, ADD COLUMN mangkir_sampai_tgl DATE NULL DEFAULT NULL"); } $qD2=$koneksi->query("SELECT mangkir_dari_tgl, mangkir_sampai_tgl FROM tb_denda LIMIT 1"); $rD2=$qD2?$qD2->fetch_assoc():[]; $mangkirDari=trim((string)($rD2['mangkir_dari_tgl']??'')); $mangkirSampai=trim((string)($rD2['mangkir_sampai_tgl']??'')); } else { $mangkirMenit=0; } }
+								                                // (definisi mangkir_tgl_aktif ada di blok helper atas)
 									$tolMasukR=intval($tolRed['toleransi_masuk']??10); $tolPulangR=intval($tolRed['toleransi_pulang']??5); $tolIstKelR=intval($tolRed['toleransi_istirahat_keluar']??5); $tolIstMasukR=intval($tolRed['toleransi_istirahat_masuk']??10);
 									if($is_flexible){
 										$exp_pulang_flex = (!empty($masuk) && $masuk!='00:00') ? date('H:i', strtotime($masuk) + ($expected_hours*3600)) : '';
@@ -1104,15 +1321,62 @@ if (isset($_SESSION['delete_success'])) {
 									$dIstMasuk = ($has_ist_masuk && $s_ist_masuk!='-') ? (intval((strtotime($istirahat_masuk)-strtotime($s_ist_masuk)+86400)%86400/60)) : 0; if($dIstMasuk>720) $dIstMasuk-=1440;
 									$is_early_istirahat = ($has_ist_keluar && $s_ist_keluar!='-' && $dIstKel > $tolIstKelR);
 									$is_late_istirahat = ($has_ist_masuk && $s_ist_masuk!='-' && $dIstMasuk > $tolIstMasukR);
+									// Telat melewati batas mangkir -> label TIDAK HADIR (angka tidak diubah).
+									// Acuan: shift roster hari itu bila ada, else shift yg dipakai baris ini.
+									// (Di sini karena $diffMasuk & $mangkirMenit baru ada di titik ini.)
+									if ($hasil_kerja === 'HADIR' && $mangkirMenit > 0 && $has_masuk) {
+									    if (!isset($rosterShiftMap)) {
+									        $rosterShiftMap = [];
+									        if (!empty($TanggalAwal) && !empty($TanggalAkhir)) {
+									            $qr0 = $koneksi->query("SELECT h.tgl_rkk AS tgl, TRIM(k.no_absen) AS pin, j.jam_masuk FROM tb_rkk_detail rd JOIN tb_rkk h ON h.id_rkk=rd.id_rkk JOIN ms_karyawan k ON k.id_karyawan=rd.id_karyawan LEFT JOIN tb_jadwal j ON j.id_jadwal=rd.id_jadwal WHERE h.tgl_rkk BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+									            if ($qr0) while ($rw0 = $qr0->fetch_assoc()) $rosterShiftMap[$rw0['tgl'] . '|' . trim((string)$rw0['pin'])] = $rw0['jam_masuk'];
+									        }
+									    }
+									    if (!mangkir_tgl_aktif($mangkirDari, $mangkirSampai, $date)) {
+									        // di luar periode tanggal -> keine label mangkir
+									    } else {
+									    $refMasuk = $rosterShiftMap[$date . '|' . trim((string)$PIN)] ?? null;
+									    if (!empty($refMasuk)) {
+									        $dl0 = strtotime("1970-01-01 " . substr($masuk, 0, 5)) - strtotime("1970-01-01 " . substr($refMasuk, 0, 5));
+									        if ($dl0 > 43200) $dl0 -= 86400;
+									        elseif ($dl0 < -43200) $dl0 += 86400;
+									        $dl0m = (int)($dl0 / 60);
+									        if ($dl0m > $mangkirMenit) $hasil_kerja = 'TIDAK HADIR (telat ' . $dl0m . ' mnt)';
+									    } elseif (isset($diffMasuk) && $diffMasuk > $mangkirMenit) {
+									        $hasil_kerja = 'TIDAK HADIR (telat ' . $diffMasuk . ' mnt)';
+									    }
+									    } // tutup: cek periode bulan
+									}
+									// Override tampilan baris PENGGANTI (upah + status khusus)
+									if ($is_pengganti) {
+										$upah = $ganti_upah;
+										$upah_bersih = $ganti_upah;
+										$hasil_kerja = 'HADIR';
+										$pengganti_note = 'PENGGANTI' . ($ganti_absen_nama !== '' ? ' — menggantikan ' . $ganti_absen_nama : '');
+									} elseif ($ganti_absen_nama !== '') {
+										$pengganti_note = 'Juga menggantikan ' . $ganti_absen_nama;
+									}
 								?>
-									<tr class="hover:bg-gray-50 transition-colors">
+									<tr class="hover:bg-gray-50 transition-colors" <?= $is_pengganti ? 'style="background:#eff6ff;"' : '' ?>>
 										<td class="py-2 px-2 text-center align-middle">
-											<input type="checkbox" name="selected_logs[]" value="<?= htmlspecialchars($PIN . '|' . $date) ?>" class="log-checkbox rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
+											<?php if ($is_pengganti): ?>
+												<span class="text-gray-300">-</span>
+											<?php else: ?>
+												<input type="checkbox" name="selected_logs[]" value="<?= htmlspecialchars($PIN . '|' . $date) ?>" class="log-checkbox rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
+											<?php endif; ?>
 										</td>
 										<td data-label="No" class="py-2 px-2 text-[15px] text-center text-gray-500"><?php echo $no++; ?></td>
 										<td data-label="Tanggal" class="py-2 px-2 text-[15px] text-gray-700"><?php echo date('d-m-Y', strtotime($date)); ?></td>
 										<td data-label="No Absen" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($PIN); ?></td>
-										<td data-label="Nama Karyawan" class="py-2 px-2 text-[15px] font-bold text-gray-900"><?php echo htmlspecialchars($nama_karyawan); ?></td>
+									<td data-label="Nama Karyawan" class="py-2 px-2 text-[15px] font-bold <?= $no_valid_schedule ? 'text-red-600 bg-red-100' : 'text-gray-900' ?>">
+										<?php echo htmlspecialchars($nama_karyawan); ?>
+										<?php if ($no_valid_schedule): ?>
+											<div class="text-xs text-red-600 font-bold mt-1"><?= htmlspecialchars($schedule_warning) ?></div>
+										<?php endif; ?>
+										<?php if ($pengganti_note !== ''): ?>
+											<div class="text-xs font-bold mt-1" style="color:#1d4ed8;"><?= htmlspecialchars($pengganti_note) ?></div>
+										<?php endif; ?>
+									</td>
 										<td data-label="Departemen" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($bagian); ?></td>
 										<td data-label="Sub Bagian" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($sub_bagian); ?></td>
 										<td data-label="OS/DHK" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($os_dhk); ?></td>
@@ -1125,7 +1389,7 @@ if (isset($_SESSION['delete_success'])) {
 										<td data-label="Absen Pulang" class="py-2 px-2 text-[15px] text-center font-semibold text-gray-900 <?= ($is_early_pulang) ? 'bg-red-custom' : '' ?>"><?php echo !empty($pulang) ? htmlspecialchars($pulang) : '-'; ?></td>
 										<td data-label="Absen Istirahat Keluar" class="py-2 px-2 text-[15px] text-center text-gray-600 <?= ($is_early_istirahat) ? 'bg-red-custom' : '' ?>"><?php echo !empty($istirahat_keluar) ? htmlspecialchars($istirahat_keluar) : '-'; ?></td>
 										<td data-label="Absen Istirahat Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600 <?= ($is_late_istirahat) ? 'bg-red-custom' : '' ?>"><?php echo !empty($istirahat_masuk) ? htmlspecialchars($istirahat_masuk) : '-'; ?></td>
-										<td data-label="Upah Pokok" class="py-2 px-2 text-[15px] text-right text-gray-600 font-semibold"><?php echo rupiah($upah); ?></td>
+										<td data-label="Upah Pokok" class="py-2 px-2 text-[15px] text-right font-semibold <?= $no_valid_schedule ? 'text-red-600 bg-red-100' : 'text-gray-600' ?>"><?php echo rupiah($upah); ?></td>
 										<td data-label="Lembur" class="py-2 px-2 text-[15px] text-right text-gray-600"><?= rupiah($lembur_money) . ' (' . $final_lembur_jam . ' Jam)' ?></td>
 										<td data-label="Pot. Telat" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_telat > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_telat); ?></td>
 										<td data-label="Pot. Istirahat (Awal)" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_ist_awal > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_ist_awal); ?></td>
@@ -1133,9 +1397,12 @@ if (isset($_SESSION['delete_success'])) {
 										<td data-label="Denda Pulang" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_pulang > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_pulang); ?></td>
 										<td data-label="Denda Tidak Absen" class="py-2 px-2 text-[15px] text-right text-red-600 font-semibold <?= ($p_tidak_lengkap > 0) ? 'bg-red-custom' : '' ?>"><?php echo rupiah($p_tidak_lengkap); ?></td>
 										<td data-label="Pot. Lain" class="py-2 px-2 text-[15px] text-right text-gray-600"><?php echo rupiah(0); ?></td>
-										<td data-label="Upah Setelah Potongan" class="py-2 px-2 text-[15px] text-right font-bold text-blue-600"><?php echo rupiah($upah_bersih); ?></td>
-										<td data-label="Hasil" class="py-2 px-2 text-[15px] text-center font-bold <?php echo $hasil_kerja == 'HADIR' ? 'text-green-600' : 'text-red-600'; ?>"><?php echo $hasil_kerja; ?></td>
+										<td data-label="Upah Setelah Potongan" class="py-2 px-2 text-[15px] text-right font-bold <?= $no_valid_schedule ? 'text-red-600 bg-red-100' : 'text-blue-600' ?>"><?php echo rupiah($upah_bersih); ?></td>
+										<td data-label="Hasil" class="py-2 px-2 text-[15px] text-center font-bold <?= $no_valid_schedule ? 'text-red-600 bg-red-100' : ($hasil_kerja == 'HADIR' ? 'text-green-600' : 'text-red-600') ?>"><?php echo $hasil_kerja; ?></td>
 										<td data-label="Aksi" class="py-2 px-2 text-center align-middle">
+											<?php if ($is_pengganti): ?>
+												<span class="px-2 py-0.5 rounded-full font-bold text-xs" style="background:#dbeafe;color:#1d4ed8;">PENGGANTI</span>
+											<?php else: ?>
 											<div class="flex gap-1 justify-center">
 												<?php 
 												$user_role = strtolower($_SESSION['role'] ?? '');
@@ -1150,14 +1417,365 @@ if (isset($_SESSION['delete_success'])) {
 													<i class="fa fa-trash-alt"></i> Hapus
 												</button>
 											</div>
+											<?php endif; ?>
 										</td>
 									</tr>
 								<?php
 								endforeach;
 								?>
-							</tbody>
-						</table>
+						</tbody>
+					</table>
+				</div><!-- /table-responsive: tutup di sini agar pagination tidak ikut scroll horizontal -->
+					<?php if ($total_data > 0) :
+						// Bangun base URL pagination, pertahankan filter yang ada (ip/key/tanggal/per_hal/cari)
+						$base_params = $_GET;
+						$base_params['page'] = 'generate';
+						$base_params['aksi'] = 'tarik';
+						unset($base_params['hal']);
+						$base_qs = http_build_query($base_params);
+						$base_url = '?' . $base_qs . ($base_qs !== '' ? '&' : '') . 'hal=';
+						$mulai_no = $total_data > 0 ? ($offset_hal + 1) : 0;
+						$sampai_no = min($offset_hal + $per_halaman_eff, $total_data);
+						// Window halaman: tampilkan maksimal 5 nomor
+						$win_start = max(1, min($hal_aktif - 2, $total_hal - 4));
+						$win_end = min($total_hal, $win_start + 4);
+						if ($win_end - $win_start < 4) $win_start = max(1, $win_end - 4);
+					?>
+					<div class="d-flex justify-content-between align-items-center flex-wrap mt-3 px-1" style="gap:10px;">
+						<div class="text-muted" style="font-size:13px;">
+							Menampilkan <?php echo $mulai_no; ?> s/d <?php echo $sampai_no; ?> dari <?php echo $total_data; ?> data
+							(Hal. <?php echo $hal_aktif; ?> / <?php echo $total_hal; ?>)
+						</div>
+						<nav aria-label="Pagination Tarik Data">
+							<ul class="pagination mb-0" style="gap:4px;">
+								<?php if ($hal_aktif > 1) : ?>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_url . '1'); ?>" title="Halaman pertama">&laquo;</a>
+								</li>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_url . ($hal_aktif - 1)); ?>">Prev</a>
+								</li>
+								<?php else : ?>
+								<li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+								<li class="page-item disabled"><span class="page-link">Prev</span></li>
+								<?php endif; ?>
+								<?php for ($p = $win_start; $p <= $win_end; $p++) : ?>
+								<li class="page-item <?php echo ($p == $hal_aktif) ? 'active' : ''; ?>">
+									<?php if ($p == $hal_aktif) : ?>
+									<span class="page-link" style="background:#2563eb;border-color:#2563eb;color:#fff;"><?php echo $p; ?></span>
+									<?php else : ?>
+									<a class="page-link" href="<?php echo htmlspecialchars($base_url . $p); ?>"><?php echo $p; ?></a>
+									<?php endif; ?>
+								</li>
+								<?php endfor; ?>
+								<?php if ($hal_aktif < $total_hal) : ?>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_url . ($hal_aktif + 1)); ?>">Next</a>
+								</li>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_url . $total_hal); ?>" title="Halaman terakhir">&raquo;</a>
+								</li>
+								<?php else : ?>
+								<li class="page-item disabled"><span class="page-link">Next</span></li>
+								<li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+								<?php endif; ?>
+							</ul>
+						</nav>
+					</div>
+					<?php else : ?>
+					<div class="alert alert-warning text-center font-bold" style="border-radius:8px;">Tidak ada data yang cocok dengan pencarian/filter.</div>
 					<?php endif; ?>
+				<div class="px-3"><!-- lanjutan isi (penutup div ini pakai </div> bawaan di bawah) -->
+				<?php endif; ?>
+				<?php
+				// ===== PANEL TIDAK ABSEN (rencana RKK vs tap mesin) =====
+				$noshow = [];
+				if (!empty($TanggalAwal) && !empty($TanggalAkhir)) {
+				    $taps = [];
+				    $qt = $koneksi->query("SELECT userid, tgl, MIN(detail_waktu) AS first_tap FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' GROUP BY userid, tgl");
+				    if ($qt) while ($rt = $qt->fetch_assoc()) $taps[$rt['tgl'] . '|' . trim((string)$rt['userid'])] = $rt['first_tap'] ?? '';
+				    $mkMenit = 0; $mkDari = ''; $mkSampai = '';
+				    $qmD = $koneksi->query("SHOW COLUMNS FROM tb_denda LIKE 'mangkir_menit'");
+				    if ($qmD && $qmD->num_rows == 0) {
+				        // Self-heal: bikin kolom bila belum ada (sama kayak halaman Denda)
+				        $koneksi->query("ALTER TABLE tb_denda ADD COLUMN mangkir_menit INT NOT NULL DEFAULT 0");
+				        $qmD = $koneksi->query("SHOW COLUMNS FROM tb_denda LIKE 'mangkir_menit'");
+				    }
+				    if ($qmD && $qmD->num_rows > 0) {
+				        $qmV = $koneksi->query("SELECT mangkir_menit FROM tb_denda LIMIT 1");
+				        $rmV = $qmV ? $qmV->fetch_assoc() : [];
+				        $mkMenit = max(0, (int)($rmV['mangkir_menit'] ?? 0));
+				        $qDt = $koneksi->query("SHOW COLUMNS FROM tb_denda LIKE 'mangkir_dari_tgl'");
+				        if ($qDt && $qDt->num_rows == 0) {
+				            $koneksi->query("ALTER TABLE tb_denda ADD COLUMN mangkir_dari_tgl DATE NULL DEFAULT NULL, ADD COLUMN mangkir_sampai_tgl DATE NULL DEFAULT NULL");
+				        }
+				        $qmV2 = $koneksi->query("SELECT mangkir_dari_tgl, mangkir_sampai_tgl FROM tb_denda LIMIT 1");
+				        $rmV2 = $qmV2 ? $qmV2->fetch_assoc() : [];
+				        $mkDari = trim((string)($rmV2['mangkir_dari_tgl'] ?? ''));
+				        $mkSampai = trim((string)($rmV2['mangkir_sampai_tgl'] ?? ''));
+				    }
+				    // Sumber: SEMUA karyawan aktif pada tanggal-tanggal yang ada tap-nya (maks 7 hari).
+				    // Shift acuan per orang-tanggal: roster (RKK) bila ada, else shift master.
+				    $noshow_src = 'semua karyawan aktif';
+				    $tgl_aktif = [];
+				    foreach ($taps as $tk => $tv) { $dd = explode('|', $tk, 2); $tgl_aktif[$dd[0]] = true; }
+				    ksort($tgl_aktif);
+				    $rosterShift = [];
+				    $qr0 = $koneksi->query("SELECT h.tgl_rkk AS tgl, TRIM(k.no_absen) AS pin, j.jam_masuk AS sm, j.jam_keluar AS sk FROM tb_rkk_detail rd JOIN tb_rkk h ON h.id_rkk=rd.id_rkk JOIN ms_karyawan k ON k.id_karyawan=rd.id_karyawan LEFT JOIN tb_jadwal j ON j.id_jadwal=rd.id_jadwal WHERE h.tgl_rkk BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+				    if ($qr0) while ($rw0 = $qr0->fetch_assoc()) $rosterShift[$rw0['tgl'] . '|' . trim((string)$rw0['pin'])] = [$rw0['sm'], $rw0['sk']];
+				    if (count($tgl_aktif) > 0 && count($tgl_aktif) <= 7) {
+				        $qa = $koneksi->query("SELECT k.id_karyawan, k.no_absen, k.nama_karyawan, k.upah, o.OS_DHK AS oslbl, d.nama_departmen AS dept, jm.jam_masuk AS m_masuk, jm.jam_keluar AS m_keluar FROM ms_karyawan k LEFT JOIN ms_os_dhk o ON o.id_os_dhk=k.id_os_dhk LEFT JOIN ms_departmen d ON d.id_departmen=k.id_departmen LEFT JOIN tb_jadwal jm ON jm.id_jadwal=k.id_jadwal WHERE k.status_karyawan='Aktif' AND k.no_absen!='' AND k.no_absen IS NOT NULL ORDER BY k.nama_karyawan");
+				        if ($qa) while ($ra = $qa->fetch_assoc()) {
+				            $pinT = trim((string)$ra['no_absen']);
+				            foreach (array_keys($tgl_aktif) as $dt) {
+				                $tkey = $dt . '|' . $pinT;
+				                $sm = isset($rosterShift[$tkey]) && !empty($rosterShift[$tkey][0]) ? $rosterShift[$tkey][0] : ($ra['m_masuk'] ?? '');
+				                $sk = isset($rosterShift[$tkey]) && !empty($rosterShift[$tkey][1]) ? $rosterShift[$tkey][1] : ($ra['m_keluar'] ?? '');
+				                if (!isset($taps[$tkey])) {
+				                    $exp = '';
+				                    if ($sm !== '' && $sk !== '') {
+				                        $sec = strtotime($sk) - strtotime($sm);
+				                        if ($sec < 0) $sec += 86400;
+				                        $h = (int)($sec / 3600); $m = (int)(($sec % 3600) / 60);
+				                        $exp = $h . ' jam' . ($m > 0 ? ' ' . $m . ' mnt' : '') . ' (' . substr($sm, 0, 5) . '–' . substr($sk, 0, 5) . ')';
+				                    }
+				                    $noshow[] = ['tgl' => $dt, 'id_karyawan' => $ra['id_karyawan'], 'no_absen' => $ra['no_absen'], 'nama_karyawan' => $ra['nama_karyawan'], 'oslbl' => $ra['oslbl'], 'dept' => $ra['dept'], 'seharusnya' => $exp, 'ket' => 'Tidak absen — tidak ada tap hari ini'];
+				                } elseif ($mkMenit > 0 && !empty($taps[$tkey]) && mangkir_tgl_aktif($mkDari, $mkSampai, $dt)) {
+				                    $ft = substr(trim((string)$taps[$tkey]), 11, 5);
+				                    if ($sm !== '' && preg_match('/^\d{2}:\d{2}$/', $ft)) {
+				                        $dl = strtotime("1970-01-01 $ft") - strtotime("1970-01-01 " . substr($sm, 0, 5));
+				                        if ($dl > 43200) $dl -= 86400;
+				                        elseif ($dl < -43200) $dl += 86400;
+				                        $dlm = (int)($dl / 60);
+				                        if ($dlm > $mkMenit) {
+				                            $noshow[] = ['tgl' => $dt, 'id_karyawan' => $ra['id_karyawan'], 'no_absen' => $ra['no_absen'], 'nama_karyawan' => $ra['nama_karyawan'], 'oslbl' => $ra['oslbl'], 'dept' => $ra['dept'], 'seharusnya' => 'telat ' . $dlm . ' mnt (batas ' . $mkMenit . ' mnt)', 'ket' => 'Telat ' . $dlm . ' menit — dihitung mangkir'];
+				                    }
+				                    }
+				                }
+				            }
+				        }
+				    }
+				}
+				$ganti_map = [];
+				if (!empty($TanggalAwal) && !empty($TanggalAkhir)) {
+				    $qg = $koneksi->query("SELECT g.*, k2.nama_karyawan AS nama_ganti FROM tb_ganti g LEFT JOIN ms_karyawan k2 ON k2.id_karyawan=g.id_karyawan_ganti WHERE g.tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+				    if ($qg) while ($rg = $qg->fetch_assoc()) $ganti_map[$rg['tgl'] . '|' . $rg['id_karyawan_absen']] = $rg;
+				}
+				$opsi_kar = [];
+				$qk = $koneksi->query("SELECT k.id_karyawan, k.no_absen, k.nama_karyawan, o.OS_DHK AS oslbl, d.nama_departmen AS dept FROM ms_karyawan k LEFT JOIN ms_os_dhk o ON o.id_os_dhk=k.id_os_dhk LEFT JOIN ms_departmen d ON d.id_departmen=k.id_departmen WHERE k.status_karyawan='Aktif' ORDER BY k.nama_karyawan");
+				if ($qk) while ($rk = $qk->fetch_assoc()) $opsi_kar[] = $rk;
+				?>
+				<?php if (!empty($ganti_msg)): ?>
+					<div class="p-3 mb-3 rounded-lg border text-sm <?= strpos($ganti_msg, 'Gagal') === false ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800' ?>"><?= htmlspecialchars($ganti_msg) ?></div>
+				<?php endif; ?>
+				<div class="mt-4 p-4 rounded-xl border border-gray-200 bg-white">
+					<div class="d-flex justify-content-between align-items-center flex-wrap mb-1" style="gap:10px;">
+						<h4 class="font-bold text-sm m-0">Tidak Absen / Tidak Masuk (<?= count($noshow) ?> orang)</h4>
+						<?php if (!empty($noshow)): ?>
+						<div class="download-btn-container d-flex flex-wrap" style="gap:8px;">
+							<a href="excel_tidak_absen.php?tanggal_awal=<?= htmlspecialchars($TanggalAwal) ?>&tanggal_akhir=<?= htmlspecialchars($TanggalAkhir) ?>" target="_blank" class="btn btn-success font-semibold text-white d-inline-flex align-items-center shadow-sm download-btn">
+								<i class="fas fa-file-excel mr-2"></i> Download Excel
+							</a>
+							<a href="pdf_tidak_absen.php?tanggal_awal=<?= htmlspecialchars($TanggalAwal) ?>&tanggal_akhir=<?= htmlspecialchars($TanggalAkhir) ?>" target="_blank" class="btn btn-danger font-semibold text-white d-inline-flex align-items-center shadow-sm download-btn">
+								<i class="fas fa-file-pdf mr-2"></i> Download PDF
+							</a>
+						</div>
+						<?php endif; ?>
+					</div>
+					<p class="text-xs text-gray-500 mb-3">Sumber rencana: <?= htmlspecialchars($noshow_src) ?>. Yang tidak ada tap-nya di mesin pada rentang tanggal ini.</p>
+					<?php if (empty($noshow)): ?>
+						<p class="text-xs text-gray-500">Tidak ada data — seluruh karyawan yang direncanakan tercatat hadir.</p>
+					<?php else:
+						// ===== PAGINATION PHP tabel tidak absen (filter + slice, tanpa ubah isi data) =====
+						$filtered_ns = $noshow;
+						if ($cari_ns !== '') {
+							$filtered_ns = [];
+							$cari_ns_lower = strtolower($cari_ns);
+							foreach ($noshow as $ns_item) {
+								$gex_item = $ganti_map[($ns_item['tgl'] . '|' . $ns_item['id_karyawan'])] ?? null;
+								$hay_ns = strtolower($ns_item['tgl'] . ' ' . date('d-m-Y', strtotime($ns_item['tgl'])) . ' ' . $ns_item['no_absen'] . ' ' . $ns_item['nama_karyawan'] . ' ' . ($ns_item['oslbl'] ?? '') . ' ' . ($ns_item['dept'] ?? '') . ' ' . ($ns_item['seharusnya'] ?? '') . ' ' . ($ns_item['ket'] ?? '') . ' ' . ($gex_item['nama_ganti'] ?? ''));
+								if (strpos($hay_ns, $cari_ns_lower) !== false) $filtered_ns[] = $ns_item;
+							}
+						}
+						$total_ns = count($filtered_ns);
+						if ($show_all_ns || $total_ns === 0) {
+							$total_hal_ns = 1; $hal_ns = 1; $offset_ns = 0;
+							$paged_noshow = $filtered_ns;
+							$per_hal_ns_eff = $total_ns > 0 ? $total_ns : 25;
+						} else {
+							$per_hal_ns_eff = $per_hal_ns;
+							$total_hal_ns = max(1, (int)ceil($total_ns / $per_hal_ns_eff));
+							$hal_ns = isset($_GET['hal_ns']) ? max(1, (int)$_GET['hal_ns']) : 1;
+							if ($hal_ns > $total_hal_ns) $hal_ns = $total_hal_ns;
+							$offset_ns = ($hal_ns - 1) * $per_hal_ns_eff;
+							$paged_noshow = array_slice($filtered_ns, $offset_ns, $per_hal_ns_eff);
+						}
+					?>
+					<!-- Bar atas pagination tidak absen: Tampilkan (per halaman) + Cari -->
+					<div class="d-flex justify-content-between align-items-center flex-wrap mb-3" style="gap:10px;">
+						<div class="d-flex align-items-center" style="gap:8px;font-size:13px;color:#334155;">
+							<label class="m-0" for="per-hal-ns-select">Tampilkan</label>
+							<select id="per-hal-ns-select" class="form-control" style="width:auto;display:inline-block;padding:4px 8px;border:1px solid #e0e6ed;border-radius:8px;font-size:13px;">
+								<option value="10" <?php echo (!$show_all_ns && $per_hal_ns == 10) ? 'selected' : ''; ?>>10</option>
+								<option value="25" <?php echo (!$show_all_ns && $per_hal_ns == 25) ? 'selected' : ''; ?>>25</option>
+								<option value="50" <?php echo (!$show_all_ns && $per_hal_ns == 50) ? 'selected' : ''; ?>>50</option>
+								<option value="100" <?php echo (!$show_all_ns && $per_hal_ns == 100) ? 'selected' : ''; ?>>100</option>
+								<option value="-1" <?php echo $show_all_ns ? 'selected' : ''; ?>>Semua</option>
+							</select>
+							<span>data</span>
+						</div>
+						<div class="d-flex align-items-center" style="gap:8px;font-size:13px;color:#334155;">
+							<label class="m-0" for="cari-ns-input">Cari:</label>
+							<input type="text" id="cari-ns-input" value="<?php echo htmlspecialchars($cari_ns); ?>" placeholder="Cari nama / no absen..." class="form-control" style="width:180px;padding:5px 10px;border:1px solid #e0e6ed;border-radius:8px;font-size:13px;" />
+							<button type="button" id="cari-ns-btn" class="btn btn-primary btn-sm shadow-sm">Cari</button>
+							<?php if ($cari_ns !== '') :
+								$reset_ns = $_GET;
+								$reset_ns['page'] = 'generate';
+								$reset_ns['aksi'] = 'tarik';
+								unset($reset_ns['cari_ns'], $reset_ns['hal_ns']);
+							?>
+							<a href="?<?php echo htmlspecialchars(http_build_query($reset_ns)); ?>" class="btn btn-default btn-sm" style="border:1px solid #e0e6ed;">Reset</a>
+							<?php endif; ?>
+						</div>
+					</div>
+					<div class="overflow-x-auto">
+					<table id="tabel-tidak-absen" class="w-full text-sm text-left bg-white rounded-lg overflow-hidden">
+						<thead class="bg-gray-50 border-b border-gray-200"><tr><th class="py-2 px-3">Tanggal</th><th class="py-2 px-3">Nama</th><th class="py-2 px-3">OS / Bagian</th><th class="py-2 px-3">Seharusnya</th><th class="py-2 px-3">Keterangan</th><th class="py-2 px-3">Digantikan oleh</th></tr></thead>
+						<tbody class="divide-y divide-gray-100">
+						<?php foreach ($paged_noshow as $ns):
+						    $gkey = $ns['tgl'] . '|' . $ns['id_karyawan'];
+						    $gex = $ganti_map[$gkey] ?? null;
+						?>
+							<tr class="hover:bg-gray-50">
+								<td class="py-2 px-3"><?= date('d-m-Y', strtotime($ns['tgl'])) ?></td>
+								<td class="py-2 px-3 font-semibold"><?= htmlspecialchars($ns['nama_karyawan']) ?> <span class="text-gray-400 text-xs">(<?= htmlspecialchars($ns['no_absen']) ?>)</span></td>
+								<td class="py-2 px-3 text-xs"><?= htmlspecialchars(($ns['oslbl'] ?: '-') . ' / ' . ($ns['dept'] ?: '-')) ?></td>
+								<td class="py-2 px-3 text-xs font-semibold"><?= htmlspecialchars($ns['seharusnya'] ?: '-') ?></td>
+								<td class="py-2 px-3 text-xs text-amber-700 font-semibold"><?= htmlspecialchars($ns['ket'] ?? 'Tidak absen — tidak ada tap hari ini') ?></td>
+								<td class="py-2 px-3 text-xs">
+									<?php if ($gex): ?>
+										<div class="flex flex-col gap-1 min-w-[160px]">
+											<span class="px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-bold" style="width:fit-content;"><?= htmlspecialchars($gex['nama_ganti'] ?: '?') ?></span>
+											<form method="POST" onsubmit="return confirm('Batalkan pengganti ini? Baris PENGGANTI di tabel masuk ikut hilang.')">
+												<input type="hidden" name="ganti_batal" value="1">
+												<input type="hidden" name="ganti_tgl" value="<?= htmlspecialchars($ns['tgl']) ?>">
+												<input type="hidden" name="ganti_absen" value="<?= (int)$ns['id_karyawan'] ?>">
+												<button type="submit" class="px-2 py-1 bg-red-500 text-white rounded text-xs font-bold">Batal</button>
+											</form>
+										</div>
+									<?php else: ?>
+									<form method="POST" class="flex flex-col gap-1 min-w-[220px]">
+										<input type="hidden" name="ganti_simpan" value="1">
+										<input type="hidden" name="ganti_tgl" value="<?= htmlspecialchars($ns['tgl']) ?>">
+										<input type="hidden" name="ganti_absen" value="<?= (int)$ns['id_karyawan'] ?>">
+										<select name="ganti_oleh" required class="ganti-select border border-gray-300 rounded px-2 py-1 text-xs w-full" data-kid="<?= (int)$ns['id_karyawan'] ?>">
+											<option value="">- Pilih pengganti -</option>
+										</select>
+										<div class="flex gap-2 items-center">
+										<button type="submit" class="px-2 py-1 bg-indigo-600 text-white rounded text-xs font-bold">Simpan</button>
+										<a href="?page=karyawan&aksi=tambah" class="text-indigo-600 underline">+ Tambah karyawan baru di master</a>
+										</div>
+									</form>
+									<?php endif; ?>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+						<?php if (empty($paged_noshow)): ?>
+							<tr><td colspan="6" class="py-3 px-3 text-center text-gray-500">Tidak ada data yang cocok dengan pencarian.</td></tr>
+						<?php endif; ?>
+						</tbody>
+					</table>
+					</div>
+					<?php if ($total_ns > 0) :
+						$base_ns = $_GET;
+						$base_ns['page'] = 'generate';
+						$base_ns['aksi'] = 'tarik';
+						unset($base_ns['hal_ns']);
+						$base_ns_qs = http_build_query($base_ns);
+						$base_ns_url = '?' . $base_ns_qs . ($base_ns_qs !== '' ? '&' : '') . 'hal_ns=';
+						$mulai_ns = $offset_ns + 1;
+						$sampai_ns = min($offset_ns + $per_hal_ns_eff, $total_ns);
+						$win_start_ns = max(1, min($hal_ns - 2, $total_hal_ns - 4));
+						$win_end_ns = min($total_hal_ns, $win_start_ns + 4);
+						if ($win_end_ns - $win_start_ns < 4) $win_start_ns = max(1, $win_end_ns - 4);
+					?>
+					<div class="d-flex justify-content-between align-items-center flex-wrap mt-3" style="gap:10px;">
+						<div class="text-muted" style="font-size:12px;">
+							Menampilkan <?php echo $mulai_ns; ?> s/d <?php echo $sampai_ns; ?> dari <?php echo $total_ns; ?> data
+							(Hal. <?php echo $hal_ns; ?> / <?php echo $total_hal_ns; ?>)
+						</div>
+						<nav aria-label="Pagination Tidak Absen">
+							<ul class="pagination pagination-sm mb-0" style="gap:4px;">
+								<?php if ($hal_ns > 1) : ?>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_ns_url . '1'); ?>" title="Halaman pertama">&laquo;</a>
+								</li>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_ns_url . ($hal_ns - 1)); ?>">Prev</a>
+								</li>
+								<?php else : ?>
+								<li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+								<li class="page-item disabled"><span class="page-link">Prev</span></li>
+								<?php endif; ?>
+								<?php for ($pn = $win_start_ns; $pn <= $win_end_ns; $pn++) : ?>
+								<li class="page-item <?php echo ($pn == $hal_ns) ? 'active' : ''; ?>">
+									<?php if ($pn == $hal_ns) : ?>
+									<span class="page-link" style="background:#2563eb;border-color:#2563eb;color:#fff;"><?php echo $pn; ?></span>
+									<?php else : ?>
+									<a class="page-link" href="<?php echo htmlspecialchars($base_ns_url . $pn); ?>"><?php echo $pn; ?></a>
+									<?php endif; ?>
+								</li>
+								<?php endfor; ?>
+								<?php if ($hal_ns < $total_hal_ns) : ?>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_ns_url . ($hal_ns + 1)); ?>">Next</a>
+								</li>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_ns_url . $total_hal_ns); ?>" title="Halaman terakhir">&raquo;</a>
+								</li>
+								<?php else : ?>
+								<li class="page-item disabled"><span class="page-link">Next</span></li>
+								<li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+								<?php endif; ?>
+							</ul>
+						</nav>
+					</div>
+					<?php endif; ?>
+					<script>
+					(function(){
+						function initGanti(){
+							try {
+								if (!(window.jQuery && jQuery.fn)) return;
+								var master = document.getElementById('ganti_master_opts');
+								var html = master ? master.innerHTML : '';
+								document.querySelectorAll('select.ganti-select').forEach(function(sel){
+									if (sel.dataset.filled) return;
+									sel.innerHTML = '<option value="">- Pilih pengganti -</option>' + html;
+									var skip = sel.getAttribute('data-kid');
+									if (skip) {
+										var o = sel.querySelector('option[value="' + skip + '"]');
+										if (o) o.remove();
+									}
+									sel.dataset.filled = '1';
+								});
+								if (jQuery.fn.select2) {
+									jQuery('.ganti-select').each(function(){ if(!jQuery(this).data('select2')) jQuery(this).select2({width:'100%',placeholder:'- Pilih pengganti -',allowClear:false}); });
+								}
+							} catch(e){}
+						}
+						// Tabel tidak absen pakai pagination PHP (?hal_ns=&per_hal_ns=&cari_ns=),
+						// DataTables tidak dipakai agar tidak render semua + tidak dobel pagination.
+						if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ initGanti(); });
+						else { initGanti(); }
+					})();
+					</script>
+					<select id="ganti_master_opts" style="display:none">
+						<?php foreach ($opsi_kar as $ok2): ?>
+						<option value="<?= (int)$ok2['id_karyawan'] ?>"><?= htmlspecialchars($ok2['nama_karyawan']) ?> (<?= htmlspecialchars($ok2['no_absen']) ?>) — <?= htmlspecialchars(($ok2['oslbl'] ?: '-') . ' / ' . ($ok2['dept'] ?: '-')) ?></option>
+						<?php endforeach; ?>
+					</select>
+					<?php endif; ?>
+				</div>
 				</div>
 				</form>
 			</div>
@@ -1176,42 +1794,60 @@ if (isset($_SESSION['delete_success'])) {
 			});
 			<?php endif; ?>
 
-			$('#dataTables-example').DataTable({
-				pageLength: 25,
-				autoWidth: false,
-				responsive: false,
-				columnDefs: [
-					{ orderable: false, targets: 0 }
-				],
-				order: [[1, 'asc']],
-				lengthMenu: [
-					[10, 25, 50, -1],
-					[10, 25, 50, "Semua"]
-				],
-				language: {
-					search: "Cari:",
-					searchPlaceholder: "Cari data...",
-					lengthMenu: "Tampilkan _MENU_ data",
-					info: "Menampilkan _START_ s/d _END_ dari _TOTAL_ data",
-					paginate: {
-						previous: "Prev",
-						next: "Next"
-					}
-				}
+			// Tabel utama pakai pagination PHP (?hal=&per_hal=&cari=) — DataTables tidak dipakai di sini
+			// agar bar "Tampilkan/Cari" dan pagination selalu tampil.
+
+			// Bar atas: ganti jumlah data per halaman (reset ke hal 1, pertahankan filter)
+			$('#per-hal-select').on('change', function() {
+				var url = new URL(window.location.href);
+				url.searchParams.set('per_hal', $(this).val());
+				url.searchParams.set('hal', '1');
+				window.location.href = url.toString();
 			});
 
-			// Dihapus style .css('float') bawaan agar tidak bentrok dengan flexbox pada mobile
-			$('.dataTables_filter').addClass('mb-3');
-			$('.dataTables_length').addClass('mb-3');
+			// Bar atas: Cari server-side (lintas semua data, reset ke hal 1)
+			function submitCariTarik() {
+				var url = new URL(window.location.href);
+				var kw = $('#cari-tarik-input').val().trim();
+				if (kw !== '') url.searchParams.set('cari', kw);
+				else url.searchParams.delete('cari');
+				url.searchParams.set('hal', '1');
+				window.location.href = url.toString();
+			}
+			$('#cari-tarik-btn').on('click', submitCariTarik);
+			$('#cari-tarik-input').on('keydown', function(e) {
+				if (e.key === 'Enter') { e.preventDefault(); submitCariTarik(); }
+			});
 
-			// Select All checkbox logic
+			// Bar atas tabel TIDAK ABSEN: ganti jumlah data per halaman (reset ke hal_ns 1)
+			$('#per-hal-ns-select').on('change', function() {
+				var url = new URL(window.location.href);
+				url.searchParams.set('per_hal_ns', $(this).val());
+				url.searchParams.set('hal_ns', '1');
+				window.location.href = url.toString();
+			});
+
+			// Bar atas tabel TIDAK ABSEN: Cari server-side (reset ke hal_ns 1)
+			function submitCariNs() {
+				var url = new URL(window.location.href);
+				var kw = $('#cari-ns-input').val().trim();
+				if (kw !== '') url.searchParams.set('cari_ns', kw);
+				else url.searchParams.delete('cari_ns');
+				url.searchParams.set('hal_ns', '1');
+				window.location.href = url.toString();
+			}
+			$('#cari-ns-btn').on('click', submitCariNs);
+			$('#cari-ns-input').on('keydown', function(e) {
+				if (e.key === 'Enter') { e.preventDefault(); submitCariNs(); }
+			});
+
+			// Select All checkbox logic (plain, tanpa DataTables)
 			$('#select-all').on('click', function() {
-				var rows = $('#dataTables-example').DataTable().rows({ 'search': 'applied' }).nodes();
-				$('input[type="checkbox"].log-checkbox', rows).prop('checked', this.checked);
+				$('.log-checkbox').prop('checked', this.checked);
 			});
 
 			// Checkbox change handler to sync select-all state
-			$('#dataTables-example').on('change', '.log-checkbox', function() {
+			$('#tabel-tarik-data').on('change', '.log-checkbox', function() {
 				if (!this.checked) {
 					var el = $('#select-all').get(0);
 					if (el && el.checked && ('indeterminate' in el)) {
@@ -1224,9 +1860,8 @@ if (isset($_SESSION['delete_success'])) {
 			$('#btn-hapus-terpilih').on('click', function(e) {
 				e.preventDefault();
 				
-				var table = $('#dataTables-example').DataTable();
 				var checkedData = [];
-				table.$('.log-checkbox:checked').each(function() {
+				$('.log-checkbox:checked').each(function() {
 					checkedData.push($(this).val());
 				});
 				
@@ -1265,7 +1900,7 @@ if (isset($_SESSION['delete_success'])) {
 			});
 
 			// Submit single delete
-			$('#dataTables-example').on('click', '.btn-hapus-single', function(e) {
+			$('#tabel-tarik-data').on('click', '.btn-hapus-single', function(e) {
 				e.preventDefault();
 				var logKey = $(this).data('log-key');
 				
@@ -1288,7 +1923,7 @@ if (isset($_SESSION['delete_success'])) {
 				});
 			});
 			// Edit Lembur via SweetAlert2 Input
-			$('#dataTables-example').on('click', '.btn-edit-lembur', function(e) {
+			$('#tabel-tarik-data').on('click', '.btn-edit-lembur', function(e) {
 				e.preventDefault();
 				var pin = $(this).data('pin');
 				var date = $(this).data('date');

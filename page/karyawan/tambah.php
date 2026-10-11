@@ -9,6 +9,18 @@ if ($checkMonthly->num_rows == 0) {
     $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN target_bulanan DECIMAL(10,2) DEFAULT 40.00");
 }
 
+// Check and create No Telp column if it doesn't exist (harus sebelum whatsapp)
+$checkTelp = $koneksi->query("SHOW COLUMNS FROM ms_karyawan LIKE 'no_telp'");
+if ($checkTelp->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN no_telp VARCHAR(20) NULL DEFAULT NULL AFTER no_bpjs");
+}
+
+// Check and create WhatsApp column if it doesn't exist
+$checkWhatsApp = $koneksi->query("SHOW COLUMNS FROM ms_karyawan LIKE 'whatsapp'");
+if ($checkWhatsApp->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN whatsapp VARCHAR(20) DEFAULT '' AFTER no_telp");
+}
+
 if (isset($_POST['simpan'])) {
     $nama = $koneksi->real_escape_string($_POST['tnama']);
     $noabsen = $koneksi->real_escape_string($_POST['tnoabsen']);
@@ -17,18 +29,20 @@ if (isset($_POST['simpan'])) {
     $jabatan = !empty($_POST['tjabatan']) ? intval($_POST['tjabatan']) : 1;
     $os = !empty($_POST['tos']) ? intval($_POST['tos']) : 1;
     $golongan = !empty($_POST['tgolongan']) ? intval($_POST['tgolongan']) : 1;
-    $jeniskelamin = $koneksi->real_escape_string($_POST['tjeniskelamin']);
+    $jeniskelamin = (isset($_POST['tjeniskelamin']) && in_array($_POST['tjeniskelamin'], ['Laki-laki', 'Perempuan'], true)) ? "'" . $koneksi->real_escape_string($_POST['tjeniskelamin']) . "'" : "NULL";
     $agama = $koneksi->real_escape_string($_POST['tagama']);
     $tempatlahir = $koneksi->real_escape_string($_POST['ttempatlahir']);
     $tanggallahir = !empty($_POST['ttanggallahir']) && $_POST['ttanggallahir'] !== '' ? $koneksi->real_escape_string($_POST['ttanggallahir']) : NULL;
-    $statuskawin = $koneksi->real_escape_string($_POST['tstatuskawin']);
+    $statuskawin = (isset($_POST['tstatuskawin']) && in_array($_POST['tstatuskawin'], ['Kawin', 'Belum Kawin', 'Janda', 'Duda'], true)) ? "'" . $koneksi->real_escape_string($_POST['tstatuskawin']) . "'" : "NULL";
     $noktp = $koneksi->real_escape_string($_POST['tnoktp']);
     $nobpjs = $koneksi->real_escape_string($_POST['tnobpjs']);
+    $notelp = isset($_POST['tnotelp']) ? $koneksi->real_escape_string($_POST['tnotelp']) : '';
+    $whatsapp = isset($_POST['twhatsapp']) ? $koneksi->real_escape_string($_POST['twhatsapp']) : '';
     $alamatktp = isset($_POST['talamatktp']) ? $koneksi->real_escape_string($_POST['talamatktp']) : '';
     $alamattinggal = isset($_POST['talamattinggal']) ? $koneksi->real_escape_string($_POST['talamattinggal']) : '';
     $tanggalbergabung = isset($_POST['ttanggalbergabung']) && $_POST['ttanggalbergabung'] !== '' ? $koneksi->real_escape_string($_POST['ttanggalbergabung']) : date('Y-m-d');
     $upah = !empty($_POST['tupah']) ? floatval(str_replace(['Rp', '.', ' '], '', $_POST['tupah'])) : 0;
-    $jadwal = $koneksi->real_escape_string($_POST['tjadwal']);
+    $jadwal = isset($_POST['tjadwal']) && $_POST['tjadwal'] !== '' ? (int)$_POST['tjadwal'] : 0;
     $target_mingguan = !empty($_POST['ttarget_mingguan']) ? floatval($_POST['ttarget_mingguan']) : 20.00;
     $target_bulanan = !empty($_POST['ttarget_bulanan']) ? floatval($_POST['ttarget_bulanan']) : 40.00;
 
@@ -36,12 +50,12 @@ if (isset($_POST['simpan'])) {
     
     $sql = $koneksi->query("INSERT INTO ms_karyawan (
         id_departmen, id_jabatan, no_absen, nama_karyawan, tempat_lahir, tgl_lahir, agama, 
-        status_kawin, jenis_kelamin, no_ktp, no_bpjs, alamat_ktp, alamat_tinggal, 
+        status_kawin, jenis_kelamin, no_ktp, no_bpjs, no_telp, whatsapp, alamat_ktp, alamat_tinggal, 
         status_karyawan, tgl_aktif, id_sub_department, id_os_dhk, id_golongan, id_jadwal, upah,
         target_mingguan, target_bulanan
     ) VALUES (
         '$departmen', '$jabatan', '$noabsen', '$nama', '$tempatlahir', $tgl_lahir_sql, '$agama',
-        '$statuskawin', '$jeniskelamin', '$noktp', '$nobpjs', '$alamatktp', '$alamattinggal',
+        $statuskawin, $jeniskelamin, '$noktp', '$nobpjs', '$notelp', '$whatsapp', '$alamatktp', '$alamattinggal',
         'Aktif', '$tanggalbergabung', '$subdept', '$os', '$golongan', '$jadwal', '$upah',
         '$target_mingguan', '$target_bulanan'
     )");
@@ -95,6 +109,7 @@ if (isset($_POST['simpan'])) {
             }
         }
         
+        $jsMsg = $sync_message ? json_encode("<br><br><strong>Sinkronisasi ke mesin:</strong><br><small>".nl2br(htmlspecialchars($sync_message))."</small>") : "''";
         echo "<!DOCTYPE html>
         <html>
         <head>
@@ -103,9 +118,9 @@ if (isset($_POST['simpan'])) {
         <body>
             <script>
                 Swal.fire({
-                    icon: '" . ($sync_success ? 'success' : 'warning') . "',
-                    title: '" . ($sync_success ? 'Berhasil' : 'Perhatian') . "',
-                    text: 'Data karyawan berhasil disimpan.',
+                    icon: 'success',
+                    title: 'Berhasil',
+                    html: 'Data karyawan berhasil disimpan.' + $jsMsg,
                     confirmButtonColor: '#4f46e5',
                     confirmButtonText: 'Selesai'
                 }).then((result) => {
@@ -333,8 +348,8 @@ if (isset($_POST['simpan'])) {
                         </div>
 
                         <div class="form-group">
-                            <label class="block text-sm font-semibold text-gray-700 mb-2">Upah Harian (Rp) <span class="text-red-500">*</span></label>
-                            <input type="text" name="tupah" id="tupah_format" required class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-indigo-700" placeholder="0">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Upah Harian (Rp) <span class="text-gray-400">(Boleh 0 untuk tim boneless)</span></label>
+                            <input type="text" name="tupah" id="tupah_format" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-indigo-700" placeholder="0" value="0">
                         </div>
                     </div>
                 </div>
@@ -351,6 +366,14 @@ if (isset($_POST['simpan'])) {
                         <div class="form-group">
                             <label class="block text-sm font-semibold text-gray-700 mb-2">No. BPJS</label>
                             <input type="text" name="tnobpjs" class="max-w-md w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="No. BPJS Ketenagakerjaan/Kesehatan">
+                        </div>
+                        <div class="form-group">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">No. Telp</label>
+                            <input type="text" name="tnotelp" class="max-w-md w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="cth: 08123456789">
+                        </div>
+                        <div class="form-group">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">WhatsApp</label>
+                            <input type="text" name="twhatsapp" class="max-w-md w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="cth: 08123456789">
                         </div>
                         <div class="form-group">
                             <label class="block text-sm font-semibold text-gray-700 mb-2">Alamat Lengkap (KTP)</label>

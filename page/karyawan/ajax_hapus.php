@@ -47,6 +47,33 @@ if ($action === 'exec') {
     exit;
 }
 
+if ($action === 'delete_direct') {
+    // Hapus langsung by PIN tanpa preview (cepat: tidak baca GetAllUserInfo).
+    $dbOnly = !empty($_POST['db_only']);
+    $targets = [];
+    if (!$dbOnly) {
+        $no_absen = trim((string)($emp['no_absen'] ?? ''));
+        if ($no_absen === '') { echo json_encode(['success'=>false,'msg'=>'No. absen kosong — tidak bisa hapus dari mesin. Pakai hapus biasa lalu pilih DB Saja.']); exit; }
+        if (function_exists('get_all_devices')) {
+            foreach (get_all_devices($koneksi) as $d) {
+                $targets[$d['id_mesin']][] = $no_absen;
+            }
+        }
+    }
+    $results = [];
+    if (!$dbOnly && !empty($targets)) {
+        $results = delete_karyawan_from_devices($koneksi, $nama, false, $targets);
+        foreach ($results as $did => $r) {
+            if ($did === '_dry_run_mode' || $did === '_dry_run_info') continue;
+            log_sync_activity($koneksi, 'karyawan_delete_direct', $did, $id, $r['status'] ?? 'error', "Hapus langsung '$nama': " . ($r['message'] ?? ''));
+        }
+    }
+    $del = $koneksi->query("DELETE FROM ms_karyawan WHERE id_karyawan=$id");
+    echo json_encode(['success'=>(bool)$del,'results'=>$results,'db_only'=>$dbOnly,
+        'msg'=>$del ? 'Data karyawan berhasil dihapus.' : 'Gagal hapus database']);
+    exit;
+}
+
 if ($action === 'preview_bulk') {
     $ids = array_map('intval', (array)($_POST['ids'] ?? []));
     $ids = array_values(array_unique(array_filter($ids)));

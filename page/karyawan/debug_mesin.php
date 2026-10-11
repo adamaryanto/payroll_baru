@@ -17,10 +17,12 @@ $runRefresh = isset($_GET['refresh']);
 $refresh_results = [];
 $runVar = isset($_GET['variant']);
 $runKeys = isset($_GET['trykeys']);
+$runEnroll = isset($_GET['testenroll']);
 $results = [];
 $scan_results = [];
 $zk_results = [];
 $var_results = [];
+$enroll_results = [];
 
 // MODE TEBAK KUNCI (coba kunci umum pabrik via UDP, tanpa tulis data).
 $key_results = [];
@@ -35,6 +37,166 @@ if($runKeys){
         $kr['device'] = $device['nama_mesin'];
         $kr['ip'] = $ip;
         $key_results[] = $kr;
+    }
+}
+
+// MODE TES ENROLL (simulasi enroll + auto-sebar): pilih 1 mesin master, coba StartEnroll, cek template muncul, sebar ke mesin lain.
+if($runEnroll){
+    set_time_limit(0);
+    $test_pin = $_GET['test_pin'] ?? '8888';
+    $master_id = $_GET['enroll_master'] ?? '';
+    if($master_id === ''){ $enroll_results[] = ['device'=>'?','status'=>'error','msg'=>'Pilih mesin master dulu']; }
+    else if($master_id === 'auto'){
+        // AUTO-DETECT MODE: scan all machines to detect where fingerprint is enrolled
+        $er = ['device'=>'AUTO-DETECT','steps'=>[]];
+        
+        // 1. Get baseline from all online machines
+        $baselines = [];
+        $online_devices = [];
+        foreach($devices as $d){
+            if(empty($d['ip_mesin'])) continue;
+            if(!test_device_connection($d['ip_mesin'], $d['port'])) continue;
+            $templates = get_fingerprint_templates($d['ip_mesin'], $d['port'], $d['comm_key']??0, $test_pin);
+            $baselines[$d['id_mesin']] = array_map(fn($t)=>(int)$t['finger_id'], $templates);
+            $online_devices[$d['id_mesin']] = $d;
+        }
+        $er['steps']['scan'] = ['ok'=>true,'msg'=>'Scanning '.count($online_devices).' mesin online. Baseline diambil dari semua mesin.'];
+        
+        // 2. Wait instruction
+        $er['steps']['wait'] = ['ok'=>true,'msg'=>'TEMPEL JARI di MESIN MANA SAJA (yang online). Sistem memantau SEMUA mesin selama 60 detik...'];
+        
+        // 3. Polling loop: check ALL machines every 5 seconds
+        $maxPolls = 12; // 12x @ 5s = 60s
+        $detected_machine = null;
+        $new = [];
+        $cur = [];
+        
+        for($i = 0; $i < $maxPolls; $i++){
+            sleep(5);
+            foreach($online_devices as $did => $d){
+                $cur = get_fingerprint_templates($d['ip_mesin'], $d['port'], $d['comm_key']??0, $test_pin);
+                $curIds = array_map(fn($t)=>(int)$t['finger_id'], $cur);
+                $new = array_values(array_diff($curIds, $baselines[$did]));
+                if(!empty($new)){
+                    $detected_machine = $d;
+                    break 2; // Break both loops - found new fingerprint!
+                }
+            }
+        }
+        
+        $pollTime = ($i + 1) * 5;
+        
+        // 4. Show detection result
+        if($detected_machine){
+            $er['steps']['detect'] = ['ok'=>true,'msg'=>"✅ Jari BARU terdeteksi di {$detected_machine['nama_mesin']} ({$detected_machine['ip_mesin']}) setelah {$pollTime} detik. Jari baru: ".implode(',',$new).' (total '.count($cur).' jari)'];
+            
+            // 5. Auto-spread from detected machine to all others
+            $spread = [];
+            $nm = 'TES ENROLL '.$test_pin;
+            $safeNm = htmlspecialchars($nm, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+            
+            foreach($devices as $dev){
+                if((string)$dev['id_mesin'] === (string)$detected_machine['id_mesin']) continue; // Skip source machine
+                if(empty($dev['ip_mesin']) || !test_device_connection($dev['ip_mesin'], $dev['port'])){ 
+                    $spread[]=['device'=>$dev['nama_mesin'],'status'=>'skipped','msg'=>'Offline']; 
+                    continue; 
+                }
+                if(($dev['protocol'] ?? 'soap') === 'zkudp'){ 
+                    $spread[]=['device'=>$dev['nama_mesin'],'status'=>'skipped','msg'=>'Biner tidak support template']; 
+                    continue; 
+                }
+                
+                $tkey = $dev['comm_key'] ?? 0;
+                send_soap_request($dev['ip_mesin'], $dev['port'], "<DisableDevice><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey></DisableDevice>");
+                send_soap_request($dev['ip_mesin'], $dev['port'], "<SetUserInfo><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey><Arg><PIN xsi:type=\"xsd:integer\">{$test_pin}</PIN><Name xsi:type=\"xsd:string\">{$safeNm}</Name><Password xsi:type=\"xsd:string\"></Password><Group xsi:type=\"xsd:integer\">1</Group><Privilege xsi:type=\"xsd:integer\">0</Privilege></Arg></SetUserInfo>");
+                
+                $ok = 0;
+                foreach($cur as $t){ 
+                    if(set_fingerprint_template($dev['ip_mesin'], $dev['port'], $tkey, $test_pin, (int)$t['finger_id'], $t['template'], (int)($t['size']??0), (int)($t['valid']??1))) $ok++; 
+                }
+                
+                send_soap_request($dev['ip_mesin'], $dev['port'], "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey></RefreshData>");
+                send_soap_request($dev['ip_mesin'], $dev['port'], "<EnableDevice><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey></EnableDevice>");
+                
+                $cek = get_fingerprint_templates($dev['ip_mesin'], $dev['port'], $tkey, $test_pin);
+                $st = ($ok === count($cur) && count($cek) >= count($cur)) ? 'success' : ($ok > 0 ? 'warning' : 'error');
+                $spread[]=['device'=>$dev['nama_mesin'],'status'=>$st,'msg'=>"Terkirim $ok/".count($cur)." jari, terverifikasi ".count($cek)." jari"];
+            }
+            
+            $er['steps']['spread'] = ['ok'=>true,'msg'=>'Sebar dari '.$detected_machine['nama_mesin'].' ke '.count($spread).' mesin lain','detail'=>$spread];
+            $er['status'] = 'success';
+        } else {
+            $er['steps']['detect'] = ['ok'=>false,'msg'=>"❌ Timeout setelah {$pollTime} detik — tidak ada jari baru terdeteksi di ".count($online_devices)." mesin online. Pastikan tempel jari tepat setelah klik Tes Enroll."];
+            $er['status'] = 'waiting';
+        }
+        
+        $enroll_results[] = $er;
+    }
+    else {
+        $master = null;
+        foreach($devices as $d) if((string)$d['id_mesin'] === (string)$master_id){ $master = $d; break; }
+        if(!$master || empty($master['ip_mesin'])){ $enroll_results[] = ['device'=>'Master','status'=>'error','msg'=>'Mesin master tidak ketemu / IP kosong']; }
+        else {
+            $ip = $master['ip_mesin'];
+            $port = $master['port'] ?? 4370;
+            $comm = intval($master['comm_key'] ?? 0);
+            $er = ['device'=>$master['nama_mesin'],'ip'=>$ip,'steps'=>[]];
+            // 1. Cek koneksi
+            if(!test_device_connection($ip, $port)){ $er['steps']['connect'] = ['ok'=>false,'msg'=>'Mesin offline']; $er['status']='error'; $enroll_results[] = $er; }
+            else {
+                $er['steps']['connect'] = ['ok'=>true,'msg'=>'Online'];
+                // 2. Ambil baseline template (sebelum enroll)
+                $base = get_fingerprint_templates($ip, $port, $comm, $test_pin);
+                $baseIds = array_map(fn($t)=>(int)$t['finger_id'], $base);
+                $er['steps']['baseline'] = ['ok'=>true,'msg'=>'Baseline: '.count($baseIds).' jari sudah ada ('.implode(',',$baseIds).')'];
+                // 3. Kirim StartEnroll (mode enroll)
+                $enrollCmd = "<StartEnroll><ArgComKey xsi:type=\"xsd:integer\">{$comm}</ArgComKey><Arg><PIN xsi:type=\"xsd:integer\">{$test_pin}</PIN><FingerID xsi:type=\"xsd:integer\">0</FingerID></Arg></StartEnroll>";
+                $respEnroll = send_soap_request($ip, $port, $enrollCmd);
+                $enrollOk = $respEnroll && (stripos($respEnroll,'Success')!==false || stripos($respEnroll,'Successfully')!==false);
+                $er['steps']['enroll_mode'] = ['ok'=>$enrollOk,'msg'=>$enrollOk ? 'Mesin masuk mode enroll (TEMPEL JARI SEKARANG di mesin!)' : 'Mesin tidak balas Success — mungkin sudah mode enroll manual atau tidak support StartEnroll'];
+                // 4. Loop polling: tunggu sampai ada jari baru (max 60 detik)
+                $er['steps']['wait'] = ['ok'=>true,'msg'=>'Setelah klik Tes Enroll, LANGSUNG tempel jari 3x di mesin. Sistem memantau selama 60 detik...'];
+                $maxPolls = 12; // 12x polling @ 5 detik = 60 detik
+                $new = [];
+                $cur = [];
+                $curIds = [];
+                for($i = 0; $i < $maxPolls; $i++){
+                    sleep(5); // Tunggu 5 detik
+                    $cur = get_fingerprint_templates($ip, $port, $comm, $test_pin);
+                    $curIds = array_map(fn($t)=>(int)$t['finger_id'], $cur);
+                    $new = array_values(array_diff($curIds, $baseIds));
+                    if(!empty($new)) break; // Ada jari baru, keluar dari loop
+                }
+                $pollTime = ($i + 1) * 5;
+                $er['steps']['poll'] = ['ok'=>!empty($new),'msg'=>empty($new) ? "Timeout setelah {$pollTime} detik — belum ada jari baru. Pastikan tempel jari tepat setelah klik Tes Enroll." : "Jari BARU terdeteksi setelah {$pollTime} detik: ".implode(',',$new).' (total sekarang '.count($curIds).' jari)'];
+                // 5. Auto-sebar (kalau ada jari baru)
+                if(!empty($new)){
+                    $spread = [];
+                    $nm = 'TES ENROLL '.$test_pin;
+                    $safeNm = htmlspecialchars($nm, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+                    foreach($devices as $dev){
+                        if((string)$dev['id_mesin'] === (string)$master_id) continue;
+                        if(empty($dev['ip_mesin']) || !test_device_connection($dev['ip_mesin'], $dev['port'])){ $spread[]=['device'=>$dev['nama_mesin'],'status'=>'skipped','msg'=>'Offline']; continue; }
+                        if(($dev['protocol'] ?? 'soap') === 'zkudp'){ $spread[]=['device'=>$dev['nama_mesin'],'status'=>'skipped','msg'=>'Biner tidak support template']; continue; }
+                        $tkey = $dev['comm_key'] ?? 0;
+                        send_soap_request($dev['ip_mesin'], $dev['port'], "<DisableDevice><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey></DisableDevice>");
+                        send_soap_request($dev['ip_mesin'], $dev['port'], "<SetUserInfo><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey><Arg><PIN xsi:type=\"xsd:integer\">{$test_pin}</PIN><Name xsi:type=\"xsd:string\">{$safeNm}</Name><Password xsi:type=\"xsd:string\"></Password><Group xsi:type=\"xsd:integer\">1</Group><Privilege xsi:type=\"xsd:integer\">0</Privilege></Arg></SetUserInfo>");
+                        $ok = 0;
+                        foreach($cur as $t){ if(set_fingerprint_template($dev['ip_mesin'], $dev['port'], $tkey, $test_pin, (int)$t['finger_id'], $t['template'], (int)($t['size']??0), (int)($t['valid']??1))) $ok++; }
+                        send_soap_request($dev['ip_mesin'], $dev['port'], "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey></RefreshData>");
+                        send_soap_request($dev['ip_mesin'], $dev['port'], "<EnableDevice><ArgComKey xsi:type=\"xsd:integer\">{$tkey}</ArgComKey></EnableDevice>");
+                        $cek = get_fingerprint_templates($dev['ip_mesin'], $dev['port'], $tkey, $test_pin);
+                        $st = ($ok === count($cur) && count($cek) >= count($cur)) ? 'success' : ($ok > 0 ? 'warning' : 'error');
+                        $spread[]=['device'=>$dev['nama_mesin'],'status'=>$st,'msg'=>"Terkirim $ok/".count($cur)." jari, terverifikasi ".count($cek)." jari"];
+                    }
+                    $er['steps']['spread'] = ['ok'=>true,'msg'=>'Sebar ke '.count($spread).' mesin lain','detail'=>$spread];
+                } else {
+                    $er['steps']['spread'] = ['ok'=>false,'msg'=>'Skip sebar (belum ada jari baru)'];
+                }
+                $er['status'] = !empty($new) ? 'success' : 'waiting';
+                $enroll_results[] = $er;
+            }
+        }
     }
 }
 
@@ -198,6 +360,75 @@ if($run){
                 <button type="submit" name="variant" value="1" class="bg-violet-600 hover:bg-violet-700 text-white font-bold py-2 px-5 rounded-lg text-sm"><i class="fas fa-shuffle mr-2"></i>Tes Varian</button>
                 <button type="submit" name="trykeys" value="1" class="bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 px-5 rounded-lg text-sm"><i class="fas fa-key mr-2"></i>Tebak Kunci Umum</button>
             </form>
+            
+            <!-- Form Tes Enroll (terpisah karena butuh pilihan mesin master + PIN test) -->
+            <?php if(!empty($devices)): ?>
+            <form method="GET" class="flex flex-col md:flex-row gap-2 items-stretch md:items-end mb-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <input type="hidden" name="page" value="karyawan">
+                <input type="hidden" name="aksi" value="debug_mesin">
+                <div>
+                    <label class="text-xs font-bold text-purple-700 uppercase">Mesin Master (untuk enroll)</label><br>
+                    <select name="enroll_master" required class="border border-purple-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">- Pilih Mesin -</option>
+                        <option value="auto" style="font-weight:bold;background:#f3e8ff;">🔍 AUTO-DETECT (scan semua mesin)</option>
+                        <?php foreach($devices as $d): ?>
+                        <option value="<?= $d['id_mesin'] ?>"><?= htmlspecialchars($d['nama_mesin']) ?> (<?= htmlspecialchars($d['ip_mesin'] ?: '-') ?>)</option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-purple-700 uppercase">PIN Test (default 8888)</label><br>
+                    <input type="text" name="test_pin" value="8888" class="border border-purple-300 rounded-lg px-3 py-2 text-sm w-28">
+                </div>
+                <button type="submit" name="testenroll" value="1" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-5 rounded-lg text-sm"><i class="fas fa-fingerprint mr-2"></i>Tes Enroll + Auto-sebar</button>
+                <div class="text-xs text-purple-700 max-w-md">Setelah klik, langsung <b>tempel jari 3x</b> di mesin master. Web akan cek apakah template terdeteksi, lalu auto-sebar ke mesin lain.</div>
+            </form>
+            <?php endif; ?>
+
+            <?php if($runEnroll): ?>
+                <?php if(empty($enroll_results)): ?>
+                    <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 mb-4">Pilih mesin master dulu.</div>
+                <?php else: ?>
+                    <?php foreach($enroll_results as $er): ?>
+                    <div class="border rounded-xl mb-4 overflow-hidden <?= ($er['status']??'')=='success'?'border-green-200':(($er['status']??'')=='waiting'?'border-amber-200':'border-red-200') ?>">
+                        <div class="px-4 py-3 font-bold <?= ($er['status']??'')=='success'?'bg-green-50 text-green-800':(($er['status']??'')=='waiting'?'bg-amber-50 text-amber-800':'bg-red-50 text-red-800') ?>">
+                            <i class="fas fa-fingerprint mr-2"></i>Tes Enroll: <?= htmlspecialchars($er['device']) ?> (<?= htmlspecialchars($er['ip']??'-') ?>)
+                            <?php if(($er['status']??'')=='success'): ?>
+                                — BERHASIL: Jari baru terdeteksi dan disebar
+                            <?php elseif(($er['status']??'')=='waiting'): ?>
+                                — MENUNGGU: Tempel jari di mesin, lalu klik Tes Enroll lagi
+                            <?php else: ?>
+                                — GAGAL
+                            <?php endif; ?>
+                        </div>
+                        <div class="p-4 space-y-2 text-sm">
+                            <?php foreach(($er['steps']??[]) as $key=>$step): ?>
+                                <?php if($key === 'spread' && isset($step['detail'])): ?>
+                                    <div class="flex gap-2 items-start">
+                                        <span class="px-2 py-0.5 rounded text-xs font-bold <?= $step['ok']?'bg-green-100 text-green-800':'bg-gray-100 text-gray-500' ?>"><?= $step['ok']?'OK':'SKIP' ?></span>
+                                        <div class="flex-1">
+                                            <b>Auto-sebar ke mesin lain</b>
+                                            <div class="mt-2 space-y-1">
+                                                <?php foreach($step['detail'] as $d): ?>
+                                                <div class="p-2 rounded border <?= $d['status']=='success'?'border-green-200 bg-green-50':($d['status']=='warning'?'border-amber-200 bg-amber-50':($d['status']=='skipped'?'border-gray-200 bg-gray-50':'border-red-200 bg-red-50')) ?>">
+                                                    <b><?= htmlspecialchars($d['device']) ?></b>: <?= htmlspecialchars($d['msg']) ?>
+                                                </div>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="flex gap-2 items-start">
+                                        <span class="px-2 py-0.5 rounded text-xs font-bold <?= $step['ok']?'bg-green-100 text-green-800':'bg-red-100 text-red-800' ?>"><?= $step['ok']?'OK':'GAGAL' ?></span>
+                                        <div><b><?= ucfirst($key) ?></b><pre class="bg-gray-50 border rounded p-2 mt-1 text-xs overflow-x-auto whitespace-pre-wrap"><?= htmlspecialchars($step['msg']) ?></pre></div>
+                                    </div>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            <?php endif; ?>
 
             <?php if($runRefresh): ?>
             <div class="border rounded-xl mb-4 overflow-hidden border-cyan-200">

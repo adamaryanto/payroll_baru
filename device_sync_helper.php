@@ -56,12 +56,17 @@ function send_soap_request($ip, $port, $request) {
  * Test connection to a fingerprint device
  */
 function test_device_connection($ip, $port = 4370) {
+    // Cache per proses, TTL 60 detik: sweep manggil berkali-kali untuk IP yang
+    // sama (mesin offline = timeout 1.5 dtk tiap panggil tanpa cache).
+    static $cache = [];
+    $key = $ip . ':' . (int)$port;
+    $now = time();
+    if (isset($cache[$key]) && ($now - $cache[$key][1]) < 60) return $cache[$key][0];
     $socket = @fsockopen($ip, $port, $errno, $errstr, 1.5);
-    if ($socket) {
-        fclose($socket);
-        return true;
-    }
-    return false;
+    $ok = $socket ? true : false;
+    if ($socket) fclose($socket);
+    $cache[$key] = [$ok, $now];
+    return $ok;
 }
 
 /**

@@ -9,6 +9,18 @@ if ($checkMonthly->num_rows == 0) {
     $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN target_bulanan DECIMAL(10,2) DEFAULT 40.00");
 }
 
+// Check and create WhatsApp column if it doesn't exist
+$checkWhatsApp = $koneksi->query("SHOW COLUMNS FROM ms_karyawan LIKE 'whatsapp'");
+if ($checkWhatsApp->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN whatsapp VARCHAR(20) DEFAULT '' AFTER no_telp");
+}
+
+// Check and create No Telp column if it doesn't exist
+$checkTelp = $koneksi->query("SHOW COLUMNS FROM ms_karyawan LIKE 'no_telp'");
+if ($checkTelp->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_karyawan ADD COLUMN no_telp VARCHAR(20) NULL DEFAULT NULL AFTER no_bpjs");
+}
+
 if (isset($_GET['id'])) {
     $idu = $koneksi->real_escape_string($_GET['id']);
     $tampil = $koneksi->query("SELECT * FROM ms_karyawan WHERE id_karyawan = '$idu'");
@@ -26,6 +38,8 @@ if (isset($_GET['id'])) {
     $noabsen = $data['no_absen'];
     $nama = $data['nama_karyawan'];
     $nobpjs = $data['no_bpjs'];
+    $notelp = $data['no_telp'] ?? '';
+    $whatsapp = $data['whatsapp'] ?? '';
     $tempatlahir = $data['tempat_lahir'];
     $tgllahir = $data['tgl_lahir'];
     $noktp = $data['no_ktp'];
@@ -44,33 +58,106 @@ if (isset($_GET['id'])) {
     $target_bulanan = $data['target_bulanan'] ?? 40.00;
 }
 
+// Roster mendatang karyawan ini (untuk hint Rencana Shift, 14 hari ke depan)
+$rk_map = [];
+$rk_id = isset($idkaryawan) ? (int)$idkaryawan : 0;
+if ($rk_id > 0) {
+    $qrk = $koneksi->query("SELECT h.tgl_rkk, d.id_jadwal, j.keterangan, j.jam_masuk, j.jam_keluar FROM tb_rkk_detail d JOIN tb_rkk h ON h.id_rkk=d.id_rkk LEFT JOIN tb_jadwal j ON j.id_jadwal=d.id_jadwal WHERE d.id_karyawan='$rk_id' AND h.tgl_rkk >= CURDATE() ORDER BY h.tgl_rkk ASC LIMIT 14");
+    if ($qrk) {
+        while ($rrk = $qrk->fetch_assoc()) {
+            $rk_map[$rrk['tgl_rkk']] = ($rrk['keterangan'] ?: 'Shift ' . $rrk['id_jadwal']) . ' (' . substr($rrk['jam_masuk'] ?? '', 0, 5) . '-' . substr($rrk['jam_keluar'] ?? '', 0, 5) . ')';
+        }
+    }
+}
+// Default Rencana Shift = roster TERAKHIR DIUBAH (mis. via jadwal_excel),
+// biar yang barusan diganti langsung kelihatan di sini. Ganti tanggal manual
+// untuk lihat/tulis tanggal lain. Nilai default = isi DB, jadi simpan tanpa
+// menyentuh Rencana Shift hasilnya tetap sama (di-skip).
+$rk_def_date = '';
+$rk_def_shift = 0;
+$rk_def_txt = '';
+if ($rk_id > 0) {
+    $qdef = $koneksi->query("SELECT h.tgl_rkk, d.id_jadwal, j.keterangan, j.jam_masuk, j.jam_keluar FROM tb_rkk_detail d JOIN tb_rkk h ON h.id_rkk=d.id_rkk LEFT JOIN tb_jadwal j ON j.id_jadwal=d.id_jadwal WHERE d.id_karyawan='$rk_id' AND h.tgl_rkk >= CURDATE() ORDER BY d.tgl_updt DESC LIMIT 1");
+    if ($qdef && $qdef->num_rows > 0) {
+        $rdef = $qdef->fetch_assoc();
+        $rk_def_date = $rdef['tgl_rkk'];
+        $rk_def_shift = (int)$rdef['id_jadwal'];
+        $rk_def_txt = ($rdef['keterangan'] ?: 'Shift ' . $rdef['id_jadwal']) . ' (' . substr($rdef['jam_masuk'] ?? '', 0, 5) . '-' . substr($rdef['jam_keluar'] ?? '', 0, 5) . ')';
+    }
+}
+$rk_hint_init = $rk_def_date !== '' ? ('Saat ini: <b>' . htmlspecialchars($rk_def_txt) . '</b> — pilih shift lalu simpan untuk menimpa.') : 'Pilih tanggal untuk lihat roster saat ini.';
+
 if (isset($_POST['update'])) {
     ini_set('display_errors',1); error_reporting(E_ALL);
     $tid = $koneksi->real_escape_string($_POST['tid']);
     $tnama = $koneksi->real_escape_string($_POST['tnama']);
     $tnoabsen = $koneksi->real_escape_string($_POST['tnoabsen']);
     $tnobpjs = $koneksi->real_escape_string($_POST['tnobpjs']);
-    $tos = $koneksi->real_escape_string($_POST['tos']);
-    $tgolongan = $koneksi->real_escape_string($_POST['tgolongan']);
-    $tjeniskelamin = $koneksi->real_escape_string($_POST['tjeniskelamin']);
+    $tnotelp = isset($_POST['tnotelp']) ? $koneksi->real_escape_string($_POST['tnotelp']) : '';
+    $twhatsapp = isset($_POST['twhatsapp']) ? $koneksi->real_escape_string($_POST['twhatsapp']) : '';
+    $tos = isset($_POST['tos']) && $_POST['tos'] !== '' ? (int)$_POST['tos'] : 0;
+    $tgolongan = isset($_POST['tgolongan']) && $_POST['tgolongan'] !== '' ? (int)$_POST['tgolongan'] : 0;
+    $tjeniskelamin = (isset($_POST['tjeniskelamin']) && in_array($_POST['tjeniskelamin'], ['Laki-laki', 'Perempuan'], true)) ? "'" . $koneksi->real_escape_string($_POST['tjeniskelamin']) . "'" : "NULL";
     $tagama = $koneksi->real_escape_string($_POST['tagama']);
     $ttempatlahir = $koneksi->real_escape_string($_POST['ttempatlahir']);
-    $ttanggallahir = $koneksi->real_escape_string($_POST['ttanggallahir']);
-    $tstatuskawin = $koneksi->real_escape_string($_POST['tstatuskawin']);
+    $ttanggallahir = isset($_POST['ttanggallahir']) && $_POST['ttanggallahir'] !== '' ? "'" . $koneksi->real_escape_string($_POST['ttanggallahir']) . "'" : "NULL";
+    $tstatuskawin = (isset($_POST['tstatuskawin']) && in_array($_POST['tstatuskawin'], ['Kawin', 'Belum Kawin', 'Janda', 'Duda'], true)) ? "'" . $koneksi->real_escape_string($_POST['tstatuskawin']) . "'" : "NULL";
     $tnoktp = $koneksi->real_escape_string($_POST['tnoktp']);
     $tbpjs = $koneksi->real_escape_string($_POST['tnobpjs']);
-    $tstatuskaryawan = $koneksi->real_escape_string($_POST['tstatuskaryawan']);
+    $tstatuskaryawan = (isset($_POST['tstatuskaryawan']) && in_array($_POST['tstatuskaryawan'], ['Aktif', 'Non Aktif'], true)) ? "'" . $koneksi->real_escape_string($_POST['tstatuskaryawan']) . "'" : "NULL";
     $talamatktp = isset($_POST['talamatktp']) ? $koneksi->real_escape_string($_POST['talamatktp']) : '';
     $talamattinggal = isset($_POST['talamattinggal']) ? $koneksi->real_escape_string($_POST['talamattinggal']) : '';
     $ttanggalbergabung = isset($_POST['ttanggalbergabung']) && $_POST['ttanggalbergabung'] !== '' ? $koneksi->real_escape_string($_POST['ttanggalbergabung']) : date('Y-m-d');
     $tupah = !empty($_POST['tupah']) ? floatval(str_replace(['Rp', '.', ' '], '', $_POST['tupah'])) : 0;
 
-    $tdepartmen = $koneksi->real_escape_string($_POST['tdepartmen']);
-    $tsubdept = $koneksi->real_escape_string($_POST['tsubdept']);
-    $tjabatan = $koneksi->real_escape_string($_POST['tjabatan']);
-    $tjadwal = $koneksi->real_escape_string($_POST['tjadwal']);
+    $tdepartmen = isset($_POST['tdepartmen']) && $_POST['tdepartmen'] !== '' ? (int)$_POST['tdepartmen'] : 0;
+    $tsubdept = isset($_POST['tsubdept']) && $_POST['tsubdept'] !== '' ? (int)$_POST['tsubdept'] : 0;
+    $tjabatan = isset($_POST['tjabatan']) && $_POST['tjabatan'] !== '' ? (int)$_POST['tjabatan'] : 0;
+    $tjadwal = isset($_POST['tjadwal']) && $_POST['tjadwal'] !== '' ? (int)$_POST['tjadwal'] : 0;
     $ttarget_mingguan = !empty($_POST['ttarget_mingguan']) ? floatval($_POST['ttarget_mingguan']) : 20.00;
     $ttarget_bulanan = !empty($_POST['ttarget_bulanan']) ? floatval($_POST['ttarget_bulanan']) : 40.00;
+
+    // --- Rencana Shift (roster per tanggal, opsional; tidak mengubah shift tetap di atas) ---
+    // Aturan: hanya diproses bila Shift Rencana dipilih. Tanggal tanpa shift = mode lihat (diabaikan).
+    $trenc_date = trim((string)($_POST['trencana_tgl'] ?? ''));
+    $trenc_shift = isset($_POST['trencana_shift']) && $_POST['trencana_shift'] !== '' ? (int)$_POST['trencana_shift'] : 0;
+    $roster_msg = '';
+    $pre_err = '';
+    if ($trenc_shift > 0) {
+        if ($trenc_date === '') {
+            $pre_err = 'Tanggal rencana wajib diisi bila Shift Rencana dipilih.';
+        } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $trenc_date) || $trenc_date < date('Y-m-d')) {
+            $pre_err = 'Tanggal rencana tidak valid / sudah lewat.';
+        } else {
+            $qcs = $koneksi->query("SELECT keterangan, jam_masuk, jam_keluar FROM tb_jadwal WHERE id_jadwal='$trenc_shift' LIMIT 1");
+            if (!$qcs || $qcs->num_rows == 0) {
+                $pre_err = 'Shift rencana tidak ditemukan.';
+            } else {
+                $sh_row = $qcs->fetch_assoc();
+                $roster_msg = $sh_row['keterangan'] . ' (' . substr($sh_row['jam_masuk'] ?? '', 0, 5) . '-' . substr($sh_row['jam_keluar'] ?? '', 0, 5) . ')';
+            }
+        }
+    }
+    if ($pre_err !== '') {
+        echo "<!DOCTYPE html>
+        <html>
+        <head>
+            <script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script>
+        </head>
+        <body>
+            <script>
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Gagal',
+                    text: " . json_encode($pre_err) . ",
+                    confirmButtonColor: '#4f46e5',
+                    confirmButtonText: 'Ok'
+                });
+            </script>
+        </body>
+        </html>";
+        return;
+    }
 
     $sql = $koneksi->query("UPDATE ms_karyawan SET 
         id_departmen = '$tdepartmen',
@@ -78,19 +165,21 @@ if (isset($_POST['update'])) {
         id_sub_department = '$tsubdept',
         nama_karyawan = '$tnama',
         tempat_lahir = '$ttempatlahir',
-        tgl_lahir = '$ttanggallahir',
+        tgl_lahir = $ttanggallahir,
         agama = '$tagama',
-        status_kawin = '$tstatuskawin',
-        jenis_kelamin = '$tjeniskelamin',
+        status_kawin = $tstatuskawin,
+        jenis_kelamin = $tjeniskelamin,
         no_ktp = '$tnoktp',
         no_bpjs = '$tbpjs',
+        no_telp = '$tnotelp',
+        whatsapp = '$twhatsapp',
         alamat_ktp = '$talamatktp',
         alamat_tinggal = '$talamattinggal',
         tgl_aktif = '$ttanggalbergabung',
         id_os_dhk = '$tos',
         id_golongan = '$tgolongan',
         id_jadwal = '$tjadwal',
-        status_karyawan = '$tstatuskaryawan',
+        status_karyawan = $tstatuskaryawan,
         upah = '$tupah',
         target_mingguan = '$ttarget_mingguan',
         target_bulanan = '$ttarget_bulanan'
@@ -98,6 +187,48 @@ if (isset($_POST['update'])) {
     ");
 
     if ($sql) {
+        // Tulis roster tanggal tsb (tb_rkk + tb_rkk_detail) bila Shift Rencana dipilih
+        $roster_info = '';
+        if ($trenc_shift > 0) {
+            $tid_int = (int)$tid;
+            $qh = $koneksi->query("SELECT id_rkk FROM tb_rkk WHERE tgl_rkk='$trenc_date' LIMIT 1");
+            if ($qh && $qh->num_rows > 0) { $rh = $qh->fetch_assoc(); $id_rkk = (int)$rh['id_rkk']; }
+            else {
+                $now = date('Y-m-d H:i:s');
+                $ket = $koneksi->real_escape_string('Roster Ubah Karyawan ' . $trenc_date);
+                $koneksi->query("INSERT INTO tb_rkk (tgl_rkk, keterangan, jam_kerja, detail_rkk, status_rkk, tgl_status) VALUES ('$trenc_date', '$ket', '12', '$now', '0', '$now')");
+                $id_rkk = $koneksi->insert_id;
+            }
+            if ($id_rkk > 0) {
+                // Roster sudah sama -> lewati (biar simpan tanpa menyentuh Rencana Shift tidak dihitung menulis)
+                $qc0 = $koneksi->query("SELECT id_jadwal FROM tb_rkk_detail WHERE id_rkk='$id_rkk' AND id_karyawan='$tid_int' LIMIT 1");
+                $rk_same = ($qc0 && $qc0->num_rows > 0) && (int)$qc0->fetch_assoc()['id_jadwal'] === $trenc_shift;
+                if ($rk_same) {
+                    $roster_info = "<br><small>Roster " . htmlspecialchars($trenc_date) . " sudah sama.</small>";
+                } else {
+                $rd_dept = $tdepartmen > 0 ? $tdepartmen : 0;
+                $rd_sub = $tsubdept > 0 ? $tsubdept : 0;
+                if ($rd_dept <= 0) {
+                    $qd = $koneksi->query("SELECT MIN(id_departmen) AS m FROM ms_departmen");
+                    if ($qd && ($dr = $qd->fetch_assoc()) && $dr['m']) $rd_dept = (int)$dr['m'];
+                }
+                if ($rd_sub <= 0) {
+                    $qs = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
+                    if ($qs && ($sr = $qs->fetch_assoc()) && $sr['m']) $rd_sub = (int)$sr['m'];
+                }
+                $qc2 = $koneksi->query("SELECT id_rkk_detail FROM tb_rkk_detail WHERE id_rkk='$id_rkk' AND id_karyawan='$tid_int' LIMIT 1");
+                if ($qc2 && $qc2->num_rows > 0) {
+                    $cr2 = $qc2->fetch_assoc();
+                    $dq = $koneksi->query("UPDATE tb_rkk_detail SET id_jadwal='$trenc_shift' WHERE id_rkk_detail='" . (int)$cr2['id_rkk_detail'] . "'");
+                } else {
+                    $dq = $koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$tid_int', NULL, '$rd_dept', '$rd_sub', '0', 'Hadir', '$trenc_shift', '0', '0', '0', NOW())");
+                }
+                $roster_info = $dq ? ("<br><small>Roster " . htmlspecialchars($trenc_date) . ": " . htmlspecialchars($roster_msg) . "</small>") : ("<br><small class=\"text-red-600\">Roster " . htmlspecialchars($trenc_date) . " gagal: " . htmlspecialchars($koneksi->error) . "</small>");
+                }
+            } else {
+                $roster_info = "<br><small class=\"text-red-600\">Roster gagal: header tanggal tidak bisa dibuat.</small>";
+            }
+        }
         // Sync ke mesin jangan bikin blank - timeout cepet & gak blokir save
         $sync_results = [];
         $sync_message = '';
@@ -150,9 +281,9 @@ if (isset($_POST['update'])) {
         <body>
             <script>
                 Swal.fire({
-                    icon: '" . ($sync_success ? 'success' : 'warning') . "',
-                    title: '" . ($sync_success ? 'Berhasil' : 'Perhatian') . "',
-                    html: 'Data karyawan berhasil diperbarui.' + $jsMsg2,
+                    icon: 'success',
+                    title: 'Berhasil',
+                    html: 'Data karyawan berhasil diperbarui." . $roster_info . "' + $jsMsg2,
                     confirmButtonColor: '#4f46e5',
                     confirmButtonText: 'Selesai'
                 }).then((result) => {
@@ -377,6 +508,34 @@ if (isset($_POST['update'])) {
                     </div>
                 </div>
 
+                <!-- Section Rencana Shift (roster per tanggal, opsional) -->
+                <div class="mb-8">
+                    <h4 class="text-sm font-bold text-indigo-600 uppercase tracking-wider mb-2 flex items-center">
+                        <i class="fas fa-calendar-alt mr-2 text-lg"></i> Rencana Shift
+                    </h4>
+                    <p class="text-xs text-gray-500 mb-4">Menampilkan roster <b>terakhir diubah</b> (mis. via Ubah Jadwal Excel) — ganti tanggal untuk lihat/tulis roster tanggal lain (dipakai Tarik Data / Excel / PDF). Shift / Jadwal di atas (master) dipakai bila tanggal itu kosong.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
+                        <div class="form-group">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Tanggal Rencana</label>
+                            <input type="date" name="trencana_tgl" id="trencana_tgl" min="<?= date('Y-m-d') ?>" value="<?= htmlspecialchars($rk_def_date); ?>" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            <p id="rk_hint" class="text-xs text-gray-500 mt-1"><?= $rk_hint_init; ?></p>
+                        </div>
+                        <div class="form-group">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Shift Rencana</label>
+                            <select name="trencana_shift" id="trencana_shift" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                                <option value="">- Pilih Shift (opsional) -</option>
+                                <?php
+                                $q_rshift = $koneksi->query("SELECT * FROM tb_jadwal ORDER BY jam_masuk");
+                                while($d = $q_rshift->fetch_assoc()) {
+                                    $rsel = ($rk_def_shift > 0 && (int)$d['id_jadwal'] === $rk_def_shift) ? ' selected' : '';
+                                    echo "<option value='".$d['id_jadwal']."'".$rsel.">".$d['keterangan']." (".$d['jam_masuk']." - ".$d['jam_keluar'].")</option>";
+                                }
+                                ?>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Section 2: Documents & Domisile -->
                 <div class="mb-8">
                     <h4 class="text-sm font-bold text-indigo-600 uppercase tracking-wider mb-4 flex items-center">
@@ -390,6 +549,14 @@ if (isset($_POST['update'])) {
                         <div class="form-group">
                             <label class="block text-sm font-semibold text-gray-700 mb-2">No. BPJS</label>
                             <input type="text" name="tnobpjs" value="<?= $nobpjs; ?>" class="max-w-md w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Masukkan No. BPJS">
+                        </div>
+                        <div class="form-group">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">No. Telp</label>
+                            <input type="text" name="tnotelp" value="<?= $notelp; ?>" class="max-w-md w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="cth: 08123456789">
+                        </div>
+                        <div class="form-group">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">WhatsApp</label>
+                            <input type="text" name="twhatsapp" value="<?= $whatsapp; ?>" class="max-w-md w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="cth: 08123456789">
                         </div>
                         <div class="form-group">
                             <label class="block text-sm font-semibold text-gray-700 mb-2">Alamat Lengkap (KTP)</label>
@@ -413,8 +580,8 @@ if (isset($_POST['update'])) {
                             <input type="date" name="ttanggalbergabung" value="<?= $tglaktif; ?>" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
                         </div>
                         <div class="form-group">
-                            <label class="block text-sm font-semibold text-gray-700 mb-2">Upah Harian Baru (Rp) <span class="text-red-500">*</span></label>
-                            <input type="text" name="tupah" id="tupah_format" value="<?= number_format($upah, 0, ',', '.'); ?>" required class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-indigo-700" placeholder="0">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Upah Harian Baru (Rp) <span class="text-gray-400">(Boleh 0 untuk tim boneless)</span></label>
+                            <input type="text" name="tupah" id="tupah_format" value="<?= number_format($upah, 0, ',', '.'); ?>" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-indigo-700" placeholder="0">
                         </div>
                     </div>
                 </div>
@@ -477,6 +644,18 @@ if (isset($_POST['update'])) {
         });
 
         // 1. Logika untuk Select2 Manage
+        // Hint roster saat tanggal rencana diganti (cuma info, dropdown tidak ikut berubah)
+        var RK_MAP = <?= json_encode($rk_map ?: new stdClass); ?>;
+        $('#trencana_tgl').on('change', function() {
+            var v = $(this).val();
+            if (v && RK_MAP[v]) {
+                $('#rk_hint').html('Saat ini: <b>' + $('<div>').text(RK_MAP[v]).html() + '</b> — pilih shift lalu simpan untuk menimpa.');
+            } else if (v) {
+                $('#rk_hint').text('Belum ada roster tanggal ini — pilih shift lalu simpan untuk membuat.');
+            } else {
+                $('#rk_hint').text('Pilih tanggal untuk lihat roster saat ini.');
+            }
+        });
         $('.select2-manage').on('change', function() {
             var $select = $(this);
             var selectedVal = $select.val();

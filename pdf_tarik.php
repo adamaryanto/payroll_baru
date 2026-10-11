@@ -159,6 +159,12 @@ if ($Connect) {
 // Query and group data from tb_record for Date Range
 $db_records = $koneksi->query("SELECT * FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' ORDER BY tgl ASC, id_record ASC");
 $grouped = [];
+// Roster per-tanggal: tgl|pin => shift (acuan utama; master cuma fallback)
+$rosterMap = [];
+if (!empty($TanggalAwal) && !empty($TanggalAkhir)) {
+	$qr_roster = $koneksi->query("SELECT h.tgl_rkk AS tgl, TRIM(k.no_absen) AS pin, j.* FROM tb_rkk_detail rd JOIN tb_rkk h ON h.id_rkk=rd.id_rkk JOIN ms_karyawan k ON k.id_karyawan=rd.id_karyawan LEFT JOIN tb_jadwal j ON j.id_jadwal=rd.id_jadwal WHERE h.tgl_rkk BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+	if ($qr_roster) while ($rw_roster = $qr_roster->fetch_assoc()) $rosterMap[$rw_roster['tgl'] . '|' . trim((string)$rw_roster['pin'])] = $rw_roster;
+}
 
 while ($row_rec = $db_records->fetch_assoc()) {
 	$PIN = $row_rec['userid'];
@@ -256,6 +262,23 @@ foreach ($grouped as $key => &$row) {
 	}
 }
 unset($row);
+
+// Inject baris PENGGANTI (tb_ganti) — sama seperti tabel tarik-data.php
+$qganti = $koneksi->query("SELECT g.tgl, g.id_karyawan_absen, g.id_karyawan_ganti, g.upah_bayar, TRIM(k.no_absen) AS pin_ganti, k2.nama_karyawan AS nama_absen FROM tb_ganti g LEFT JOIN ms_karyawan k ON k.id_karyawan=g.id_karyawan_ganti LEFT JOIN ms_karyawan k2 ON k2.id_karyawan=g.id_karyawan_absen WHERE g.tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+if ($qganti) while ($rg = $qganti->fetch_assoc()) {
+	$pin_g = trim((string)($rg['pin_ganti'] ?? ''));
+	if ($pin_g === '') continue;
+	$tgl_g = $rg['tgl'];
+	$real_k = $pin_g . '_' . $tgl_g;
+	if (isset($grouped[$real_k])) {
+		$grouped[$real_k]['ganti_absen_nama'] = $rg['nama_absen'] ?? '';
+		continue;
+	}
+	$gk = 'GANTI_' . $tgl_g . '_' . (int)$rg['id_karyawan_ganti'] . '_' . (int)$rg['id_karyawan_absen'];
+	if (isset($grouped[$gk])) continue;
+	$grouped[$gk] = ['pin' => $pin_g, 'date' => $tgl_g, 'masuk' => '', 'istirahat_keluar' => '', 'istirahat_masuk' => '', 'pulang' => '', 'raw_times' => [], 'is_pengganti' => true, 'ganti_absen_nama' => $rg['nama_absen'] ?? '', 'ganti_upah' => (float)$rg['upah_bayar']];
+}
+uasort($grouped, function($ag, $bg) { $cg = strcmp($ag['date'], $bg['date']); return $cg !== 0 ? $cg : strcmp($ag['pin'], $bg['pin']); });
 ?>
 <!DOCTYPE html>
 <html>
@@ -303,30 +326,46 @@ unset($row);
             100% { transform: rotate(360deg); }
         }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <script>
         window.onload = function() {
-            var element = document.getElementById('content-to-pdf');
-            var opt = {
-                margin:       10,
-                filename:     'Laporan_Log_Absensi_' + '<?= htmlspecialchars($TanggalAwal) ?>_to_<?= htmlspecialchars($TanggalAkhir) ?>' + '.pdf',
-                image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2, useCORS: true },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
-            };
-            
-            html2pdf().set(opt).from(element).save().then(function() {
+            try {
+                var jsPDF = window.jspdf.jsPDF;
+                var doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+                doc.setFontSize(13);
+                doc.text('LAPORAN LOG ABSENSI MASUK / PULANG', 148.5, 12, { align: 'center' });
+                doc.setFontSize(9);
+                doc.text('Tanggal: <?= date("d-m-Y", strtotime($TanggalAwal)) ?> s/d <?= date("d-m-Y", strtotime($TanggalAkhir)) ?> | Unduh: <?= date("d-m-Y H:i") ?>', 148.5, 18, { align: 'center' });
+                doc.autoTable({
+                    html: '#lapTable',
+                    startY: 22,
+                    theme: 'grid',
+                    styles: { fontSize: 6, cellPadding: 1.2, overflow: 'linebreak', valign: 'middle' },
+                    headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold', fontSize: 6 },
+                    footStyles: { fillColor: [241, 245, 249], textColor: 0, fontStyle: 'bold' },
+                    columnStyles: {
+                        0:{halign:'center'},1:{halign:'center'},2:{halign:'center'},
+                        6:{halign:'center'},7:{halign:'center'},8:{halign:'center'},9:{halign:'center'},
+                        10:{halign:'center'},11:{halign:'center'},12:{halign:'center'},13:{halign:'center'},
+                        14:{halign:'center'},15:{halign:'center'},
+                        16:{halign:'right'},17:{halign:'right'},18:{halign:'right'},19:{halign:'right'},
+                        20:{halign:'right'},21:{halign:'right'},22:{halign:'right'},23:{halign:'right'},
+                        24:{halign:'right'},25:{halign:'center'}
+                    }
+                });
+                doc.save('Laporan_Log_Absensi_' + '<?= htmlspecialchars($TanggalAwal) ?>_to_<?= htmlspecialchars($TanggalAkhir) ?>' + '.pdf');
                 document.getElementById('loader').style.display = 'none';
                 document.body.innerHTML = '<div style="text-align: center; margin-top: 150px; font-family: \'Inter\', sans-serif;"><h2 style="color: #047857; font-size: 24px;">✓ Download Selesai</h2><p style="color: #666; font-size: 14px; margin-top: 10px;">Laporan PDF berhasil diunduh. Halaman ini akan tertutup otomatis.</p></div>';
                 setTimeout(function() {
                     window.close();
                 }, 1500);
-            }).catch(function(err) {
+            } catch(err) {
                 console.error(err);
                 document.getElementById('loader').style.display = 'none';
                 alert('Gagal membuat PDF. Silakan coba lagi.');
-            });
-        }
+            }
+        };
     </script>
 </head>
 <body>
@@ -341,7 +380,7 @@ unset($row);
             <p>Tanggal Absensi: <?php echo date('d-m-Y', strtotime($TanggalAwal)) . ' s/d ' . date('d-m-Y', strtotime($TanggalAkhir)); ?> | Unduh: <?php echo date('d-m-Y H:i'); ?></p>
         </div>
 
-        <table>
+        <table id="lapTable">
             <thead>
                 <tr>
                     <th width="2%" class="text-center">No</th>
@@ -375,6 +414,7 @@ unset($row);
             <tbody>
                 <?php
                 $no = 1;
+                $t_upah = 0; $t_lembur = 0; $t_pot = 0; $t_bersih = 0;
                 foreach ($grouped as $key => $row) :
                     $PIN = $row['pin'];
                     $date = $row['date'];
@@ -398,42 +438,47 @@ unset($row);
                     $golongan = $emp['label_gol'] ?? 'Harian';
                     $upah = $emp['upah'] ?? 0;
 
-                    // Cari Shift Terdekat atau gunakan shift terdaftar jika sesuai
+                    // Acuan shift: roster tanggal ini bila ada, else master (fallback).
                     $assigned_shift = null;
-                    if (!empty($emp['id_jadwal'])) {
-                        $q_ass = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '{$emp['id_jadwal']}'");
-                        if ($q_ass && $q_ass->num_rows > 0) {
-                            $assigned_shift = $q_ass->fetch_assoc();
-                        }
+                    $use_roster = false;
+                    $roster_key = $date . '|' . trim((string)$PIN);
+                    if (isset($rosterMap[$roster_key]) && !empty($rosterMap[$roster_key]['id_jadwal'])) {
+                    	$assigned_shift = $rosterMap[$roster_key];
+                    	$use_roster = true;
+                    } elseif (!empty($emp['id_jadwal'])) {
+                    	$q_ass = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '{$emp['id_jadwal']}'");
+                    	if ($q_ass && $q_ass->num_rows > 0) {
+                    		$assigned_shift = $q_ass->fetch_assoc();
+                    	}
                     }
                     
-                    $use_assigned = false;
-                    if ($assigned_shift) {
-                        if (strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false) {
-                            $use_assigned = true;
-                        } else {
-                            if (!empty($masuk) && $masuk != '00:00' && $masuk != '00:00:00') {
-                                $in_time = strtotime("1970-01-01 " . $masuk);
-                                $shift_time = strtotime("1970-01-01 " . $assigned_shift['jam_masuk']);
-                                $diff = abs($in_time - $shift_time);
-                                if ($diff > 43200) {
-                                    $diff = 86400 - $diff;
-                                }
-                                // Jika jam masuk riil selisihnya dalam batas 2 jam (7200 detik) dari jam masuk shift terdaftar
-                                if ($diff <= 7200) {
-                                    $use_assigned = true;
-                                }
-                            } else {
-                                // Jika tidak absen masuk, gunakan shift terdaftar
-                                $use_assigned = true;
-                            }
-                        }
+                    $use_assigned = $use_roster;
+                    if (!$use_roster && $assigned_shift) {
+                    	if (strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false) {
+                    		$use_assigned = true;
+                    	} else {
+                    		if (!empty($masuk) && $masuk != '00:00' && $masuk != '00:00:00') {
+                    			$in_time = strtotime("1970-01-01 " . $masuk);
+                    			$shift_time = strtotime("1970-01-01 " . $assigned_shift['jam_masuk']);
+                    			$diff = abs($in_time - $shift_time);
+                    			if ($diff > 43200) {
+                    				$diff = 86400 - $diff;
+                    			}
+                    			// Jika jam masuk riil selisihnya dalam batas 2 jam (7200 detik) dari jam masuk shift terdaftar
+                    			if ($diff <= 7200) {
+                    				$use_assigned = true;
+                    			}
+                    		} else {
+                    			// Jika tidak absen masuk, gunakan shift terdaftar
+                    			$use_assigned = true;
+                    		}
+                    	}
                     }
                     
                     if ($use_assigned) {
-                        $shift = $assigned_shift;
+                    	$shift = $assigned_shift;
                     } else {
-                        $shift = get_closest_shift($koneksi, $masuk);
+                    	$shift = get_closest_shift($koneksi, $masuk);
                     }
                     $s_masuk = '-';
                     $s_keluar = '-';
@@ -532,7 +577,20 @@ unset($row);
                     $upah_bersih = $upah - $total_potongan + $lembur_money;
                     if ($upah_bersih < 0) $upah_bersih = 0;
 
-                    $hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
+                    if (!empty($row['is_pengganti'])) {
+                        $upah = (float)($row['ganti_upah'] ?? 0);
+                        $upah_bersih = $upah;
+                        $hasil_kerja = 'HADIR';
+                        $nama_karyawan .= ' (PENGGANTI' . (!empty($row['ganti_absen_nama']) ? ' - ' . $row['ganti_absen_nama'] : '') . ')';
+                    } elseif (!empty($row['ganti_absen_nama'])) {
+                        $nama_karyawan .= ' (Juga menggantikan ' . $row['ganti_absen_nama'] . ')';
+                        $hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
+                    } else {
+                        $hasil_kerja = ($has_masuk || $has_keluar) ? 'HADIR' : 'TIDAK HADIR';
+                    }
+                    $t_upah += $upah; $t_lembur += $lembur_money;
+                    $t_pot += ($p_telat + $p_pulang + $p_ist_awal + $p_ist_telat + $p_tidak_lengkap);
+                    $t_bersih += $upah_bersih;
                 ?>
                     <tr>
                         <td class="text-center"><?php echo $no++; ?></td>
@@ -564,6 +622,17 @@ unset($row);
                     </tr>
                 <?php endforeach; ?>
             </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="16" class="text-right text-bold">TOTAL</td>
+                    <td class="text-right text-bold"><?php echo rupiah($t_upah); ?></td>
+                    <td class="text-right text-bold"><?php echo rupiah($t_lembur); ?></td>
+                    <td class="text-right text-bold" colspan="5"><?php echo rupiah($t_pot); ?></td>
+                    <td class="text-right text-bold">-</td>
+                    <td class="text-right text-bold"><?php echo rupiah($t_bersih); ?></td>
+                    <td class="text-center text-bold">-</td>
+                </tr>
+            </tfoot>
         </table>
     </div>
 </body>

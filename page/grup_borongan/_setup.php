@@ -41,4 +41,16 @@ foreach (['tb_rkk_detail' => 'fk_rkk_grup', 'tb_realisasi_detail' => 'fk_realisa
         @$koneksi->query("ALTER TABLE `$tbl` ADD CONSTRAINT `$fk` FOREIGN KEY (id_grup) REFERENCES ms_grup_borongan (id_grup) ON DELETE SET NULL");
     }
 }
+// Penanda borongan (radio di master): 1 = grup borongan, 0 = bukan
+$ckB = $koneksi->query("SHOW COLUMNS FROM ms_grup_borongan LIKE 'is_borongan'");
+if ($ckB && $ckB->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_grup_borongan ADD COLUMN is_borongan TINYINT(1) NOT NULL DEFAULT 0");
+    $koneksi->query("UPDATE ms_grup_borongan SET is_borongan = 1 WHERE harga IS NOT NULL AND harga <> 0");
+}
+// Flag borongan PER ORANG (default 0 = bukan); ikut flag grup lama sekali saat pertama ada
+$ckAB = $koneksi->query("SHOW COLUMNS FROM ms_grup_borongan_anggota LIKE 'is_borongan'");
+if ($ckAB && $ckAB->num_rows == 0) {
+    $koneksi->query("ALTER TABLE ms_grup_borongan_anggota ADD COLUMN is_borongan TINYINT(1) NOT NULL DEFAULT 0");
+    $koneksi->query("UPDATE ms_grup_borongan_anggota a JOIN ms_grup_borongan g ON a.id_grup = g.id_grup SET a.is_borongan = 1 WHERE g.is_borongan = 1");
+}
 ?>

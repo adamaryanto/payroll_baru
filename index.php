@@ -271,6 +271,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     elseif ($aksi == "debug_mesin") { include "page/karyawan/debug_mesin.php"; } 
                     elseif ($aksi == "fingerprint_backup") { include "page/karyawan/fingerprint_backup.php"; } 
                     elseif ($aksi == "cek_pin") { include "page/karyawan/cek_pin.php"; } 
+                    elseif ($aksi == "jadwal_excel") { include "page/karyawan/jadwal_excel.php"; } 
                     else { echo "<div class='p-5 text-center text-gray-500'>Halaman tidak ditemukan</div>"; } 
                   } else if ($page == 'bagian') {
                     if ($aksi == "") { include "page/bagian/bagian.php"; } 
@@ -340,6 +341,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     elseif ($aksi == "hapusdetail") { include "page/rkk/hapus.php"; } 
                     elseif ($aksi == "hapus_massal") { include "page/rkk/hapus_massal.php"; } 
                     elseif ($aksi == "detail") { include "page/rkk/detail.php"; } 
+                    elseif ($aksi == "import") { include "page/rkk/import_excel.php"; } 
                     elseif ($aksi == "accept") { include "page/rkk/app.php"; }
                   } else if ($page == 'siac') {
                     if ($aksi == "") { include "page/siac/karyawan.php"; } 
@@ -460,6 +462,136 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
           });
         });
       </script>
+
+  <?php
+  // Auto-sweep GLOBAL: jalan di semua halaman (background, tanpa reload).
+  // Halaman Backup tidak lagi auto-run inline (tombol manual tetap ada).
+  if (!function_exists('sweep_get_config')) { @include_once __DIR__ . '/fingerprint_db_helper.php'; }
+  $__gsw = ['enabled' => false, 'due' => false, 'endpoint' => 'page/karyawan/ajax_sweep_run.php'];
+  if (function_exists('sweep_get_config') && isset($koneksi)) {
+      $__gswc = sweep_get_config($koneksi);
+      $__gsw['enabled'] = !empty($__gswc['enabled']);
+      if ($__gsw['enabled']) {
+          $__gdue = !empty($__gswc['last_run']) ? (strtotime($__gswc['last_run']) + sweep_interval_seconds($__gswc['interval_jam'])) : 0;
+          $__gsw['due'] = ($__gdue === 0 || time() >= $__gdue);
+      }
+  }
+  ?>
+  <script>window.__SWEEP__ = <?= json_encode($__gsw) ?>;</script>
+  <script>
+  /* Runner sweep otomatis GLOBAL (semua halaman) — inline biar tanpa file/folder baru.
+   * Dibaca dari window.__SWEEP__ di atas. Jalan di background (XHR streaming)
+   * 5 detik setelah halaman dibuka, hanya kalau jadwal Nyala + sudah waktunya.
+   * Ada tombol Stop. Tumpang-tindih antar tab/halaman dicegah server (lock + cooldown). */
+  (function () {
+    var SW = window.__SWEEP__ || null;
+    if (!SW || !SW.enabled || !SW.due) return;
+    var endpoint = SW.endpoint || 'page/karyawan/ajax_sweep_run.php';
+    var box = document.createElement('div');
+    box.id = 'swAutoBox';
+    box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:9999;width:min(420px,92vw);'
+      + 'background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);'
+      + 'font-size:12px;color:#334155;overflow:hidden;';
+    box.innerHTML = '<div style="padding:8px 10px;font-weight:bold;background:#f1f5f9;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+      + '<span>Sweep otomatis berjalan…</span>'
+      + '<button type="button" id="swAutoStop" style="display:none;background:#dc2626;color:#fff;border:0;border-radius:8px;font-weight:bold;padding:4px 10px;cursor:pointer">■ Stop</button>'
+      + '</div>'
+      + '<pre id="swAutoLog" style="display:none;margin:0;padding:8px 10px;max-height:220px;overflow-y:auto;white-space:pre-wrap;background:#fff"></pre>'
+      + '<div id="swAutoSum" style="padding:6px 10px;font-weight:bold"></div>';
+    if (!document.body) return;
+    document.body.appendChild(box);
+    var logEl = box.querySelector('#swAutoLog');
+    var sumEl = box.querySelector('#swAutoSum');
+    var stopBtn = box.querySelector('#swAutoStop');
+  var xhr = null, seen = 0, stopped = false, finished = false, loopTimer = null, autoLoop = true;
+  function appendLine(s) {
+    logEl.style.display = 'block';
+    logEl.appendChild(document.createTextNode(s + '\n'));
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  stopBtn.addEventListener('click', function () {
+    stopped = true;
+    autoLoop = false;
+    try { clearTimeout(loopTimer); } catch (e) {}
+    try { if (xhr) xhr.abort(); } catch (e) {}
+    sumEl.textContent = 'Dihentikan (termasuk jadwal otomatisnya). Refresh halaman untuk mulai lagi.';
+    stopBtn.style.display = 'none';
+  });
+  function startSweep() {
+    if (finished) return;
+    seen = 0;
+    if (document.hidden) { setTimeout(startSweep, 30000); return; }
+      stopBtn.style.display = '';
+      xhr = new XMLHttpRequest();
+      xhr.open('POST', endpoint, true);
+      xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+      xhr.onprogress = function () {
+        var chunk = xhr.responseText.substring(seen);
+        seen = xhr.responseText.length;
+        chunk.split('\n').forEach(function (ln) {
+          if (ln.indexOf('__RESULT__') === 0) return;
+          if (ln.replace(/\s+/g, '') === '') return;
+          appendLine(ln.replace(/\s+$/, ''));
+        });
+      };
+    xhr.onload = function () {
+      finished = true;
+      stopBtn.style.display = 'none';
+      var m = xhr.responseText.match(/__RESULT__(\{.*\})/);
+      var info = null;
+        try { info = m ? JSON.parse(m[1]) : null; } catch (e) {}
+      if (info && info.ran) {
+        sumEl.textContent = 'Selesai: ' + info.total + ' karyawan, baru ' + info.baru
+          + ', sebar ' + info.sebar_ok + ', repair ' + info.repair_ok + ', mesh ' + info.mesh_ok + '.';
+        try {
+          var btns = document.querySelectorAll('.btn-cek-finger, .btn-cek-mesin');
+          btns.forEach(function (b, i) { setTimeout(function () { b.click(); }, i * 200); });
+        } catch (e) {}
+        try {
+          var waitSec = Math.max(30, (info.next_in || 0) + 10);
+          var lbl = info.interval_label || '';
+          var mini = document.getElementById('swMini');
+          if (mini) {
+            try { if (window.__swPillTimer) clearInterval(window.__swPillTimer); } catch (e2) {}
+            var mt0 = performance.now();
+            var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+            var tickPill = function () {
+              var d = Math.max(0, waitSec - Math.floor((performance.now() - mt0) / 1000));
+              if (d <= 0) {
+                mini.textContent = 'Sweep: Nyala • tiap ' + lbl + ' • waktunya tiba…';
+                try { clearInterval(window.__swPillTimer); } catch (e3) {}
+                return;
+              }
+              var h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60), s = d % 60;
+              mini.textContent = 'Sweep: Nyala • tiap ' + lbl + ' • jalan ' + pad(h) + ':' + pad(m) + ':' + pad(s);
+            };
+            tickPill();
+            window.__swPillTimer = setInterval(tickPill, 1000);
+          }
+          if (autoLoop) {
+            sumEl.textContent += ' Putaran berikut otomatis.';
+            loopTimer = setTimeout(function () { finished = false; startSweep(); }, waitSec * 1000);
+          }
+          stopBtn.style.display = '';
+        } catch (e4) {}
+      } else if (stopped) {
+        } else if (info && info.reason) {
+          sumEl.textContent = 'Sweep dilewati (' + info.reason + ').';
+          setTimeout(function () { if (box.parentNode) box.parentNode.removeChild(box); }, 8000);
+        } else {
+          sumEl.textContent = 'Sweep gagal / tidak ada respons.';
+        }
+      };
+      xhr.onerror = function () {
+        finished = true;
+        stopBtn.style.display = 'none';
+        sumEl.textContent = 'Koneksi ke server gagal.';
+      };
+      xhr.send('start=1');
+    }
+    setTimeout(startSweep, 5000);
+  })();
+  </script>
 
   </body>
   </html>

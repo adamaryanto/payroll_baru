@@ -27,10 +27,12 @@ if (isset($_POST['proses_hapus'])) {
         $ids = $_POST['id_realisasi_pilih'];
         $count = 0;
 
-        foreach ($ids as $id) {
-            $id = intval($id);
-            // 1. Hapus Detail terlebih dahulu
-            $koneksi->query("DELETE FROM tb_realisasi_detail WHERE id_realisasi = $id");
+          foreach ($ids as $id) {
+              $id = intval($id);
+              // 0. Hapus rincian borongan dulu
+              $koneksi->query("DELETE b FROM tb_realisasi_borongan b JOIN tb_realisasi_detail d ON b.id_realisasi_detail = d.id_realisasi_detail WHERE d.id_realisasi = $id");
+              // 1. Hapus Detail terlebih dahulu
+              $koneksi->query("DELETE FROM tb_realisasi_detail WHERE id_realisasi = $id");
             // 2. Hapus Data Utama
             if ($koneksi->query("DELETE FROM tb_realisasi WHERE id_realisasi = $id")) {
                 $count++;
