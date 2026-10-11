@@ -77,6 +77,7 @@ if (isset($_GET['id'])) {
         GB.nama_grup as label_grup,
         GA.is_borongan as is_borongan_orang,
         GB.is_borongan as is_borongan_grup,
+        GA_PG.is_borongan as is_borongan_pengganti,
         RD.upah as upah_rkk,
         J.jam_masuk as shift_masuk,
         J.jam_keluar as shift_keluar,
@@ -118,6 +119,7 @@ if (isset($_GET['id'])) {
         LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal
         LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
         LEFT JOIN ms_grup_borongan_anggota GA ON GA.id_grup = A.id_grup AND GA.id_karyawan = A.id_karyawan AND A.id_karyawan <> 0
+        LEFT JOIN ms_grup_borongan_anggota GA_PG ON GA_PG.id_karyawan = A.id_pengganti AND A.id_pengganti <> 0
         WHERE A.id_realisasi = '$idrealisasi'
         ORDER BY (GB.nama_grup IS NULL), GB.nama_grup ASC, nama_tampil ASC
     ");
@@ -920,7 +922,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                                             class="btn btn-xs btn-info" style="background-color: #3498DB; border:none; border-radius:4px; padding:4px 10px;">
                                                             <i class="fa fa-eye"></i> Detail
                                                         </a>
-                                                        <?php if (!empty($data['is_borongan_orang'])) { ?>
+                                                        <?php if (!empty($data['is_borongan_orang']) || !empty($data['is_borongan_pengganti'])) { ?>
                                                         <button type="button"
                                                             class="btn btn-xs btn-borongan" style="background-color: #8b5cf6; color: #fff; border:none; border-radius:4px; padding:4px 10px; margin-left:4px;"
                                                             data-id="<?php echo $data['id_realisasi_detail']; ?>">

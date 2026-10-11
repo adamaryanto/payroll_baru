@@ -493,6 +493,13 @@ if (isset($_POST['simpan'])) {
     $is_total_missing_post = (empty($tjammasuk) || $tjammasuk == '00:00' || $tjammasuk == '00:00:00') &&
                              (empty($tjamkeluar) || $tjamkeluar == '00:00' || $tjamkeluar == '00:00:00');
 
+    // Cek apakah pengganti adalah karyawan borongan
+    $pengganti_borongan = false;
+    if ($tukar_new > 0) {
+        $q_bor = $koneksi->query("SELECT id_karyawan FROM ms_grup_borongan_anggota WHERE id_karyawan = '$tukar_new' LIMIT 1");
+        if ($q_bor && $q_bor->num_rows > 0) $pengganti_borongan = true;
+    }
+
     if ($is_total_missing_post) {
         $tupah = 0;
         $tstatus_hadir = 'Tidak Hadir';
@@ -503,9 +510,17 @@ if (isset($_POST['simpan'])) {
             // Hardcoded fallback inside the POST block too
             $def_upah_post = 115000;
 
-            $upah_ref = ($datadetail['r_upah'] > 0) ? (float)$datadetail['r_upah'] : 
-                       (!empty($datadetail['upah_master']) ? (float)$datadetail['upah_master'] : $def_upah_post);
-            $tupah = $upah_ref;
+            if ($pengganti_borongan) {
+                $tupah = 0; // Borongan: upah dihitung dari qty x tarif, bukan gaji master
+            } elseif ($tukar_new > 0) {
+                // Pakai gaji master karyawan pengganti
+                $q_peng_upah = $koneksi->query("SELECT upah FROM ms_karyawan WHERE id_karyawan = '$tukar_new' LIMIT 1");
+                $tupah = ($q_peng_upah && ($rp = $q_peng_upah->fetch_assoc())) ? (float)$rp['upah'] : $def_upah_post;
+            } else {
+                $upah_ref = ($datadetail['r_upah'] > 0) ? (float)$datadetail['r_upah'] : 
+                           (!empty($datadetail['upah_master']) ? (float)$datadetail['upah_master'] : $def_upah_post);
+                $tupah = $upah_ref;
+            }
         }
     }
 
