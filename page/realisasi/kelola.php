@@ -734,7 +734,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Istirahat<br>Masuk</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">Jam Pulang</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Detail Borongan</th>'
-                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#EFEFEF;">Hasil Kerja (kg)</th>'
+                                            . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#EFEFEF;">Hasil Kerja</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Upah</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Potongan</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Lembur</th>'
@@ -903,7 +903,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                         }
                                         ?>
                                         <td data-label="Detail Borongan" class="text-left"><?= $bor_detail_html ?></td>
-                                        <td data-label="Hasil Kerja"><?php echo !empty($bor_lines) ? rtrim(rtrim(number_format($bor_hasil_sum, 2, '.', ''), '0'), '.') : $data['hasil_kerja']; ?></td>
+                                        <td data-label="Hasil Kerja"><?php echo (!empty($bor_lines) ? rtrim(rtrim(number_format($bor_hasil_sum, 2, '.', ''), '0'), '.') : $data['hasil_kerja']) . ' kg'; ?></td>
                                         <td data-label="Upah" class="text-right">
                                             <?= rupiah($finalUpah) ?>
                                         </td>
