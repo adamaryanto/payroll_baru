@@ -192,6 +192,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                   <li class="nav-item"><a href="?page=denda" class="nav-link"><i class="fas fa-exclamation-triangle nav-icon"></i><p>Denda</p></a></li>
                   <li class="nav-item"><a href="?page=lembur" class="nav-link"><i class="fas fa-business-time nav-icon"></i><p>Lembur</p></a></li>
                   <li class="nav-item"><a href="?page=grup_borongan" class="nav-link"><i class="fas fa-boxes nav-icon"></i><p>Grup</p></a></li>
+                  <li class="nav-item"><a href="?page=boneless&aksi=master" class="nav-link"><i class="fas fa-truck nav-icon"></i><p>Mobil</p></a></li>
 
                 </ul>
               </li>
@@ -342,6 +343,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     elseif ($aksi == "hapus_massal") { include "page/rkk/hapus_massal.php"; } 
                     elseif ($aksi == "detail") { include "page/rkk/detail.php"; } 
                     elseif ($aksi == "import") { include "page/rkk/import_excel.php"; } 
+                    elseif ($aksi == "importkelola") { include "page/rkk/import_kelola.php"; } 
                     elseif ($aksi == "accept") { include "page/rkk/app.php"; }
                   } else if ($page == 'siac') {
                     if ($aksi == "") { include "page/siac/karyawan.php"; } 

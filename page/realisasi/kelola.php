@@ -1,4 +1,9 @@
 <?php
+// Kolom pengganti (tukar karyawan: nama tetap, tercatat "Digantikan oleh ...")
+$checkGantiColK = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_pengganti'");
+if ($checkGantiColK->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_pengganti INT NULL DEFAULT NULL");
+}
 // Helpers for cross-midnight time comparisons
 if (!function_exists('is_time_late')) {
     function is_time_late($actual, $expected) {
@@ -95,9 +100,11 @@ if (isset($_GET['id'])) {
          WHERE U3.id_rkk_detail = A.id_rkk_detail 
          AND U3.status = 'Digantikan' 
          AND U4.status = 'Pengganti' 
-         LIMIT 1) as digantikan_oleh
+         LIMIT 1) as digantikan_oleh,
+        PG.nama_karyawan as pengganti_langsung
         FROM tb_realisasi_detail A 
         LEFT JOIN ms_karyawan B ON A.id_karyawan = B.id_karyawan
+        LEFT JOIN ms_karyawan PG ON A.id_pengganti = PG.id_karyawan
         LEFT JOIN tb_realisasi C ON A.id_realisasi = C.id_realisasi
         -- Join ke master departmen dari karyawan master
         LEFT JOIN ms_departmen D ON B.id_departmen = D.id_departmen
@@ -190,6 +197,33 @@ if ($simpan) {
 
 $cleanup = @$_POST['cleanup'];
 if ($cleanup) {
+    // 0. Tarik dulu dari semua mesin (SISTEM SAMA dgn halaman tarik data) -> masuk tb_record,
+    //    jadi halaman tarik data ikut kebagian tanpa kerja 2x. Pull ini idempotent (dobel diabaikan).
+    if (!function_exists('pull_attendance_from_all_devices')) {
+        include_once __DIR__ . '/../../device_sync_helper.php';
+    }
+    $pull_info = '';
+    if (function_exists('pull_attendance_from_all_devices')) {
+        $qr = $koneksi->query("SELECT tgl_realisasi FROM tb_realisasi WHERE id_realisasi = '$idrealisasi'");
+        $dr = $qr ? $qr->fetch_assoc() : null;
+        if ($dr && !empty($dr['tgl_realisasi'])) {
+            $t0 = $dr['tgl_realisasi'];
+            $t1 = date('Y-m-d', strtotime('+1 day', strtotime($t0))); // shift malam lewat tengah malam
+            $pr = pull_attendance_from_all_devices($koneksi, $t0, $t1);
+            if (function_exists('log_sync_activity')) {
+                foreach (($pr['per_device'] ?? []) as $dev_id => $rs) {
+                    if (!empty($rs['online'])) {
+                        log_sync_activity($koneksi, 'attendance_pull', $dev_id, null, 'success', "Pulled {$rs['records_pulled']} records, saved {$rs['records_saved']} (via realisasi)");
+                    }
+                }
+            }
+            if ((int)($pr['online_devices'] ?? 0) === 0) {
+                $pull_info = 'Tarik mesin: semua mesin offline, pakai data record yang sudah ada. ';
+            } else {
+                $pull_info = 'Tarik mesin: ' . (int)($pr['records_saved'] ?? 0) . ' baru dari ' . (int)$pr['online_devices'] . '/' . (int)$pr['total_devices'] . ' mesin. ';
+            }
+        }
+    }
     $count = syncRealisasiData($koneksi, $idrealisasi);
     echo '<!DOCTYPE html>
     <html>
@@ -201,7 +235,7 @@ if ($cleanup) {
             Swal.fire({
                 icon: "success",
                 title: "Berhasil",
-                text: "Berhasil menarik ' . $count . ' data dari record mesin.",
+                text: "' . addslashes($pull_info) . 'Berhasil menarik ' . $count . ' data dari record mesin.",
                 confirmButtonColor: "#2563eb",
                 confirmButtonText: "OK"
             }).then((result) => {
@@ -619,7 +653,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                         <button type="button" id="btn-save-all" class="btn btn-primary bg-blue-600 hover:bg-blue-700 border-none px-6 py-2">
                             <i class="fas fa-save mr-1.5"></i> Simpan Semua
                         </button>
-                        <button type="button" id="btn-cleanup" class="btn btn-warning bg-amber-500 hover:bg-amber-600 border-none px-6 py-2 ml-2 text-white">
+                        <button type="button" id="btn-cleanup" class="btn btn-warning bg-amber-500 hover:bg-amber-600 border-none px-6 py-2 ml-2 text-white" title="Tarik dari mesin + sinkron ke tabel (sama seperti halaman tarik data)">
                             <i class="fas fa-sync-alt mr-1.5"></i> Tarik Data
                         </button>
                         <input type="hidden" name="simpan" id="simpan-input" value="">
@@ -809,6 +843,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                                 <?php if (!empty($data['menggantikan'])) echo " <span class='text-blue-600 font-bold'>(Menggantikan " . $data['menggantikan'] . ")</span>"; ?>
                                                 <?php if (!empty($data['menggantikan']) && !empty($data['digantikan_oleh'])) echo " &"; ?>
                                                 <?php if (!empty($data['digantikan_oleh'])) echo " <span class='text-red-600 font-bold'>(Digantikan oleh " . $data['digantikan_oleh'] . ")</span>"; ?>
+                                                <?php if (empty($data['digantikan_oleh']) && !empty($data['pengganti_langsung'])) echo " <span class='text-red-600 font-bold'>(Digantikan oleh " . $data['pengganti_langsung'] . ")</span>"; ?>
                                             </strong>
 
                                             <?php $show_badge = !(($data['status_rkk'] ?? '') == 'Hadir' && $attendanceStatus != 'TIDAK HADIR'); ?>

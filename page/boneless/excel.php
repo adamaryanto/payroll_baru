@@ -54,16 +54,16 @@ echo "<meta charset='UTF-8'>";
         <th style="<?php echo $cHdrL.$bd; ?>">HASIL KERJA</th>
         <th style="<?php echo $cHdrL.$bd; ?>">UPAH DIBAYAR</th>
     </tr>
-    <?php $sn = 1; $sat_tot = 0; foreach ($satuan as $sr): $sat_tot += (int)$sr['upah']; ?>
+    <?php $sn = 1; $sat_tot = 0; $sat_allkg = true; foreach ($satuan as $sr): $sat_tot += (int)$sr['upah']; $sr_u = strtoupper(trim($sr['satuan'] ?? 'KG')); if ($sr_u !== '' && $sr_u !== 'KG') $sat_allkg = false; ?>
     <tr style="<?php echo $fBase; ?>">
         <td align="center" style="<?php echo $cWhite.$bd; ?>"><?= $sn++ ?></td>
         <td style="<?php echo $cWhite.$bd; ?>"><?= htmlspecialchars(strtoupper($sr['nama'])) ?></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?>"><?= rtrim(rtrim(number_format((float)$sr['hasil'], 2, '.', ''), '0'), '.') ?></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?>"><?= rtrim(rtrim(number_format((float)$sr['hasil'], 2, '.', ''), '0'), '.') . ' ' . ($sr_u !== '' ? ucfirst(strtolower($sr_u)) : 'Kg') ?></td>
         <td align="right" style="<?php echo $cWhite.$bd; ?>">Rp <?= number_format($sr['upah'], 0, ',', '.') ?></td>
     </tr>
     <?php endforeach; ?>
     <tr style="<?php echo $fBase; ?>">
-        <td colspan="3" align="center" style="<?php echo $cWhite.$bd; ?>">TOTAL (<?= count($satuan) ?> orang<?= ($hrg_sat_saved !== null && $hrg_sat_saved !== '') ? ', Rp ' . number_format($hrg_sat_saved, 0, ',', '.') . '/kg' : '' ?>)</td>
+        <td colspan="3" align="center" style="<?php echo $cWhite.$bd; ?>">TOTAL (<?= count($satuan) ?> orang<?= ($sat_allkg && $hrg_sat_saved !== null && $hrg_sat_saved !== '') ? ', Rp ' . number_format($hrg_sat_saved, 0, ',', '.') . '/kg' : '' ?>)</td>
         <td align="right" style="<?php echo $cWhite.$bd; ?>">Rp <?= number_format($sat_tot, 0, ',', '.') ?></td>
     </tr>
 </table>

@@ -4,6 +4,11 @@ $checkLemburJamCol = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE
 if ($checkLemburJamCol->num_rows == 0) {
     $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN lembur_jam DECIMAL(10,2) DEFAULT 0.00");
 }
+// Kolom pengganti (tukar karyawan: nama tetap, tercatat "Digantikan oleh ...")
+$checkGantiCol = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_pengganti'");
+if ($checkGantiCol->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_pengganti INT NULL DEFAULT NULL");
+}
 
 // Helpers for cross-midnight time comparisons
 if (!function_exists('is_time_late')) {
@@ -334,6 +339,27 @@ if (!function_exists('rupiah')) {
                         <input type="text" readonly value="<?= !empty($datadetail['nama_sub_department']) ? $datadetail['nama_sub_department'] : ($datadetail['sub_bagian_manual_str'] ?? '') ?>" class="form-control" style="background: #f9fafb;">
                     </div>
                 </div>
+                <div class="row">
+                    <div class="form-group col-md-6">
+                        <label>GANTI KARYAWAN <span class="text-muted">(nama tetap — tercatat "Digantikan oleh ...", ikut tersimpan saat Simpan)</span></label>
+                        <select name="tukar_id_karyawan" class="form-control">
+                            <option value="">- Tidak ganti -</option>
+                            <?php
+                            $tukar_cur = (int)($datadetail['id_pengganti'] ?? 0);
+                            $tukar_in = [];
+                            $q_in = $koneksi->query("SELECT DISTINCT id_karyawan FROM tb_realisasi_detail WHERE id_realisasi = '" . (int)$dataidrealisasi . "' AND id_karyawan <> 0");
+                            while ($q_in && ($rr = $q_in->fetch_assoc())) $tukar_in[(int)$rr['id_karyawan']] = true;
+                            $q_tukar = $koneksi->query("SELECT K.id_karyawan, K.nama_karyawan, O.OS_DHK as os FROM ms_karyawan K LEFT JOIN ms_os_dhk O ON K.id_os_dhk = O.id_os_dhk WHERE K.status_karyawan = 'Aktif' ORDER BY K.nama_karyawan ASC");
+                            while ($q_tukar && ($tk = $q_tukar->fetch_assoc())) {
+                                $tid = (int)$tk['id_karyawan'];
+                                if ($tid !== $tukar_cur && isset($tukar_in[$tid])) continue; // sudah ada di realisasi ini
+                                $lbl = $tk['nama_karyawan'] . ' — ' . ($tk['os'] ?: '-');
+                                echo "<option value=\"$tid\"" . ($tid === $tukar_cur ? ' selected' : '') . ">" . htmlspecialchars($lbl) . "</option>";
+                            }
+                            ?>
+                        </select>
+                    </div>
+                </div>
 
                 <div class="section-divider text-danger">
                     Input Realisasi Absensi & Upah
@@ -425,6 +451,44 @@ if (isset($_POST['simpan'])) {
     $hasilkerjanya = mysqli_real_escape_string($koneksi, $_POST['thasilkerja'] ?? '');
     $tlembur = (float)($_POST['tlembur'] ?? 0);
     $tlembur_jam = (float)($_POST['tlembur_jam'] ?? 0);
+    // Pengganti (tukar karyawan): nama di baris ini TETAP, yang dicatat penggantinya.
+    // Status & upah ikut normal (tidak jadi Tidak Hadir).
+    $tukar_new = (int)($_POST['tukar_id_karyawan'] ?? 0);
+    $tukar_cur = (int)($datadetail['id_pengganti'] ?? 0);
+    $vganti = ($tukar_cur > 0) ? "'$tukar_cur'" : "NULL";
+    if ($tukar_new !== $tukar_cur) {
+        if ($tukar_new <= 0) {
+            $vganti = "NULL"; // batal ganti
+        } else {
+            $tukar_err = '';
+            $st_real = $koneksi->query("SELECT status_realisasi FROM tb_realisasi WHERE id_realisasi = '" . (int)$datadetail['id_realisasi'] . "'")->fetch_assoc();
+            if ($st_real && (int)$st_real['status_realisasi'] >= 2) {
+                $tukar_err = 'Realisasi sudah Approved, tidak bisa tukar karyawan!';
+            } elseif ($tukar_new === (int)($datadetail['id_karyawan'] ?? 0)) {
+                $tukar_err = 'Pengganti sama dengan karyawan baris ini!';
+            } else {
+                $mk = $koneksi->query("SELECT id_karyawan FROM ms_karyawan WHERE id_karyawan = '$tukar_new' AND status_karyawan = 'Aktif' LIMIT 1")->fetch_assoc();
+                if (!$mk) {
+                    $tukar_err = 'Karyawan pengganti tidak valid / nonaktif!';
+                } else {
+                    $dup = $koneksi->query("SELECT id_realisasi_detail FROM tb_realisasi_detail WHERE id_realisasi = '" . (int)$datadetail['id_realisasi'] . "' AND id_karyawan = '$tukar_new' AND id_realisasi_detail <> '$id' LIMIT 1");
+                    if ($dup && $dup->num_rows > 0) $tukar_err = 'Karyawan ini sudah ada di realisasi ini!';
+                }
+            }
+            if ($tukar_err !== '') {
+                echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+                    Swal.fire({ icon: "error", title: "Gagal Tukar", text: "' . addslashes($tukar_err) . ' Data tidak disimpan.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.history.back(); });
+                </script></body></html>';
+                exit;
+            }
+            $vganti = "'$tukar_new'";
+            // Rincian borongan milik orang lama ikut dibuang
+            $ckBor = $koneksi->query("SHOW TABLES LIKE 'tb_realisasi_borongan'");
+            if ($ckBor && $ckBor->num_rows > 0) {
+                $koneksi->query("DELETE FROM tb_realisasi_borongan WHERE id_realisasi_detail = '$id'");
+            }
+        }
+    }
     // Logika Kehadiran & Upah Otomatis (Fix untuk Input Parsial)
     $is_total_missing_post = (empty($tjammasuk) || $tjammasuk == '00:00' || $tjammasuk == '00:00:00') &&
                              (empty($tjamkeluar) || $tjamkeluar == '00:00' || $tjamkeluar == '00:00:00');
@@ -503,6 +567,7 @@ if (isset($_POST['simpan'])) {
     }
 
     $update = $koneksi->query("UPDATE tb_realisasi_detail SET 
+        id_pengganti = $vganti,
         r_upah = $tupah, 
         id_jadwal = $tshift,
         r_jam_masuk = '$s_masuk',

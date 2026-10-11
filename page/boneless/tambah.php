@@ -22,6 +22,15 @@ $ckHS = $koneksi->query("SHOW COLUMNS FROM tb_boneless LIKE 'harga_satuan'");
 if ($ckHS && $ckHS->num_rows == 0) {
     $koneksi->query("ALTER TABLE tb_boneless ADD COLUMN harga_satuan INT NULL DEFAULT NULL");
 }
+// Kolom per-baris: satuan (KG/EKOR) + harga (upah = hasil x harga per baris, tidak lagi dibagi rata)
+$ckSatU = $koneksi->query("SHOW COLUMNS FROM tb_boneless_satuan LIKE 'satuan'");
+if ($ckSatU && $ckSatU->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_boneless_satuan ADD COLUMN satuan VARCHAR(10) NOT NULL DEFAULT 'KG'");
+}
+$ckSatH = $koneksi->query("SHOW COLUMNS FROM tb_boneless_satuan LIKE 'harga'");
+if ($ckSatH && $ckSatH->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_boneless_satuan ADD COLUMN harga INT NOT NULL DEFAULT 0");
+}
 
 if ($simpan) {
     $tgl = @$_POST['tgl'];
@@ -57,26 +66,22 @@ if ($simpan) {
             }
         }
 
-        // Simpan karyawan satuan (upah dibagi rata: total kg x harga / jumlah orang)
-        $hrg_sat = (float)(@$_POST['harga_satuan'] ?: 800);
-        $koneksi->query("UPDATE tb_boneless SET harga_satuan = '$hrg_sat' WHERE id_boneless = '$id_header'");
+        // Simpan karyawan satuan (upah per baris: hasil x harga, satuan KG/EKOR)
         $sat_nama = $_POST['sat_nama'] ?? [];
         $sat_hasil = $_POST['sat_hasil'] ?? [];
-        $sat_rows = [];
-        $sat_total = 0;
+        $sat_satuan = $_POST['sat_satuan'] ?? [];
+        $sat_harga = $_POST['sat_harga'] ?? [];
         for ($i = 0; $i < count($sat_nama); $i++) {
             $nm = trim($sat_nama[$i] ?? '');
             if ($nm === '') continue;
             $q = (float)($sat_hasil[$i] ?: 0);
-            $sat_rows[] = [$nm, $q];
-            $sat_total += $q;
-        }
-        $sat_n = count($sat_rows);
-        foreach ($sat_rows as $sr) {
-            $nm_esc = $koneksi->real_escape_string($sr[0]);
-            $up_sat = ($sat_n > 0) ? (int)round($sat_total * $hrg_sat / $sat_n) : 0;
-            $koneksi->query("INSERT INTO tb_boneless_satuan (id_boneless, nama, hasil, upah)
-                             VALUES ('$id_header', '$nm_esc', '{$sr[1]}', '$up_sat')");
+            $u = strtoupper(trim($sat_satuan[$i] ?? 'KG'));
+            if ($u !== 'EKOR') $u = 'KG';
+            $h = (float)($sat_harga[$i] ?? 0);
+            $nm_esc = $koneksi->real_escape_string($nm);
+            $up_sat = (int)round($q * $h);
+            $koneksi->query("INSERT INTO tb_boneless_satuan (id_boneless, nama, hasil, upah, satuan, harga)
+                             VALUES ('$id_header', '$nm_esc', '$q', '$up_sat', '$u', '$h')");
         }
         echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body>
             <script>
@@ -207,26 +212,24 @@ $default_harga_satuan = 800;
                         <hr class="my-5 border-gray-200">
 
                         <div class="mt-4">
-                            <label class="text-xs font-bold text-indigo-700 uppercase mb-3 block"><i class="fas fa-users mr-1"></i>Karyawan Satuan (upah dibagi rata)</label>
+                            <label class="text-xs font-bold text-indigo-700 uppercase mb-3 block"><i class="fas fa-users mr-1"></i>Karyawan Satuan (upah per baris)</label>
                             <div class="row mb-3">
-                                <div class="col-md-6 form-group">
-                                    <label class="text-xs font-bold text-gray-700 uppercase mb-1">Harga /Kg (Rp)</label>
-                                    <input type="number" name="harga_satuan" id="harga_satuan" class="form-control h-[42px]" value="<?= $default_harga_satuan ?>">
-                                </div>
-                                <div class="col-md-6 form-group">
-                                    <label class="text-xs font-bold text-gray-700 uppercase mb-1">Upah / Orang (otomatis)</label>
+                                <div class="col-md-12 form-group">
+                                    <label class="text-xs font-bold text-gray-700 uppercase mb-1">Total Upah Satuan (otomatis)</label>
                                     <div class="h-[42px] flex items-center px-3 bg-indigo-50 border border-indigo-200 rounded-lg font-black text-indigo-700" id="satPerOrang">Rp 0</div>
                                 </div>
                             </div>
-                            <p class="text-xs text-gray-500 italic mb-3">Rumus: total kg &times; harga &divide; jumlah orang. Kolom Hasil Kerja boleh diisi sebagian (misal hanya baris pertama).</p>
+                            <p class="text-xs text-gray-500 italic mb-3">Rumus per baris: hasil &times; harga. Satuan bisa Kg atau Ekor per baris.</p>
                             <div class="table-responsive">
                                 <table class="table table-bordered" id="tableSatuan">
                                     <thead class="bg-indigo-50">
                                         <tr>
                                             <th class="text-center" style="width: 50px;">No</th>
                                             <th>Nama Sesuai KTP</th>
-                                            <th style="width: 150px;">Hasil Kerja</th>
-                                            <th style="width: 180px;">Upah Dibayar</th>
+                                            <th style="width: 120px;">Hasil Kerja</th>
+                                            <th style="width: 110px;">Satuan</th>
+                                            <th style="width: 140px;">Harga (Rp)</th>
+                                            <th style="width: 170px;">Upah Dibayar</th>
                                             <th style="width: 60px;"></th>
                                         </tr>
                                     </thead>
@@ -237,6 +240,13 @@ $default_harga_satuan = 800;
                                                 <td class="text-center font-bold text-gray-400"><?= $sn++ ?></td>
                                                 <td><input type="text" name="sat_nama[]" class="form-control" value="<?= $nm ?>"></td>
                                                 <td><input type="number" step="any" name="sat_hasil[]" class="form-control text-center sat-qty" value=""></td>
+                                                <td>
+                                                    <select name="sat_satuan[]" class="form-control text-center sat-unit">
+                                                        <option value="KG">KG</option>
+                                                        <option value="EKOR">EKOR</option>
+                                                    </select>
+                                                </td>
+                                                <td><input type="number" name="sat_harga[]" class="form-control text-center sat-price" value="<?= $default_harga_satuan ?>"></td>
                                                 <td><input type="text" class="form-control text-right font-bold text-indigo-600 bg-indigo-50 sat-upah-view" readonly value="Rp 0"></td>
                                                 <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger remove-row"><i class="fas fa-times"></i></button></td>
                                             </tr>
@@ -248,7 +258,11 @@ $default_harga_satuan = 800;
                         </div>
 
                         <div class="mt-6 p-4 bg-gray-50 rounded-xl border border-gray-200">
-                            <div class="flex justify-between items-center">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm font-bold text-gray-600 uppercase">Total Boneless Murni (tanpa mobil)</span>
+                                <span class="text-lg font-extrabold text-gray-800" id="summaryBonelessNet">Rp 0</span>
+                            </div>
+                            <div class="flex justify-between items-center pt-2 border-t border-gray-200">
                                 <span class="text-lg font-extrabold text-gray-800 uppercase">Grand Total Akhir</span>
                                 <span class="text-xl font-black text-indigo-700" id="summaryGrandTotal">Rp 0</span>
                             </div>
@@ -320,8 +334,10 @@ $default_harga_satuan = 800;
             const jmlMobil = parseFloat(document.querySelector('input[name="jumlah_mobil"]').value) || 0;
 
             // Logika Grand Total: (Nambah - Kurang) + (Biaya Mobil)
-            const grandTotal = (totalPlus - totalMinus) + (jmlMobil * masterCost);
+            const bonelessNet = totalPlus - totalMinus;
+            const grandTotal = bonelessNet + (jmlMobil * masterCost);
 
+            document.getElementById('summaryBonelessNet').innerText = 'Rp ' + Math.round(bonelessNet).toLocaleString('id-ID');
             document.getElementById('summaryGrandTotal').innerText = 'Rp ' + Math.round(grandTotal).toLocaleString('id-ID');
         };
 
@@ -340,20 +356,18 @@ $default_harga_satuan = 800;
         });
 
         window.calcSatuan = function() {
-            let totalKg = 0, n = 0;
+            let tot = 0;
             document.querySelectorAll('#tableSatuan .sat-row').forEach(row => {
-                const nm = row.querySelector('input[name="sat_nama[]"]').value.trim();
-                if (nm === '') return;
-                n++;
-                totalKg += parseFloat(row.querySelector('.sat-qty').value) || 0;
+                const nmEl = row.querySelector('input[name="sat_nama[]"]');
+                const nm = nmEl ? nmEl.value.trim() : '';
+                const q = parseFloat(row.querySelector('.sat-qty').value) || 0;
+                const hEl = row.querySelector('.sat-price');
+                const h = hEl ? (parseFloat(hEl.value) || 0) : 0;
+                const up = (nm === '') ? 0 : Math.round(q * h);
+                row.querySelector('.sat-upah-view').value = 'Rp ' + up.toLocaleString('id-ID');
+                if (nm !== '') tot += up;
             });
-            const harga = parseFloat(document.getElementById('harga_satuan').value) || 0;
-            const per = n > 0 ? Math.round(totalKg * harga / n) : 0;
-            document.querySelectorAll('#tableSatuan .sat-row').forEach(row => {
-                const nm = row.querySelector('input[name="sat_nama[]"]').value.trim();
-                row.querySelector('.sat-upah-view').value = (nm === '') ? 'Rp 0' : 'Rp ' + per.toLocaleString('id-ID');
-            });
-            document.getElementById('satPerOrang').innerText = 'Rp ' + per.toLocaleString('id-ID');
+            document.getElementById('satPerOrang').innerText = 'Rp ' + tot.toLocaleString('id-ID');
         };
 
         document.getElementById('addSatRow').addEventListener('click', function() {
@@ -364,6 +378,13 @@ $default_harga_satuan = 800;
                 <td class="text-center font-bold text-gray-400">-</td>
                 <td><input type="text" name="sat_nama[]" class="form-control"></td>
                 <td><input type="number" step="any" name="sat_hasil[]" class="form-control text-center sat-qty" value=""></td>
+                <td>
+                    <select name="sat_satuan[]" class="form-control text-center sat-unit">
+                        <option value="KG">KG</option>
+                        <option value="EKOR">EKOR</option>
+                    </select>
+                </td>
+                <td><input type="number" name="sat_harga[]" class="form-control text-center sat-price" value="<?= $default_harga_satuan ?>"></td>
                 <td><input type="text" class="form-control text-right font-bold text-indigo-600 bg-indigo-50 sat-upah-view" readonly value="Rp 0"></td>
                 <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger remove-row w-full"><i class="fas fa-times"></i></button></td>
             `;
@@ -371,7 +392,7 @@ $default_harga_satuan = 800;
         });
 
         document.addEventListener('input', e => {
-            if (e.target.classList.contains('sat-qty') || e.target.id === 'harga_satuan' || e.target.getAttribute('name') === 'sat_nama[]') {
+            if (e.target.classList.contains('sat-qty') || e.target.classList.contains('sat-price') || e.target.classList.contains('sat-unit') || e.target.getAttribute('name') === 'sat_nama[]') {
                 calcSatuan();
             }
         });

@@ -155,6 +155,9 @@ if ($datastatusrkk == 3) {
           <a href="?page=rkk&aksi=karyawan&id=<?= $idrkk; ?>" class="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white text-[14px] md:text-base font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto justify-center">
             <i class="fas fa-user-plus mr-1.5"></i> Tetapkan Karyawan
           </a>
+          <a href="?page=rkk&aksi=importkelola&id=<?= $idrkk; ?>" class="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] md:text-base font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto justify-center">
+            <i class="fas fa-file-excel mr-1.5"></i> Import Excel
+          </a>
         <?php endif; ?>
       </div>
     </div>
