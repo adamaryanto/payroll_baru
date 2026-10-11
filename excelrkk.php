@@ -91,35 +91,38 @@ while ($row = $result->fetch_assoc()) {
 }
 
 $erow = 0;
-$empty15 = str_repeat("<td style='$cWhite$bd'></td>", 15);
 ?>
 <table border="1" style="border-collapse:collapse;">
 <?php $erow++; // R1 judul ?>
-    <tr><td colspan="10" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?> height:23px;">FORMAT ABSENSI KARYAWAN HARI <?= $judul_hari . ' ' . $judul_tgl ?></td></tr>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?> height:23px;">FORMAT ABSENSI KARYAWAN HARI <?= $judul_hari . ' ' . $judul_tgl ?></td></tr>
 <?php $erow++; // R2 aturan ?>
-    <tr><td colspan="10" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000</td></tr>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000</td></tr>
 <?php $erow++; // R3 jam ?>
-    <tr><td colspan="10" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td></tr>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td></tr>
+<?php $erow++; // R4 ADMIN ?>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">ADMIN</td></tr>
 <?php
 $hdr_gray = "$fB$thC$cHdr$bd";
 $hdr_light = "$fB$thC$cHdrL$bd";
 foreach ($data_per_bagian as $nama_bagian => $karyawans):
     $erow++; // bar ungu
 ?>
-    <tr><td colspan="10" style="<?= $fB ?> <?= $thC ?> <?= $cSection ?><?= $bd ?>"><?= $nama_bagian ?></td></tr>
+    <tr><td colspan="15" style="<?= $fB ?> <?= $thC ?> <?= $cSection ?><?= $bd ?>"><?= $nama_bagian ?></td></tr>
     <?php $erow++; // header baris 1 ?>
     <tr>
         <?php
         foreach (['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK'] as $h) echo "<th rowspan='2' style='$hdr_gray'>$h</th>";
-        echo "<th style='$hdr_gray'>ISTIRAHAT</th>";
+        echo "<th rowspan='2' style='$hdr_gray'>ISTIRAHAT</th>";
         foreach (['JAM PULANG'] as $h) echo "<th rowspan='2' style='$hdr_gray'>$h</th>";
+        foreach (['HASIL KERJA','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'] as $h) echo "<th rowspan='2' style='$hdr_light'>$h</th>";
         ?>
     </tr>
     <?php $erow++; // header baris 2: MASUK di kolom I ?>
-    <tr><?= str_repeat("<td style='$cWhite$bd'></td>", 8) ?><th style="<?= $hdr_gray ?>">MASUK</th><?= str_repeat("<td style='$cWhite$bd'></td>", 1) ?></tr>
+    <tr><?= str_repeat("<td style='$cWhite$bd'></td>", 8) ?><th style="<?= $hdr_gray ?>">MASUK</th><?= str_repeat("<td style='$cWhite$bd'></td>", 6) ?></tr>
     <?php $no_rkk = 1; ?>
     <?php foreach ($karyawans as $k):
         $erow++;
+        $upah = (float)($k['upah'] ?? 0);
     ?>
     <tr style="<?= $fB ?>">
         <?= ex_cell($no_rkk++, "$cWhite$bd") ?>
@@ -132,10 +135,27 @@ foreach ($data_per_bagian as $nama_bagian => $karyawans):
         <?= ex_cell('', "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>"><?= ex_num($upah) ?></td>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>"><?= ex_num($upah) ?></td>
     </tr>
     <?php endforeach; ?>
 <?php endforeach; ?>
-<?php // baris total tabel utama dibuang (kolom kanan tidak dipakai) ?>
+<?php
+$erow++;
+$total_row = $erow;
+$first_data_row = 4;
+$last_data_row = $total_row - 1;
+?>
+    <tr style="<?= $fB ?>">
+        <?= str_repeat("<td style='$cWhite$bd'></td>", 11) ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>"><?= ex_num($sum_upah_all) ?></td>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <td align="right" style="<?= $cWhite ?><?= $bd ?>"><?= ex_num($sum_upah_all) ?></td>
+    </tr>
 <?php
 // Nilai paten footer
 $val_bon_net = 0;
@@ -160,30 +180,30 @@ $hRow = "height:21px;";
 $hBig = "height:26px;";
 
 // spacer: pisahkan dari tabel absensi di atas
-echo "<tr>" . ex_blank(10, 14) . "</tr>";
+echo "<tr>" . ex_blank(15, 14) . "</tr>";
 
 $erow++; // rekap title (merge C-I)
 echo "<tr>" . ex_blank(2)
     . "<td colspan='7' align='center' style='$fB$thC$cRekap{$bd}$hTitle'>REALISASI TOTAL REKAP BIAYA PABRIK CIKUPA $judul_tgl</td>"
-    . ex_blank(1) . "</tr>";
+    . ex_blank(6) . "</tr>";
 $erow++; // biaya mobil
 echo "<tr>" . ex_blank(2)
     . "<td colspan='5' align='center' style='$fB16$thC$cRekap{$bd}$hRow'>Biaya $potong mobil</td>"
     . "<td colspan='2' align='right' style='$fB16$thC$cRekap{$bd}$hRow'>Rp " . ex_rp2($sum_upah_all) . "</td>"
-    . ex_blank(1) . "</tr>";
+    . ex_blank(6) . "</tr>";
 $erow++; // biaya permobil
 echo "<tr>" . ex_blank(2)
     . "<td colspan='5' align='center' style='$fB16$thC$cRekap{$bd}$hRow'>Biaya permobil</td>"
     . "<td colspan='2' align='right' style='$fB16$thC$cRekap{$bd}$hRow'>Rp " . ex_rp2($val_permobil_rkk) . "</td>"
-    . ex_blank(1) . "</tr>";
+    . ex_blank(6) . "</tr>";
 
 // spacer: pisahkan dari rekap di atas
-echo "<tr>" . ex_blank(10, 14) . "</tr>";
+echo "<tr>" . ex_blank(15, 14) . "</tr>";
 
 $erow++; // bayaran tim bonless title (merge C-J)
 echo "<tr>" . ex_blank(2)
     . "<td colspan='8' align='center' style='$fB$thC$cRekap{$bd}$hTitle'>BAYARAN TIM BONLESS</td>"
-    . ex_blank(0) . "</tr>";
+    . ex_blank(5) . "</tr>";
 
 $Jplus = []; $Jminus = []; $nb = 0;
 foreach ($boneless_details as $item):
@@ -206,7 +226,7 @@ foreach ($boneless_details as $item):
         <?= ex_cell($qty_disp, "$cWhite$ch") ?>
         <?= ex_cell('Rp' . ex_num($hrg), "$cWhite$ch") ?>
         <td align="right" style="<?= $cWhite ?><?= $ch ?>">Rp <?= $line_disp ?></td>
-        <?= ex_blank(0) ?>
+        <?= ex_blank(5) ?>
     </tr>
 <?php endforeach; ?>
 <?php
@@ -214,11 +234,11 @@ $erow++; // total bonless (label merge C-I, nilai kolom J)
 echo "<tr>" . ex_blank(2)
     . "<td colspan='7' align='center' style='$fB16$thC$cTotal{$bd}$hTitle'>TOTAL</td>"
     . "<td align='right' style='$cWhite{$bd}$hTitle'>Rp " . (($val_bon_net == 0) ? '-' : number_format($val_bon_net, 0, ',', '.')) . "</td>"
-    . ex_blank(0) . "</tr>";
+    . ex_blank(5) . "</tr>";
 $erow++; // merah: dengan mesin bonles (merge C-J)
 echo "<tr>" . ex_blank(2)
     . "<td colspan='8' align='center' style='$fB16$thC$cRed{$bd}$hBig'>DENGAN MESIN BONLES</td>"
-    . ex_blank(0) . "</tr>";
+    . ex_blank(5) . "</tr>";
 $erow++; // kuning: header
 echo "<tr>" . ex_blank(2)
     . "<td colspan='3' align='center' style='$fB16$thC$cYellow{$bd}$hBig'>BIAYA PABRIK</td>"
@@ -226,7 +246,7 @@ echo "<tr>" . ex_blank(2)
     . "<td align='center' style='$fB16$thC$cYellow{$bd}$hBig'>POTONG</td>"
     . "<td align='center' style='$fB16$thC$cYellow{$bd}$hBig'>TOTAL</td>"
     . "<td colspan='2' align='center' style='$fB16$thC$cYellow{$bd}$hBig'>Biaya Per mobil</td>"
-    . ex_blank(0) . "</tr>";
+    . ex_blank(5) . "</tr>";
 $erow++; // kuning: nilai
 echo "<tr>" . ex_blank(2)
     . "<td colspan='3' align='right' style='$cWhite{$bd}$hRow'>" . ex_rp2($sum_upah_all) . "</td>"
@@ -234,6 +254,6 @@ echo "<tr>" . ex_blank(2)
     . "<td align='center' style='$cWhite{$bd}$hRow'>$potong</td>"
     . "<td align='right' style='$cWhite{$bd}$hRow'>" . ex_rp2($val_grand_rkk) . "</td>"
     . "<td colspan='2' align='right' style='$cWhite{$bd}$hRow'>Rp" . ex_rp2($val_permobil_rkk) . "</td>"
-    . ex_blank(0) . "</tr>";
+    . ex_blank(5) . "</tr>";
 ?>
 </table>
