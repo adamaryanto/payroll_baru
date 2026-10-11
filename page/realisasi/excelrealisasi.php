@@ -63,7 +63,8 @@ while ($qb && ($rb = $qb->fetch_assoc())) {
     if ($nm === '') continue;
     $bor_map[$rb['id_realisasi_detail']][] = ['nama' => $nm, 'qty' => (float)$rb['qty'], 'tarif' => (int)$rb['tarif']];
 }
-$total_cols = 16;
+$total_cols = 15;
+$erow = 0;
 function ex_qty($v) {
     $v = (float)$v;
     if (abs($v - round($v)) < 1e-9) return (string)(int)round($v);
@@ -133,7 +134,6 @@ echo '</colgroup>';
         foreach (['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK'] as $h) echo "<th rowspan=\"2\" style=\"$fBase$th$cWhite$bd\">$h</th>";
         echo "<th style=\"$fBase$th$cWhite$bd\">ISTIRAHAT</th>";
         echo "<th rowspan=\"2\" style=\"$fBase$th$cWhite$bd\">JAM PULANG</th>";
-        echo "<th rowspan=\"2\" style=\"$fBase$th$cWhite$bd\">KETERANGAN</th>";
         foreach (['HASIL KERJA (kg)','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'] as $h) echo "<th rowspan=\"2\" style=\"$fBase$th$cHdrL$bd\">$h</th>";
         ?>
     </tr>
@@ -150,7 +150,7 @@ echo '</colgroup>';
     ?>
     <tr style="<?php echo $fBase; ?>">
         <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $no++; ?></td>
-        <td style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo strtoupper($data['nama_karyawan'] ?? ''); ?></td>
+        <td style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo strtoupper($data['nama_karyawan'] ?? '') . (!empty($data['pengganti_nama']) ? ' (Digantikan oleh ' . $data['pengganti_nama'] . ')' : ''); ?></td>
         <td style="<?php echo $cWhite.$bd; ?>"></td>
         <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $data['label_os'] ?? ''; ?></td>
         <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $data['label_gol'] ?? ''; ?></td>
@@ -159,7 +159,6 @@ echo '</colgroup>';
         <td align="center" style="<?php echo $cWhite.$bd; ?>"><?php echo $ra_masuk; ?></td>
         <td align="center" style="<?php echo $cWhite.$bd; ?>"><?php echo $ra_ist; ?></td>
         <td align="center" style="<?php echo $cWhite.$bd; ?>"><?php echo $ra_pulang; ?></td>
-        <td align="center" style="<?php echo $cWhite.$bd; ?>"><?php echo !empty($data['pengganti_nama']) ? 'Digantikan oleh ' . $data['pengganti_nama'] : ''; ?></td>
         <td align="center" style="<?php echo $cWhite.$bd; ?>"><?php echo $hasil ? $hasil . ' kg' : ''; ?></td>
         <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo number_format($data['_upah'], 0, ',', '.'); ?></td>
         <td align="right" style="<?php echo $cWhite.$bd; ?>"><?php echo $data['_pot'] ? number_format($data['_pot'], 0, ',', '.') : ''; ?></td>
@@ -181,7 +180,7 @@ foreach ($rows_per_grup as $gt) {
 }
 ?>
     <tr style="<?php echo $fBase; ?>">
-        <?php echo str_repeat("<td style=\"$cWhite$bd\"></td>", 12); ?>
+        <?php echo str_repeat("<td style=\"$cWhite$bd\"></td>", 11); ?>
         <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo number_format($tot_upah, 0, ',', '.'); ?></td>
         <td style="<?php echo $cWhite.$bd; ?>"></td><td style="<?php echo $cWhite.$bd; ?>"></td>
         <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo number_format($tot_dibayar, 0, ',', '.'); ?></td>
@@ -200,7 +199,7 @@ function ex_rp2($v) { return number_format((float)$v, 2, ',', '.'); }
 function ex_blank($n) { return str_repeat("<td style='border:0;'></td>", $n); }
 $erow++;
 ?>
-    <tr><?php echo ex_blank(2); ?><td colspan="8" align="center" style="<?php echo $fBase.$th.$cRekap.$bd; ?> font-size:18px;">REALISASI TOTAL REKAP BIAYA PABRIK CIKUPA <?php echo $judul_tgl; ?></td><?php echo ex_blank(6); ?></tr>
+    <tr><?php echo ex_blank(2); ?><td colspan="7" align="center" style="<?php echo $fBase.$th.$cRekap.$bd; ?> font-size:18px;">REALISASI TOTAL REKAP BIAYA PABRIK CIKUPA <?php echo $judul_tgl; ?></td><?php echo ex_blank(6); ?></tr>
 <?php $erow++; ?>
     <tr style="<?php echo $fBase; ?> font-weight:bold; font-size:16px;">
         <?php echo ex_blank(2); ?>
@@ -216,9 +215,9 @@ $erow++;
         <?php echo ex_blank(6); ?>
     </tr>
 <?php $erow++; ?>
-    <tr><?php echo ex_blank(16); ?></tr>
+    <tr><?php echo ex_blank(15); ?></tr>
 <?php $erow++; ?>
-    <tr><?php echo ex_blank(2); ?><td colspan="9" align="center" style="<?php echo $fBase.$th.$cRekap.$bd; ?> font-size:18px;">BAYARAN TIM BONLESS</td><?php echo ex_blank(5); ?></tr>
+    <tr><?php echo ex_blank(2); ?><td colspan="8" align="center" style="<?php echo $fBase.$th.$cRekap.$bd; ?> font-size:18px;">BAYARAN TIM BONLESS</td><?php echo ex_blank(5); ?></tr>
 <?php
 $nb = 0;
 foreach ($boneless_details as $item):
@@ -249,7 +248,7 @@ foreach ($boneless_details as $item):
         <?php echo ex_blank(5); ?>
     </tr>
 <?php $erow++; ?>
-    <tr><?php echo ex_blank(2); ?><td colspan="9" align="center" style="<?php echo $fBase.$th.$cRed.$bd; ?> font-size:18px;">DENGAN MESIN BONLES</td><?php echo ex_blank(5); ?></tr>
+    <tr><?php echo ex_blank(2); ?><td colspan="8" align="center" style="<?php echo $fBase.$th.$cRed.$bd; ?> font-size:18px;">DENGAN MESIN BONLES</td><?php echo ex_blank(5); ?></tr>
 <?php $erow++; ?>
     <tr style="<?php echo $fBase.$th; ?> font-size:16px;">
         <?php echo ex_blank(2); ?>
