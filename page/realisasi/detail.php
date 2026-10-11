@@ -502,7 +502,7 @@ if (isset($_POST['simpan'])) {
 
     if ($is_total_missing_post) {
         $tupah = 0;
-        $tstatus_hadir = 'Tidak Hadir';
+        $tstatus_hadir = ($tukar_new > 0) ? 'Digantikan' : 'Tidak Hadir';
     } else {
         $tstatus_hadir = 'Hadir';
         // Kembalikan ke upah awal jika upah POST adalah 0 (misal kena override JS saat initial load)
