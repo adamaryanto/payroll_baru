@@ -87,7 +87,6 @@ if ($step === 'commit') {
                     }
                     // Realisasi SENGAJA tidak dibuat dari import Excel (dibuat terpisah via Tambah Realisasi + Tarik Data).
                     if ($tx_fail !== '') {
-                    if ($tx_fail !== '') {
                         $koneksi->rollback();
                         $alert = ["icon" => "error", "title" => "Import Gagal", "text" => $tx_fail . " Semua dibatalkan, tidak ada data setengah jadi. Coba lagi."];
                     } else {
