@@ -42,9 +42,7 @@ if ($step === 'commit') {
                     if ((int)$jz > 0) {
                         $alert = ["icon" => "warning", "title" => "Sudah Ada", "text" => "Tanggal $tgl sudah ada RKK-nya. Hapus dulu via halaman RKK kalau mau import ulang."];
                     } else {
-                        // Zombie (header tanpa isi, sisa import gagal) — bersihkan lalu lanjut import
-                        $koneksi->query("DELETE FROM tb_realisasi_detail WHERE id_rkk='$zid'");
-                        $koneksi->query("DELETE FROM tb_realisasi WHERE id_rkk='$zid'");
+                        // Zombie (header tanpa isi, sisa import gagal) — bersihkan RKK-nya saja
                         $koneksi->query("DELETE FROM tb_rkk WHERE id_rkk='$zid'");
                     }
                 }
