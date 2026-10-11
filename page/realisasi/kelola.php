@@ -770,9 +770,13 @@ function bulkSavePenalties($koneksi, $id_realisasi)
 
                                      // Logic Status Kehadiran (Refined)
                                      // Attendance Status Logic (ENUM-based)
-                                     if ($data['r_status'] == 'Tidak Hadir') {
+                                     $is_replaced = !empty($data['digantikan_oleh']) || !empty($data['pengganti_langsung']);
+                                     if ($data['r_status'] == 'Tidak Hadir' && !$is_replaced) {
                                          $attendanceStatus = 'TIDAK HADIR';
                                          $statusBadgeClass = 'bg-red-100 text-red-800';
+                                     } elseif ($is_replaced) {
+                                         $attendanceStatus = 'DIGANTIKAN';
+                                         $statusBadgeClass = 'bg-amber-100 text-amber-800';
                                      } else {
                                          // If r_status is 'Hadir', check if it's currently synced but has no logs
                                          if ($data['status_realisasi_detail'] == 2 && $isTotalMissing) {
