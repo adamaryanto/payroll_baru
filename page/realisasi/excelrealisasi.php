@@ -25,7 +25,7 @@ $judul_hari = $hari_arr[(int)date('w', $ts)];
 $judul_tgl = date('d', $ts) . ' ' . $bulan_arr[(int)date('n', $ts)] . ' ' . date('Y', $ts);
 
 // Boneless
-$q_b = $koneksi->query("SELECT * FROM tb_boneless WHERE tgl = '$tanggal_sql'");
+$q_b = ($tanggal_sql !== '') ? $koneksi->query("SELECT * FROM tb_boneless WHERE tgl = '$tanggal_sql'") : false;
 $b_head = $q_b ? $q_b->fetch_assoc() : null;
 $potong = (float)($b_head['jumlah_mobil'] ?? 0);
 $boneless_details = [];
@@ -141,22 +141,21 @@ $stRp   = $x->style(['sz' => 18, 'align' => 'right', 'fill' => 'FFFFFF', 'border
 $stRpB  = $x->style(['b' => true, 'sz' => 18, 'align' => 'right', 'fill' => 'FFFFFF', 'border' => true, 'num' => 'rp']);
 $stRp2  = $x->style(['sz' => 16, 'align' => 'right', 'fill' => 'FFFFFF', 'border' => true, 'num' => 'rp2']);
 $stWrap = $x->style(['b' => true, 'sz' => 18, 'fill' => 'FFFFFF', 'border' => true, 'wrap' => true]);
+$stW = $x->style(['sz' => 18, 'fill' => 'FFFFFF', 'border' => true, 'wrap' => true]);
 
-$col_w = [67,358,168,87,138,164,215,148,120,143,131,170,131,116,166]; // 15 kolom
-
-// ---------- SHEET 1: REALISASI ----------
+// ---------- SHEET 1: REALISASI (kolom sama kayak halaman kelola + Detail Borongan) ----------
 $s1 = $x->sheet('REALISASI');
-foreach ($col_w as $i => $w) $x->width($s1, $i + 1, $w);
 $r = 1;
-$x->cell($s1, $r, 1, 'REALISASI ABSENSI KARYAWAN HARI ' . $judul_hari . ' ' . $judul_tgl, $stT); $x->merge($s1, $r, 1, $r, 15); $r++;
-$x->cell($s1, $r, 1, 'JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000', $stT); $x->merge($s1, $r, 1, $r, 15); $r++;
-$x->cell($s1, $r, 1, 'MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.', $stT); $x->merge($s1, $r, 1, $r, 15); $r++;
+$x->cell($s1, $r, 1, 'REALISASI ABSENSI KARYAWAN HARI ' . $judul_hari . ' ' . $judul_tgl, $stT); $x->merge($s1, $r, 1, $r, 16); $r++;
+$x->cell($s1, $r, 1, 'JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000', $stT); $x->merge($s1, $r, 1, $r, 16); $r++;
+$x->cell($s1, $r, 1, 'MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.', $stT); $x->merge($s1, $r, 1, $r, 16); $r++;
 $hdrL = ['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','ISTIRAHAT','JAM PULANG'];
 $hdrR = ['HASIL KERJA (kg)','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'];
 foreach ($rows_per_grup as $nama_grup => $rows) {
-    $x->cell($s1, $r, 1, $nama_grup, $stSEC); $x->merge($s1, $r, 1, $r, 15); $r++;
+    $x->cell($s1, $r, 1, $nama_grup, $stSEC); $x->merge($s1, $r, 1, $r, 16); $r++;
     foreach ($hdrL as $i => $h) $x->cell($s1, $r, $i + 1, $h, $stTH);
-    foreach ($hdrR as $i => $h) $x->cell($s1, $r, 11 + $i, $h, $stTHG);
+    $x->cell($s1, $r, 11, 'Detail Borongan', $stTH);
+    foreach ($hdrR as $i => $h) $x->cell($s1, $r, 12 + $i, $h, $stTHG);
     $r++;
     $x->cell($s1, $r, 9, 'MASUK', $stTH); $r++;
     $no = 1;
@@ -165,22 +164,29 @@ foreach ($rows_per_grup as $nama_grup => $rows) {
         $ra_ist = ($data['ra_istirahat_masuk'] ?? '00:00:00') != '00:00:00' ? $data['ra_istirahat_masuk'] : '';
         $ra_pulang = ($data['ra_keluar'] ?? '00:00:00') != '00:00:00' ? $data['ra_keluar'] : '';
         $hasil = isset($data['_bor_kg']) ? ex_qty($data['_bor_kg']) : ($data['hasil_kerja'] ?? '');
+        $parts = [];
+        foreach ($bor_map[$data['id_realisasi_detail']] ?? [] as $ln) {
+            $lt = (int)round((float)$ln['qty'] * (int)$ln['tarif']);
+            $parts[] = $ln['nama'] . ' : ' . ex_qty($ln['qty']) . ' kg x ' . number_format($ln['tarif'], 0, ',', '.') . ' = Rp' . number_format($lt, 0, ',', '.');
+        }
+        $bor_detail = implode(', ', $parts);
         $nama = strtoupper($data['nama_karyawan'] ?? '') . (!empty($data['pengganti_nama']) ? ' (Digantikan oleh ' . $data['pengganti_nama'] . ')' : '');
         $x->cell($s1, $r, 1, $no++, $stCCB);
         $x->cell($s1, $r, 2, $nama, $stWrap);
         $x->cell($s1, $r, 3, '', $stC);
         $x->cell($s1, $r, 4, $data['label_os'] ?? '', $stCCB);
         $x->cell($s1, $r, 5, $data['label_gol'] ?? '', $stCCB);
-        $x->cell($s1, $r, 6, $data['posisi'] ?? '', $stC);
+        $x->cell($s1, $r, 6, $data['posisi'] ?? '', $stW);
         $x->cell($s1, $r, 7, $data['j_masuk'] ?? '', $stCCB);
         $x->cell($s1, $r, 8, $ra_masuk, $stCC);
         $x->cell($s1, $r, 9, $ra_ist, $stCC);
         $x->cell($s1, $r, 10, $ra_pulang, $stCC);
-        $x->cell($s1, $r, 11, $hasil !== '' ? ($hasil . ' kg') : '', $stCC);
-        $x->cell($s1, $r, 12, (int)round($data['_upah']), $stCRB);
-        $x->cell($s1, $r, 13, $data['_pot'] ? (int)round($data['_pot']) : '', $data['_pot'] ? $stCR : $stC);
-        $x->cell($s1, $r, 14, $data['_lembur'] ? (int)round($data['_lembur']) : '', $data['_lembur'] ? $stCR : $stC);
-        $x->cell($s1, $r, 15, (int)round($data['_upah'] - $data['_pot'] + $data['_lembur']), $stCRB);
+        $x->cell($s1, $r, 11, $bor_detail, $bor_detail !== '' ? $stW : $stC);
+        $x->cell($s1, $r, 12, $hasil !== '' ? ($hasil . ' kg') : '', $stCC);
+        $x->cell($s1, $r, 13, (int)round($data['_upah']), $stCRB);
+        $x->cell($s1, $r, 14, $data['_pot'] ? (int)round($data['_pot']) : '', $data['_pot'] ? $stCR : $stC);
+        $x->cell($s1, $r, 15, $data['_lembur'] ? (int)round($data['_lembur']) : '', $data['_lembur'] ? $stCR : $stC);
+        $x->cell($s1, $r, 16, (int)round($data['_upah'] - $data['_pot'] + $data['_lembur']), $stCRB);
         $r++;
     }
 }
@@ -192,10 +198,10 @@ foreach ($rows_per_grup as $gt) {
         $tot_dibayar += ($rr['_upah'] - $rr['_pot'] + $rr['_lembur']);
     }
 }
-for ($c = 1; $c <= 11; $c++) $x->cell($s1, $r, $c, '', $stC);
-$x->cell($s1, $r, 12, (int)round($tot_upah), $stCRB);
-$x->cell($s1, $r, 13, '', $stC); $x->cell($s1, $r, 14, '', $stC);
-$x->cell($s1, $r, 15, (int)round($tot_dibayar), $stCRB);
+for ($c = 1; $c <= 12; $c++) $x->cell($s1, $r, $c, '', $stC);
+$x->cell($s1, $r, 13, (int)round($tot_upah), $stCRB);
+$x->cell($s1, $r, 14, '', $stC); $x->cell($s1, $r, 15, '', $stC);
+$x->cell($s1, $r, 16, (int)round($tot_dibayar), $stCRB);
 $r++;
 // Nilai paten footer (angka, bukan rumus) — seperti file contoh
 $val_pabrik = $tot_dibayar;
@@ -248,8 +254,6 @@ $x->cell($s1, $r, 3, $stamp_text, $stStamp); $r++;
 
 // ---------- SHEET 2: KARYAWAN TIDAK MASUK ----------
 $s2 = $x->sheet('KARYAWAN TIDAK MASUK');
-foreach ($col_w as $i => $w) $x->width($s2, $i + 1, $w);
-$x->width($s2, 16, 300);
 $r2 = 1;
 $x->cell($s2, $r2, 1, 'KARYAWAN RENCANA TIDAK MASUK (TIDAK ADA TAP MESIN) TGL ' . $judul_tgl, $stT); $x->merge($s2, $r2, 1, $r2, 16); $r2++;
 $x->cell($s2, $r2, 1, 'Sumber rencana: RKK. Karyawan dinyatakan tidak masuk bila tidak ada tap mesin (tb_record) pada tanggal tersebut.', $stTH); $x->merge($s2, $r2, 1, $r2, 16); $r2++;
@@ -284,4 +288,6 @@ if (empty($tm_grup)) {
     }
 }
 
+$x->autofit($s1);
+$x->autofit($s2);
 $x->send("Laporan_Realisasi_Upah_$tanggal.xlsx");

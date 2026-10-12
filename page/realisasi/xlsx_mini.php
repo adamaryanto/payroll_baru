@@ -157,6 +157,23 @@ class MiniXlsx {
         return $x;
     }
 
+    // Lebar kolom ikut isi (seperti tabel HTML): dihitung dari teks terpanjang,
+    // baris merge (judul/section) dilewati. $max = batas atas, $min = batas bawah.
+    public function autofit($sh, $max = 55, $min = 12) {
+        $skip = [];
+        foreach ($this->sheets[$sh]['merge'] as $m) for ($r = $m[0]; $r <= $m[2]; $r++) $skip[$r] = true;
+        $w = [];
+        foreach ($this->sheets[$sh]['rows'] as $r => $cols) {
+            if (isset($skip[$r])) continue;
+            foreach ($cols as $c => $cell) {
+                $len = ($cell['t'] === 'n') ? strlen((string)(int)round((float)$cell['v'])) : mb_strlen((string)$cell['v']);
+                $need = $len * 1.5 + 3;
+                if (!isset($w[$c]) || $need > $w[$c]) $w[$c] = $need;
+            }
+        }
+        foreach ($w as $c => $need) $this->sheets[$sh]['widths'][$c] = max($min, min($max, round($need, 1)));
+    }
+
     public function send($filename) {
         $this->style(); // pastikan xf default idx 0 ada
         $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
