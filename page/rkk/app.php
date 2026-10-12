@@ -43,8 +43,8 @@ if ($status == "pro") {
         exit;
     }
 
-    // Cek apakah ada data Boneless untuk RKK ini (Specific by ID)
-    $cek_boneless = $koneksi->query("SELECT id_boneless FROM tb_boneless WHERE id_rkk = '$id'");
+    // Cek apakah ada data Boneless untuk tanggal RKK ini (per tanggal, bukan per ID)
+    $cek_boneless = $koneksi->query("SELECT id_boneless FROM tb_boneless WHERE tgl = '$tgl_rkk'");
 
     if ($cek_boneless->num_rows == 0) {
         $pesan = "Tidak bisa propose data! Silakan lengkapi data Boneless untuk tanggal " . date('d/m/Y', strtotime($tgl_rkk)) . " terlebih dahulu.";
@@ -136,11 +136,11 @@ if ($status == "pro") {
         exit;
     }
 
-    // New: Check Boneless before Approve as well
-    $cek_boneless = $koneksi->query("SELECT id_boneless FROM tb_boneless WHERE id_rkk = '$id'");
+    // New: Check Boneless before Approve as well (per tanggal, bukan per ID)
+    $cek_rkk = $koneksi->query("SELECT tgl_rkk FROM tb_rkk WHERE id_rkk = '$id'");
+    $tgl_rkk = $cek_rkk->fetch_assoc()['tgl_rkk'];
+    $cek_boneless = $koneksi->query("SELECT id_boneless FROM tb_boneless WHERE tgl = '$tgl_rkk'");
     if ($cek_boneless->num_rows == 0) {
-        $cek_rkk = $koneksi->query("SELECT tgl_rkk FROM tb_rkk WHERE id_rkk = '$id'");
-        $tgl_rkk = $cek_rkk->fetch_assoc()['tgl_rkk'];
     ?>
         <!DOCTYPE html>
         <html>

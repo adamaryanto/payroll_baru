@@ -10,7 +10,7 @@ $where_rkk = (strtolower($_SESSION['role']) == 'owner') ? " WHERE A.status_rkk >
 $tampil = $koneksi->query("SELECT A.*, 
     (SELECT COUNT(id_rkk_detail) FROM tb_rkk_detail WHERE id_rkk = A.id_rkk AND status_rkk != 'Digantikan') as jml, 
     (SELECT SUM(CASE WHEN status_rkk = 'Digantikan' THEN 0 ELSE upah END) FROM tb_rkk_detail WHERE id_rkk = A.id_rkk) as ttl,
-    (SELECT COUNT(id_boneless) FROM tb_boneless WHERE id_rkk = A.id_rkk) as jml_boneless 
+    (SELECT COUNT(id_boneless) FROM tb_boneless WHERE tgl = A.tgl_rkk) as jml_boneless 
     FROM tb_rkk A $where_rkk ORDER BY A.tgl_rkk ASC, A.id_rkk ASC");
 if (strtolower($_SESSION['role']) != "owner") {
     $level_status =  "Hidden";

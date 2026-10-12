@@ -290,7 +290,7 @@ function rk_extract_kelola($rows, $koneksi = null) {
             // Blok footer (rekap/boneless) bukan data karyawan — setop parsing di sini.
             // Marker selalu di kolom C (layout menjorok); bar section selalu di kolom A.
             $c3 = strtoupper($get(3));
-            $stop = ['BAYARAN TIM BONLESS', 'DENGAN MESIN BONLES', 'BIAYA PABRIK', 'TOTAL'];
+            $stop = ['BAYARAN TIM BONLESS', 'BAYARAN TIM BONLESS', 'DENGAN MESIN BONLES', 'DENGAN MESIN BONLES', 'BIAYA PABRIK', 'TOTAL'];
             if (in_array($c3, $stop, true) || strpos($c3, 'REKAP BIAYA') !== false || strpos($c3, 'BIAYA ') === 0) break;
             // Baris section (ADMIN / ...) atau baris kotor (nama nyasar di kolom lain)?
             // Kumpulkan kandidat teks (abaikan kata sampah & angka), lalu cek ke DB dulu.
