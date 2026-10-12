@@ -1,5 +1,5 @@
 <?php
-// Import Excel absensi harian -> tb_rkk (+detail) & tb_realisasi (+detail).
+// Import Excel absensi harian -> tb_rkk (+detail) saja. Realisasi dibuat setelah RKK di-approve.
 // Format: sheet PERENCANAAN + REALISASI (atau .xls hasil export), kolom:
 //   A No | B Nama | C Paraf | D OS/DHK | E Golongan | F Posisi | G Jam Kerja
 //   H Jam Masuk | I Istirahat | J Jam Pulang | K Hasil | L Upah | M Potongan | N Lembur | O Upah Dibayar
@@ -255,7 +255,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
             <h3 class="text-xl sm:text-2xl font-extrabold text-white m-0 tracking-tight flex items-center">
                 <i class="fas fa-file-excel mr-3"></i> Import Excel Absensi Harian
             </h3>
-            <p class="text-emerald-100 text-xs sm:text-sm mt-1">Section di Excel = grup (dibuat otomatis bila belum ada). Upload → preview → simpan ke RKK &amp; Realisasi baru.</p>
+            <p class="text-emerald-100 text-xs sm:text-sm mt-1">Section di Excel = grup (dibuat otomatis bila belum ada). Upload → preview → simpan ke RKK saja (Realisasi dibuat setelah RKK di-approve).</p>
         </div>
         <div class="p-5 sm:p-8">
             <div class="mb-5">
@@ -272,7 +272,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
             <form method="POST">
                 <input type="hidden" name="rx_step" value="commit">
                 <div class="mb-4 max-w-xs">
-                    <label class="block text-sm font-bold text-gray-700 mb-2">Tanggal RKK/Realisasi</label>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Tanggal RKK</label>
                     <input type="date" name="rx_date" value="<?= htmlspecialchars($preview['date'] ?: date('Y-m-d')); ?>" required class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm">
                 </div>
                 <div class="rounded-lg border border-gray-300 mb-4" style="overflow-x:auto;">
@@ -348,7 +348,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                 <?php endif; ?>
                 <div class="flex flex-col sm:flex-row gap-3">
                     <button type="submit" class="inline-flex justify-center items-center px-6 py-2.5 text-sm font-bold rounded-xl shadow-md text-white bg-emerald-600 hover:bg-emerald-700 transition">
-                        <i class="fas fa-check mr-2"></i> Simpan ke RKK + Realisasi
+                        <i class="fas fa-check mr-2"></i> Simpan ke RKK
                     </button>
                     <a href="?page=rkk&aksi=import" class="inline-flex justify-center items-center px-5 py-2.5 border border-gray-300 text-sm font-bold rounded-xl text-gray-700 bg-white hover:bg-gray-50 transition">Ulangi</a>
                 </div>
