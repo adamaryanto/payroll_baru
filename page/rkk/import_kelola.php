@@ -71,10 +71,14 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                     $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : (((int)($mk['id_departmen'] ?? 0) > 0) ? (int)$mk['id_departmen'] : $def_dept);
                     if ((int)($r['sub_id'] ?? 0) <= 0) $r['sub_id'] = ((int)($mk['id_sub_department'] ?? 0) > 0) ? (int)$mk['id_sub_department'] : 0;
                     $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
+                    $dep = rx_valid_dept($koneksi, $dep);
+                    $sub = rx_valid_sub($koneksi, $sub, $dep);
                     if ((int)($r['upah'] ?? 0) <= 0) $r['upah'] = (int)($mk['upah'] ?? 0);
                 } else {
                     $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
                     $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
+                    $dep = rx_valid_dept($koneksi, $dep);
+                    $sub = rx_valid_sub($koneksi, $sub, $dep);
                     $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $jd, $r['upah'] ?? 0, $tgl_rkk, $dep, $sub);
                     if ($kid <= 0) { $c_skip++; continue; }
                     // Paksa dept/posisi master ikut pilihan preview

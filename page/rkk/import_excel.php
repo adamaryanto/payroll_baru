@@ -78,6 +78,8 @@ if ($step === 'commit') {
                         $vg = ($id_grup === null) ? "NULL" : "'$id_grup'";
                         $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
                         $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
+                        $dep = rx_valid_dept($koneksi, $dep);
+                        $sub = rx_valid_sub($koneksi, $sub, $dep);
                         $jd = rx_commit_shift($koneksi, $r, $c_shift);
                         $kid = (int)($r['karyawan_id'] ?? 0);
                         if ($kid <= 0 && !empty($r['nama'])) {

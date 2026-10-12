@@ -520,6 +520,35 @@ function rx_commit_sub($koneksi, $r, $dep, $def_sub) {
 }
 }
 
+if (!function_exists('rx_valid_dept')) {
+// Pastikan id department ada di master (tahan FK ketat). Kalau tidak,
+// pakai id pertama; kalau tabel kosong, buatkan "UMUM". Return id atau 0.
+function rx_valid_dept($koneksi, $id) {
+    $id = (int)$id;
+    if ($id > 0) {
+        $q = $koneksi->query("SELECT id_departmen FROM ms_departmen WHERE id_departmen='$id' LIMIT 1");
+        if ($q && $q->num_rows > 0) return $id;
+    }
+    $q = $koneksi->query("SELECT MIN(id_departmen) AS m FROM ms_departmen");
+    if ($q && ($r = $q->fetch_assoc()) && (int)($r['m'] ?? 0) > 0) return (int)$r['m'];
+    return rx_ensure_dept($koneksi, 'UMUM');
+}
+}
+
+if (!function_exists('rx_valid_sub')) {
+// Pastikan id posisi ada di master (tahan FK ketat). Sama pola dengan dept.
+function rx_valid_sub($koneksi, $id, $dep = 0) {
+    $id = (int)$id;
+    if ($id > 0) {
+        $q = $koneksi->query("SELECT id_sub_department FROM ms_sub_department WHERE id_sub_department='$id' LIMIT 1");
+        if ($q && $q->num_rows > 0) return $id;
+    }
+    $q = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
+    if ($q && ($r = $q->fetch_assoc()) && (int)($r['m'] ?? 0) > 0) return (int)$r['m'];
+    return rx_ensure_sub($koneksi, 'UMUM', $dep);
+}
+}
+
 if (!function_exists('rx_make_karyawan')) {
 // Buatkan karyawan baru dari data baris Excel. Return id_karyawan atau 0.
 function rx_make_karyawan($koneksi, $nama, $osdhk, $golongan, $posisi, $shift_id, $upah, $tgl_aktif, $def_dept, $def_sub) {
