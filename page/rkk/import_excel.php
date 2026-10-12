@@ -101,11 +101,13 @@ if ($step === 'commit') {
                         $alert = ["icon" => "error", "title" => "Import Gagal", "text" => $tx_fail . " Semua dibatalkan, tidak ada data setengah jadi. Coba lagi."];
                     } else {
                         $koneksi->commit();
+                        // Boneless auto-isi halaman Boneless (bukan kelola), setelah RKK tersimpan
+                        $bon_msg = rx_save_boneless($koneksi, $tgl, $id_rkk, $imp['boneless'] ?? null, $imp['title'] ?? '');
                     unset($_SESSION['rx_import']);
                     $alert = ["icon" => "success", "title" => "Import Selesai",
-                        "text" => "RKK#$id_rkk ($tgl): $c_kar karyawan" . ($c_new > 0 ? " ($c_new karyawan baru)" : "") . ($c_grup > 0 ? ", $c_grup grup baru" : "") . ($c_shift > 0 ? ", $c_shift shift baru" : "") . "."]; 
-                    $redirect = "?page=rkk";
-                }
+                        "text" => "RKK#$id_rkk ($tgl): $c_kar karyawan" . ($c_new > 0 ? " ($c_new karyawan baru)" : "") . ($c_grup > 0 ? ", $c_grup grup baru" : "") . ($c_shift > 0 ? ", $c_shift shift baru" : "") . $bon_msg . "."];
+                        $redirect = "?page=rkk";
+                    }
                 }
             }
         }
@@ -123,17 +125,27 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
             : ["icon" => "error", "title" => "Gagal Baca", "text" => "File tidak bisa dibaca (harus .xlsx atau .xls hasil export aplikasi). Tutup dulu file Excel-nya bila sedang dibuka. Info file: " . rx_diag_file($_FILES['fexcel']['tmp_name'], $_FILES['fexcel']['name'] ?? '')];
     } else {
         $plan = ['rows' => [], 'skipped' => []]; $real = ['rows' => [], 'skipped' => []]; $title = '';
+        $raw_plan = null; $raw_satuan = null;
         foreach ($sheets as $sname => $rows) {
             $up = strtoupper($sname);
-            if (strpos($up, 'RENCANA') !== false || strpos($up, 'PERENCANA') !== false) $plan = rk_extract_kelola($rows, $koneksi);
+            if (strpos($up, 'RENCANA') !== false || strpos($up, 'PERENCANA') !== false) { $plan = rk_extract_kelola($rows, $koneksi); $raw_plan = $rows; }
             elseif (strpos($up, 'REALISASI') !== false || strpos($up, 'REAL') !== false) $real = rk_extract_kelola($rows, $koneksi);
+            if (stripos($sname, 'BONL') !== false || stripos($sname, 'BONEL') !== false) $raw_satuan = $rows;
             if ($title === '' && isset($rows[1][1])) $title = trim((string)$rows[1][1]);
         }
         if (empty($plan['rows']) && empty($real['rows'])) {
-            $vals = array_values($sheets);
-            if (isset($vals[0])) $plan = rk_extract_kelola($vals[0], $koneksi);
-            if (isset($vals[1])) $real = rk_extract_kelola($vals[1], $koneksi);
+            $fb = [];
+            foreach ($sheets as $sn => $rw) if (stripos($sn, 'BONL') === false && stripos($sn, 'BONEL') === false) $fb[] = $rw;
+            if (isset($fb[0])) { $plan = rk_extract_kelola($fb[0], $koneksi); $raw_plan = $fb[0]; }
+            if (isset($fb[1])) $real = rk_extract_kelola($fb[1], $koneksi);
         }
+        if ($raw_plan === null) {
+            $vals0 = array_values($sheets);
+            if (isset($vals0[0])) $raw_plan = $vals0[0];
+        }
+        // Boneless: footer sheet rencana + sheet satuan (tidak masuk kelola)
+        $bon = rk_extract_boneless($raw_plan);
+        $bon['satuan'] = ($raw_satuan !== null) ? rk_extract_satuan($raw_satuan) : [];
         $skipped_all = array_merge(
             array_map(function($s) { $s['sheet'] = 'PERENCANAAN'; return $s; }, $plan['skipped']),
             array_map(function($s) { $s['sheet'] = 'REALISASI'; return $s; }, $real['skipped'])
@@ -248,8 +260,8 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                 'upah_dibayar_excel' => $m['real'] ? (float)$m['real']['dibayar_excel'] : 0,
             ];
         }
-        $_SESSION['rx_import'] = ['date' => $date, 'title' => $title, 'rows' => $rows, 'skipped' => $skipped_all];
-        $preview = ['fname' => $_FILES['fexcel']['name'], 'title' => $title, 'date' => $date, 'rows' => $rows, 'skipped' => $skipped_all];
+        $_SESSION['rx_import'] = ['date' => $date, 'title' => $title, 'rows' => $rows, 'skipped' => $skipped_all, 'boneless' => $bon];
+        $preview = ['fname' => $_FILES['fexcel']['name'], 'title' => $title, 'date' => $date, 'rows' => $rows, 'skipped' => $skipped_all, 'boneless' => $bon];
     }
 }
 $list_jadwal_prev = $koneksi->query("SELECT * FROM tb_jadwal ORDER BY id_jadwal ASC");
@@ -282,6 +294,15 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                 <strong>Tanggal terdeteksi:</strong> <?= htmlspecialchars($preview['date'] ?: '(tidak terbaca dari judul — isi manual di bawah)'); ?> |
                 <strong><?= count($preview['rows']); ?></strong> baris karyawan
             </div>
+            <?php $bon_prev = $preview['boneless'] ?? null; ?>
+            <?php if ($bon_prev && ((int)($bon_prev['mobil'] ?? 0) > 0 || !empty($bon_prev['items']) || !empty($bon_prev['satuan']))): ?>
+            <div class="mb-4 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm">
+                <strong>Boneless terdeteksi:</strong> <?= (int)$bon_prev['mobil']; ?> mobil
+                • <?= count($bon_prev['items']); ?> item
+                • <?= count($bon_prev['satuan']); ?> karyawan satuan
+                — otomatis tersimpan ke halaman Boneless (tidak masuk kelola).
+            </div>
+            <?php endif; ?>
             <form method="POST">
                 <input type="hidden" name="rx_step" value="commit">
                 <div class="mb-4 max-w-xs">
@@ -409,7 +430,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
             </form>
             <div class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 leading-relaxed">
                 <strong>Cara kerja:</strong> tanggal diambil dari judul baris 1 (bisa dikoreksi di preview). Section di Excel = grup — kalau belum ada di master, otomatis dibuatkan.
-                Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada). Shift yang belum ada di master otomatis dibuatkan (12 jam). Department &amp; Posisi ikut master/tebakan Excel dan bisa diubah per baris — pilihan Posisi otomatis ikut Department. Posisi yang belum ada di master otomatis dibuatkan saat simpan.
+                Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada). Shift yang belum ada di master otomatis dibuatkan (12 jam). Department &amp; Posisi ikut master/tebakan Excel dan bisa diubah per baris — pilihan Posisi otomatis ikut Department. Posisi yang belum ada di master otomatis dibuatkan saat simpan. Rekap boneless di bawah + sheet BONLESS otomatis masuk halaman Boneless (tidak masuk kelola).
                 Nama yang tidak cocok otomatis dibuatkan karyawan baru (No. Absen = MAX+1). Baris kotor tetap diproses tapi tidak dicentang — cek manual.
             </div>
             <?php endif; ?>

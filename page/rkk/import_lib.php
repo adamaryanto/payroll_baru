@@ -321,6 +321,139 @@ function rx_commit_shift($koneksi, $r, &$c_new = null) {
 }
 }
 
+if (!function_exists('rk_extract_boneless')) {
+// Ambil rekap boneless dari footer sheet mentah (di bawah baris karyawan).
+// Kolom acuan: 7 nama | 8 qty | 9 harga (sama di layout contoh & export aplikasi).
+// Return ['mobil' => int, 'items' => [['nama','qty','harga','jenis']], 'total_excel' => float].
+function rk_extract_boneless($rows) {
+    $out = ['mobil' => 0, 'items' => [], 'total_excel' => 0];
+    if (!is_array($rows) || empty($rows)) return $out;
+    $in_items = false;
+    foreach ($rows as $rn => $cols) {
+        $get = function($n) use ($cols) { return trim((string)($cols[$n] ?? '')); };
+        $txt = '';
+        for ($c = 1; $c <= 12; $c++) { $v = $get($c); if ($v !== '') $txt .= ' ' . $v; }
+        $up = strtoupper($txt);
+        if (preg_match('/BIAYA\s+(\d+)\s+MOBIL/i', $txt, $m)) $out['mobil'] = (int)$m[1];
+        // Ejaan di file bervariasi: BONLESS (footer) / BONELESS (nama sheet)
+        if (strpos($up, 'BAYARAN TIM BONLE') !== false || strpos($up, 'BAYARAN TIM BONEL') !== false) { $in_items = true; continue; }
+        if (strpos($up, 'DENGAN MESIN BONLE') !== false || strpos($up, 'DENGAN MESIN BONEL') !== false) break;
+        if (!$in_items) continue;
+        if (preg_match('/\bTOTAL\b/', $up) && !preg_match('/[A-Z]{4,}/', str_replace('TOTAL', '', $up))) {
+            for ($c = 1; $c <= 12; $c++) { $v = $get($c); if (is_numeric(str_replace([',', ' '], '', $v))) { $out['total_excel'] = (float)str_replace(',', '', $v); break; } }
+            continue;
+        }
+        // Baris item: nama di col 7 (atau teks valid pertama col 3..10), qty col 8, harga col 9
+        $nama = '';
+        $c7 = $get(7);
+        if ($c7 !== '' && preg_match('/[A-Za-z]{3,}/', $c7) && !rx_is_junk($c7) && strtoupper($c7) !== 'PENGURANGAN') $nama = $c7;
+        if ($nama === '') {
+            for ($c = 3; $c <= 10; $c++) {
+                $v = $get($c);
+                if ($v === '' || strtoupper($v) === 'PENGURANGAN' || !preg_match('/[A-Za-z]{3,}/', $v) || rx_is_junk($v)) continue;
+                if (is_numeric(str_replace(['.', ',', ' '], '', $v))) continue;
+                $nama = $v; break;
+            }
+        }
+        if ($nama === '') continue;
+        $qv = $get(8);
+        $qty = (is_numeric(str_replace([',', ' '], '', $qv))) ? (float)str_replace(',', '', $qv) : 0;
+        if ($qty <= 0) continue;
+        $hv = $get(9);
+        $harga = (is_numeric(str_replace([',', ' '], '', $hv))) ? (float)str_replace(',', '', $hv) : 0;
+        $jenis = 'plus';
+        for ($c = 3; $c <= 8; $c++) if (strtoupper($get($c)) === 'PENGURANGAN') { $jenis = 'minus'; break; }
+        $out['items'][] = ['nama' => $nama, 'qty' => $qty, 'harga' => $harga, 'jenis' => $jenis];
+    }
+    return $out;
+}
+}
+
+if (!function_exists('rk_extract_satuan')) {
+// Ambil karyawan satuan dari sheet BONELESS BARU (No | Nama | Hasil | Upah).
+// Return [['nama','hasil','upah','harga']].
+function rk_extract_satuan($rows) {
+    $out = [];
+    if (!is_array($rows) || empty($rows)) return $out;
+    foreach ($rows as $rn => $cols) {
+        $get = function($n) use ($cols) { return trim((string)($cols[$n] ?? '')); };
+        $nm = $get(2);
+        if ($nm === '' || stripos($nm, 'NAMA') !== false) continue;
+        if (!preg_match('/[A-Za-z]{3,}/', $nm) || rx_is_junk($nm)) continue;
+        $h = is_numeric(str_replace([',', ' '], '', $get(3))) ? (float)str_replace(',', '', $get(3)) : 0;
+        $u = is_numeric(str_replace([',', ' '], '', $get(4))) ? (float)str_replace(',', '', $get(4)) : 0;
+        if ($h <= 0 && $u <= 0) continue;
+        $out[] = ['nama' => $nm, 'hasil' => $h, 'upah' => (int)round($u), 'harga' => $h > 0 ? (int)round($u / $h) : 0];
+    }
+    return $out;
+}
+}
+
+if (!function_exists('rk_ensure_satuan_table')) {
+// Pastikan tabel + kolom tb_boneless_satuan ada (salinan pola tambah.php).
+function rk_ensure_satuan_table($koneksi) {
+    $koneksi->query("CREATE TABLE IF NOT EXISTS tb_boneless_satuan (
+      id_satuan INT AUTO_INCREMENT PRIMARY KEY,
+      id_boneless INT NOT NULL,
+      nama VARCHAR(255) NOT NULL,
+      hasil DECIMAL(12,2) NOT NULL DEFAULT 0,
+      upah INT NOT NULL DEFAULT 0,
+      KEY idx_boneless (id_boneless)
+    ) ENGINE=InnoDB");
+    $a = $koneksi->query("SHOW COLUMNS FROM tb_boneless_satuan LIKE 'satuan'");
+    if ($a && $a->num_rows == 0) $koneksi->query("ALTER TABLE tb_boneless_satuan ADD COLUMN satuan VARCHAR(10) NOT NULL DEFAULT 'KG'");
+    $b = $koneksi->query("SHOW COLUMNS FROM tb_boneless_satuan LIKE 'harga'");
+    if ($b && $b->num_rows == 0) $koneksi->query("ALTER TABLE tb_boneless_satuan ADD COLUMN harga INT NOT NULL DEFAULT 0");
+}
+}
+
+if (!function_exists('rx_save_boneless')) {
+// Simpan hasil deteksi boneless ke halaman Boneless (BUKAN ke kelola/RKK detail).
+// Return pesan ringkas ('' bila dilewati: kosong / tgl sudah ada / tanggal invalid).
+function rx_save_boneless($koneksi, $tgl, $id_rkk, $bon, $title = '') {
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$tgl)) return '';
+    $mobil = (int)($bon['mobil'] ?? 0);
+    $items = $bon['items'] ?? [];
+    $satuan = $bon['satuan'] ?? [];
+    if ($mobil <= 0 && empty($items) && empty($satuan)) return '';
+    $cek = $koneksi->query("SELECT id_boneless FROM tb_boneless WHERE tgl='$tgl' LIMIT 1");
+    if ($cek && $cek->num_rows > 0) return ' (boneless tgl tsb sudah ada, dilewati)';
+    $id_bm = 'NULL';
+    $qb = $koneksi->query("SELECT id_biayamobil FROM tb_biayamobil LIMIT 1");
+    if ($qb && ($rb = $qb->fetch_assoc()) && (int)($rb['id_biayamobil'] ?? 0) > 0) $id_bm = "'" . (int)$rb['id_biayamobil'] . "'";
+    $id_rkk = (int)$id_rkk;
+    $ket = $koneksi->real_escape_string(trim('Auto import Excel ' . $title));
+    if (!$koneksi->query("INSERT INTO tb_boneless (id_rkk, id_biayamobil, tgl, jumlah_mobil, keterangan, tgl_updt) VALUES ('$id_rkk', $id_bm, '$tgl', '$mobil', '$ket', NOW())")) return ' (boneless gagal tersimpan)';
+    $id_bon = (int)$koneksi->insert_id;
+    $c_it = 0;
+    foreach ($items as $it) {
+        $nm = trim($it['nama'] ?? '');
+        $qty = (float)($it['qty'] ?? 0);
+        if ($nm === '' || $qty <= 0) continue;
+        $hrg = (float)($it['harga'] ?? 0);
+        $ttl = $qty * $hrg;
+        $jn = (($it['jenis'] ?? 'plus') === 'minus') ? 'minus' : 'plus';
+        $nm_esc = $koneksi->real_escape_string($nm);
+        if ($koneksi->query("INSERT INTO tb_boneless_detail (id_boneless, nama_item, qty, harga, total, jenis) VALUES ('$id_bon', '$nm_esc', '$qty', '$hrg', '$ttl', '$jn')")) $c_it++;
+    }
+    $c_sat = 0;
+    if (!empty($satuan)) {
+        rk_ensure_satuan_table($koneksi);
+        foreach ($satuan as $st) {
+            $nm = trim($st['nama'] ?? '');
+            if ($nm === '') continue;
+            $q = (float)($st['hasil'] ?? 0);
+            $u = (int)($st['upah'] ?? 0);
+            if ($q <= 0 && $u <= 0) continue;
+            $h = (int)($st['harga'] ?? 0);
+            $nm_esc = $koneksi->real_escape_string($nm);
+            if ($koneksi->query("INSERT INTO tb_boneless_satuan (id_boneless, nama, hasil, upah, satuan, harga) VALUES ('$id_bon', '$nm_esc', '$q', '$u', 'KG', '$h')")) $c_sat++;
+        }
+    }
+    return " + boneless ($mobil mobil, $c_it item" . ($c_sat > 0 ? ", $c_sat satuan" : "") . ")";
+}
+}
+
 if (!function_exists('rk_match_shift')) {
 // Cocokkan string jam (fraksi/"08:00") ke tb_jadwal.jam_masuk; fallback jadwal pertama
 function rk_match_shift($koneksi, $g_raw) {
