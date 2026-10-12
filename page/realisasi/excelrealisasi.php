@@ -4,7 +4,7 @@ include_once __DIR__ . '/../grup_borongan/_setup.php'; // pastikan ms_grup_boron
 
 $id = isset($_GET['id']) ? $_GET['id'] : '';
 
-$queryInfo = $koneksi->query("SELECT tgl_realisasi, status_realisasi, jam_kerja FROM tb_realisasi WHERE id_realisasi = '$id'");
+$queryInfo = $koneksi->query("SELECT tgl_realisasi, status_realisasi, jam_kerja, id_rkk FROM tb_realisasi WHERE id_realisasi = '$id'");
 $info = $queryInfo->fetch_assoc();
 $tanggal_raw = $info ? $info['tgl_realisasi'] : '';
 $status_realisasi = $info['status_realisasi'] ?? 0;
@@ -109,6 +109,27 @@ while ($r = $tampil->fetch_assoc()) {
     if (!isset($rows_per_grup[$key])) $rows_per_grup[$key] = [];
     $rows_per_grup[$key][] = $r;
 }
+
+// ===== KARYAWAN RENCANA TIDAK MASUK (rencana RKK vs tap mesin) =====
+// Cara tahu (mirip panel "tidak absen" di tarik-data): karyawan ada di rencana (RKK)
+// tapi tidak ada tap-nya di tb_record pada tanggal ini + belum ada di realisasi ini.
+$tidak_masuk = [];
+$id_rkk_link = (int)($info['id_rkk'] ?? 0);
+if ($tanggal_sql !== '' && $id_rkk_link > 0) {
+    $taps = [];
+    $qt = $koneksi->query("SELECT DISTINCT TRIM(userid) AS pin FROM tb_record WHERE tgl='$tanggal_sql' AND TRIM(userid)<>''");
+    while ($qt && ($rt = $qt->fetch_assoc())) $taps[trim((string)$rt['pin'])] = true;
+    // PIN yang sudah ada di realisasi ini (biar tidak dobel dengan tabel utama)
+    $sudah = [];
+    $qs = $koneksi->query("SELECT DISTINCT TRIM(K.no_absen) AS pin FROM tb_realisasi_detail RD JOIN ms_karyawan K ON K.id_karyawan=RD.id_karyawan WHERE RD.id_realisasi='$id' AND RD.id_karyawan<>0");
+    while ($qs && ($rs = $qs->fetch_assoc())) { $p = trim((string)$rs['pin']); if ($p !== '') $sudah[$p] = true; }
+    $qr = $koneksi->query("SELECT TRIM(K.no_absen) AS pin, K.nama_karyawan, O.OS_DHK AS oslbl, G.golongan AS gollbl, S.nama_sub_department AS posisi, J.jam_masuk AS sm FROM tb_rkk_detail RD JOIN ms_karyawan K ON K.id_karyawan=RD.id_karyawan LEFT JOIN ms_os_dhk O ON O.id_os_dhk=K.id_os_dhk LEFT JOIN ms_golongan G ON G.id_golongan=K.id_golongan LEFT JOIN ms_sub_department S ON S.id_sub_department=K.id_sub_department LEFT JOIN tb_jadwal J ON J.id_jadwal=RD.id_jadwal WHERE RD.id_rkk='$id_rkk_link' AND RD.id_karyawan<>0 ORDER BY K.nama_karyawan ASC");
+    while ($qr && ($rr = $qr->fetch_assoc())) {
+        $p = trim((string)($rr['pin'] ?? ''));
+        if ($p === '' || isset($taps[$p]) || isset($sudah[$p])) continue;
+        $tidak_masuk[] = $rr;
+    }
+}
 ?>
 <table border="1" style="border-collapse:collapse;">
 <?php
@@ -185,6 +206,39 @@ foreach ($rows_per_grup as $gt) {
         <td style="<?php echo $cWhite.$bd; ?>"></td><td style="<?php echo $cWhite.$bd; ?>"></td>
         <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo number_format($tot_dibayar, 0, ',', '.'); ?></td>
     </tr>
+<?php if (!empty($tidak_masuk)): $erow++; ?>
+    <tr><td colspan="<?php echo $total_cols; ?>" style="<?php echo $fBase.$th.$cRed.$bd; ?> font-size:18px;">KARYAWAN RENCANA TIDAK MASUK (TIDAK ADA TAP MESIN TGL <?php echo $tanggal; ?>)</td></tr>
+    <?php $erow++; ?>
+    <tr style="<?php echo $fBase.$th; ?>">
+        <?php
+        foreach (['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK'] as $h) echo "<th rowspan=\"2\" style=\"$fBase$th$cWhite$bd\">$h</th>";
+        echo "<th style=\"$fBase$th$cWhite$bd\">ISTIRAHAT</th>";
+        echo "<th rowspan=\"2\" style=\"$fBase$th$cWhite$bd\">JAM PULANG</th>";
+        foreach (['HASIL KERJA (kg)','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'] as $h) echo "<th rowspan=\"2\" style=\"$fBase$th$cHdrL$bd\">$h</th>";
+        ?>
+    </tr>
+    <?php $erow++; ?>
+    <tr><th style="<?php echo $fBase.$th.$cWhite.$bd; ?>">MASUK</th></tr>
+    <?php $ntm = 1; foreach ($tidak_masuk as $tm): $erow++; ?>
+    <tr style="<?php echo $fBase; ?>">
+        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $ntm++; ?></td>
+        <td style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo strtoupper($tm['nama_karyawan'] ?? '') . ' (TIDAK MASUK)'; ?></td>
+        <td style="<?php echo $cWhite.$bd; ?>"></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $tm['oslbl'] ?? ''; ?></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $tm['gollbl'] ?? ''; ?></td>
+        <td style="<?php echo $cWhite.$bd; ?>"><?php echo $tm['posisi'] ?? ''; ?></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?> font-weight:bold;"><?php echo $tm['sm'] ?? ''; ?></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?>"></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?>"></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?>"></td>
+        <td align="center" style="<?php echo $cWhite.$bd; ?>"></td>
+        <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;">0</td>
+        <td align="right" style="<?php echo $cWhite.$bd; ?>"></td>
+        <td align="right" style="<?php echo $cWhite.$bd; ?>"></td>
+        <td align="right" style="<?php echo $cWhite.$bd; ?> font-weight:bold;">0</td>
+    </tr>
+    <?php endforeach; ?>
+<?php endif; ?>
 <?php
 // Nilai paten footer (angka, bukan rumus) — seperti file contoh
 $val_pabrik = $tot_dibayar;
