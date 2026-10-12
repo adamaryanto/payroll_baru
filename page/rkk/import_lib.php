@@ -549,14 +549,40 @@ function rx_valid_sub($koneksi, $id, $dep = 0) {
 }
 }
 
+if (!function_exists('rx_ensure_osdhk')) {
+// Cari OS/DHK, buatkan bila belum ada (auto-generate). Return id atau 0.
+function rx_ensure_osdhk($koneksi, $name) {
+    $name = trim((string)$name);
+    if ($name === '') return 0;
+    $id = rx_lookup_id($koneksi, 'ms_os_dhk', 'OS_DHK', $name);
+    if ($id > 0) return $id;
+    $esc = $koneksi->real_escape_string($name);
+    if ($koneksi->query("INSERT INTO ms_os_dhk (OS_DHK) VALUES ('$esc')")) return (int)$koneksi->insert_id;
+    return 0;
+}
+}
+
+if (!function_exists('rx_ensure_golongan')) {
+// Cari Golongan, buatkan bila belum ada (auto-generate). Return id atau 0.
+function rx_ensure_golongan($koneksi, $name) {
+    $name = trim((string)$name);
+    if ($name === '') return 0;
+    $id = rx_lookup_id($koneksi, 'ms_golongan', 'golongan', $name);
+    if ($id > 0) return $id;
+    $esc = $koneksi->real_escape_string($name);
+    if ($koneksi->query("INSERT INTO ms_golongan (golongan) VALUES ('$esc')")) return (int)$koneksi->insert_id;
+    return 0;
+}
+}
+
 if (!function_exists('rx_make_karyawan')) {
 // Buatkan karyawan baru dari data baris Excel. Return id_karyawan atau 0.
 function rx_make_karyawan($koneksi, $nama, $osdhk, $golongan, $posisi, $shift_id, $upah, $tgl_aktif, $def_dept, $def_sub) {
     $nm_esc = $koneksi->real_escape_string(trim($nama));
     if ($nm_esc === '') return 0;
     $no_absen = rx_next_no_absen($koneksi);
-    $os = rx_lookup_id($koneksi, 'ms_os_dhk', 'OS_DHK', $osdhk ?? '');
-    $gol = rx_lookup_id($koneksi, 'ms_golongan', 'golongan', $golongan ?? '');
+    $os = rx_ensure_osdhk($koneksi, $osdhk ?? '');
+    $gol = rx_ensure_golongan($koneksi, $golongan ?? '');
     $sub = (int)$def_sub;
     if (trim($posisi ?? '') !== '') {
         $sid = rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $posisi);

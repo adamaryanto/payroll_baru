@@ -166,9 +166,13 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'preview' && !empty($_FILES['fexcel
                         $posisi_baru = $pos_txt0; // belum ada di master -> dibuat otomatis saat simpan
                     }
                 }
+                $os_txt0 = trim($r['osdhk'] ?? ''); $gol_txt0 = trim($r['golongan'] ?? '');
+                $os_baru = (!$m && $os_txt0 !== '' && rx_lookup_id($koneksi, 'ms_os_dhk', 'OS_DHK', $os_txt0) <= 0) ? $os_txt0 : '';
+                $gol_baru = (!$m && $gol_txt0 !== '' && rx_lookup_id($koneksi, 'ms_golongan', 'golongan', $gol_txt0) <= 0) ? $gol_txt0 : '';
                 $rows[] = [
                     'nama' => $r['nama'], 'section' => $r['section'],
                     'osdhk' => $r['osdhk'], 'golongan' => $r['golongan'], 'posisi' => $r['posisi'],
+                    'osdhk_baru' => $os_baru, 'golongan_baru' => $gol_baru,
                     'dirty' => !empty($r['dirty']),
                     'kar_id' => $m ? (int)$m['id_karyawan'] : 0,
                     'kar_nama' => $m ? $m['nama_karyawan'] : '',
@@ -240,7 +244,10 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                             <tr class="border-t border-gray-200">
                                 <td class="py-2 px-3"><input type="checkbox" class="rk_sel" name="rk_sel[]" value="<?= $i; ?>" <?= ($r['dup'] || !empty($r['dirty'])) ? '' : 'checked'; ?> style="width:16px;height:16px;"></td>
                                 <td class="py-2 px-3 text-sm font-bold"><?= htmlspecialchars($r['nama']); ?>
-                                    <div class="text-[11px] font-normal text-gray-400"><?= htmlspecialchars(trim(($r['osdhk'] . ' / ' . $r['golongan'] . ' / ' . $r['posisi']), ' /')); ?></div>
+                                    <div class="text-[11px] font-normal text-gray-400"><?= htmlspecialchars(trim(($r['osdhk'] . ' / ' . $r['golongan'] . ' / ' . $r['posisi']), ' /')); ?>
+                                        <?php if (!empty($r['osdhk_baru'])): ?><span class="font-bold text-purple-700">OS baru</span><?php endif; ?>
+                                        <?php if (!empty($r['golongan_baru'])): ?><span class="font-bold text-purple-700">Gol baru</span><?php endif; ?>
+                                    </div>
                                 </td>
                                 <td class="py-2 px-3 text-sm">
                                     <?= $r['section'] !== '' ? htmlspecialchars($r['section']) : '<span class="text-gray-400 italic">Tanpa Grup</span>'; ?>

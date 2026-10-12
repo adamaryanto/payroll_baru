@@ -214,6 +214,9 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
             }
             $excel_pot = $m['real'] ? (float)$m['real']['pot_excel'] : 0;
             $section = ($m['plan'] ? $m['plan']['section'] : '') ?: ($m['real'] ? $m['real']['section'] : '');
+            $os_txt0 = trim($base['osdhk'] ?? ''); $gol_txt0 = trim($base['golongan'] ?? '');
+            $os_baru = (!$match && $os_txt0 !== '' && rx_lookup_id($koneksi, 'ms_os_dhk', 'OS_DHK', $os_txt0) <= 0) ? $os_txt0 : '';
+            $gol_baru = (!$match && $gol_txt0 !== '' && rx_lookup_id($koneksi, 'ms_golongan', 'golongan', $gol_txt0) <= 0) ? $gol_txt0 : '';
             $rows[] = [
                 'nama' => $nama, 'section' => $section,
                 'dirty' => !empty($base['dirty']),
@@ -229,6 +232,8 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                 'golongan' => $base['golongan'] ?? '',
                 'posisi' => $base['posisi'] ?? '',
                 'posisi_baru' => $posisi_baru,
+                'osdhk_baru' => $os_baru,
+                'golongan_baru' => $gol_baru,
                 'dept_id' => $dep_id,
                 'sub_id' => $sub_id,
                 'in_plan' => !empty($m['plan']),
@@ -305,7 +310,10 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                 <td class="py-2 px-3 text-sm text-gray-500"><?= $idx + 1; ?></td>
                                 <td class="py-2 px-3 text-sm font-bold"><?= htmlspecialchars($r['nama']); ?>
                                     <?php if ($r['karyawan_id'] > 0): ?><div class="text-[11px] font-normal text-gray-400"><?= htmlspecialchars($r['karyawan_nama']); ?></div><?php endif; ?>
-                                    <div class="text-[11px] font-normal text-gray-400"><?= htmlspecialchars(trim(($r['osdhk'] . ' / ' . $r['golongan'] . ' / ' . $r['posisi']), ' /')); ?></div>
+                                    <div class="text-[11px] font-normal text-gray-400"><?= htmlspecialchars(trim(($r['osdhk'] . ' / ' . $r['golongan'] . ' / ' . $r['posisi']), ' /')); ?>
+                                        <?php if (!empty($r['osdhk_baru'])): ?><span class="font-bold text-purple-700">OS baru</span><?php endif; ?>
+                                        <?php if (!empty($r['golongan_baru'])): ?><span class="font-bold text-purple-700">Gol baru</span><?php endif; ?>
+                                    </div>
                                 </td>
                                 <td class="py-2 px-3 text-sm">
                                     <?= $r['section'] !== '' ? htmlspecialchars($r['section']) : '<span class="text-gray-400 italic">Tanpa Grup</span>'; ?>
