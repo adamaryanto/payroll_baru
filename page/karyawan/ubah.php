@@ -206,16 +206,9 @@ if (isset($_POST['update'])) {
                 if ($rk_same) {
                     $roster_info = "<br><small>Roster " . htmlspecialchars($trenc_date) . " sudah sama.</small>";
                 } else {
-                $rd_dept = $tdepartmen > 0 ? $tdepartmen : 0;
-                $rd_sub = $tsubdept > 0 ? $tsubdept : 0;
-                if ($rd_dept <= 0) {
-                    $qd = $koneksi->query("SELECT MIN(id_departmen) AS m FROM ms_departmen");
-                    if ($qd && ($dr = $qd->fetch_assoc()) && $dr['m']) $rd_dept = (int)$dr['m'];
-                }
-                if ($rd_sub <= 0) {
-                    $qs = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
-                    if ($qs && ($sr = $qs->fetch_assoc()) && $sr['m']) $rd_sub = (int)$sr['m'];
-                }
+                require_once __DIR__ . '/../rkk/import_lib.php';
+                $rd_dept = rx_valid_dept($koneksi, $tdepartmen ?? 0);
+                $rd_sub = rx_valid_sub($koneksi, $tsubdept ?? 0, $rd_dept);
                 $qc2 = $koneksi->query("SELECT id_rkk_detail FROM tb_rkk_detail WHERE id_rkk='$id_rkk' AND id_karyawan='$tid_int' LIMIT 1");
                 if ($qc2 && $qc2->num_rows > 0) {
                     $cr2 = $qc2->fetch_assoc();

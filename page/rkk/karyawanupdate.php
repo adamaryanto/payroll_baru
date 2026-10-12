@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/import_lib.php'; // rx_valid_dept/sub (tahan FK ketat)
 if (isset($_GET['id'])) {
     $idrkkdetail = $_GET['id'];
     $tampildetail = $koneksi->query("select * from tb_rkk_detail where id_rkk_detail = '$idrkkdetail' ");
@@ -595,8 +596,8 @@ if (isset($_POST['simpan'])) {
         $q_karyawan = $koneksi->query("SELECT id_departmen, id_sub_department FROM ms_karyawan WHERE id_karyawan = '$idkaryawan_pengganti'");
         $data_k = $q_karyawan->fetch_assoc();
 
-        $iddept_pengganti = $data_k['id_departmen'];
-        $idsub_pengganti  = $data_k['id_sub_department'];
+        $iddept_pengganti = rx_valid_dept($koneksi, $data_k['id_departmen'] ?? 0);
+        $idsub_pengganti  = rx_valid_sub($koneksi, $data_k['id_sub_department'] ?? 0, $iddept_pengganti);
 
         // 1. Masukkan karyawan pengganti ke tb_rkk_detail
         $q_insert = "INSERT INTO tb_rkk_detail 

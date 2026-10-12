@@ -36,19 +36,16 @@ if (isset($_POST['simpan_karyawan'])) {
     $nama_manual = !empty($_POST['nama_karyawan_manual']) ? $koneksi->real_escape_string($_POST['nama_karyawan_manual']) : NULL;
     $idkaryawan  = !empty($_POST['id_karyawan']) ? $_POST['id_karyawan'] : 0;
 
-    // HANDLE TAG DEPT
+    // HANDLE TAG (auto-create bila baru, tahan beda schema) + amankan FK
+    require_once __DIR__ . '/import_lib.php';
     if (!empty($id_dept) && !is_numeric($id_dept)) {
-        $name_dept = $koneksi->real_escape_string($id_dept);
-        $koneksi->query("INSERT INTO ms_departmen (nama_departmen) VALUES ('$name_dept')");
-        $id_dept = $koneksi->insert_id;
+        $id_dept = rx_ensure_dept($koneksi, $id_dept);
     }
-
-    // HANDLE TAG SUB
     if (!empty($id_sub) && !is_numeric($id_sub)) {
-        $name_sub = $koneksi->real_escape_string($id_sub);
-        $koneksi->query("INSERT INTO ms_sub_department (nama_sub_department, id_departmen) VALUES ('$name_sub', '$id_dept')");
-        $id_sub = $koneksi->insert_id;
+        $id_sub = rx_ensure_sub($koneksi, $id_sub, (int)($id_dept ?? 0));
     }
+    $id_dept = rx_valid_dept($koneksi, $id_dept ?? 0);
+    $id_sub = rx_valid_sub($koneksi, $id_sub ?? 0, $id_dept);
 
     // VALIDASI
     if (($idkaryawan != 0 || $nama_manual != NULL) && !empty($id_jadwal) && $id_rkk_fix > 0) {

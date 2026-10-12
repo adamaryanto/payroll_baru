@@ -250,6 +250,9 @@ if ($step === 'commit') {
         if ($qd && ($rd = $qd->fetch_assoc()) && $rd['m']) $def_dept = (int)$rd['m'];
         $qs = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
         if ($qs && ($rs = $qs->fetch_assoc()) && $rs['m']) $def_sub = (int)$rs['m'];
+        require_once __DIR__ . '/../rkk/import_lib.php';
+        $def_dept = rx_valid_dept($koneksi, $def_dept);
+        $def_sub = rx_valid_sub($koneksi, $def_sub, $def_dept);
         $ok = 0; $fail = 0; $c_new = 0; $same = 0; $m_upd = 0; $msgs = [];
         if (getenv('KJ_DEBUG')) { echo '<!--DBG'; echo ' sel=' . htmlspecialchars(json_encode($sel)); echo ' nrows=' . count($imp['rows']); echo ' -->'; }
         foreach ($imp['rows'] as $i => $r) {

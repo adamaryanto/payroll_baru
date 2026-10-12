@@ -19,19 +19,16 @@ if (isset($_GET['id'])) {
         $data_rkk = $cek_rkk->fetch_assoc();
         
         if ($data_rkk['status_rkk'] < 2) {
-            // Handle Tags (New Entries)
+            // Handle Tags (auto-create bila baru, tahan beda schema) + amankan FK
+            require_once __DIR__ . '/import_lib.php';
             if (!empty($tdepartmen) && !is_numeric($tdepartmen)) {
-                $name_dept = $koneksi->real_escape_string($tdepartmen);
-                $koneksi->query("INSERT INTO ms_departmen (nama_departmen) VALUES ('$name_dept')");
-                $tdepartmen = $koneksi->insert_id;
+                $tdepartmen = rx_ensure_dept($koneksi, $tdepartmen);
             }
             if (!empty($tsubdepartment) && !is_numeric($tsubdepartment)) {
-                $name_sub = $koneksi->real_escape_string($tsubdepartment);
-                // Link to dept if available
-                $dept_id_val = is_numeric($tdepartmen) ? $tdepartmen : 0;
-                $koneksi->query("INSERT INTO ms_sub_department (nama_sub_department, id_departmen) VALUES ('$name_sub', '$dept_id_val')");
-                $tsubdepartment = $koneksi->insert_id;
+                $tsubdepartment = rx_ensure_sub($koneksi, $tsubdepartment, (int)($tdepartmen ?? 0));
             }
+            $tdepartmen = rx_valid_dept($koneksi, $tdepartmen ?? 0);
+            $tsubdepartment = rx_valid_sub($koneksi, $tsubdepartment ?? 0, $tdepartmen);
 
             $tampil_j = $koneksi->query("SELECT * from tb_jadwal WHERE id_jadwal = '$tshift' ");
             $data_j = $tampil_j->fetch_assoc();
