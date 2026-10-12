@@ -3,6 +3,48 @@
 // Isi: baca .xlsx (ZipArchive), baca .xls HTML hasil export, normalisasi,
 // cocok grup/karyawan/shift, auto-generate grup & karyawan.
 
+if (!function_exists('rx_ensure_schema')) {
+// Self-heal schema sekali per request: tambahkan kolom/tabel yang kurang
+// (tanpa mengubah data). Dipanggil di halaman import sebelum dipakai.
+function rx_ensure_schema($koneksi) {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $has = function($table, $col) use ($koneksi) {
+        $q = rx_q($koneksi, "SHOW COLUMNS FROM $table LIKE '$col'");
+        return ($q && $q->num_rows > 0);
+    };
+    if (!$has('ms_sub_department', 'id_departmen')) {
+        rx_q($koneksi, "ALTER TABLE ms_sub_department ADD COLUMN id_departmen INT NOT NULL DEFAULT 0");
+        // Isi tautan dept yang masih kosong dari pemakaian terbanyak
+        // (detail RKK + master karyawan) per posisi
+        $cnt = [];
+        $q1 = rx_q($koneksi, "SELECT id_sub_department s, id_departmen d, COUNT(*) c FROM tb_rkk_detail WHERE id_sub_department>0 AND id_departmen>0 GROUP BY id_sub_department, id_departmen");
+        while ($q1 && ($r = $q1->fetch_assoc())) {
+            $s = (int)$r['s']; $d = (int)$r['d'];
+            $cnt[$s][$d] = ($cnt[$s][$d] ?? 0) + (int)$r['c'];
+        }
+        $q2 = rx_q($koneksi, "SELECT id_sub_department s, id_departmen d, COUNT(*) c FROM ms_karyawan WHERE id_sub_department>0 AND id_departmen>0 GROUP BY id_sub_department, id_departmen");
+        while ($q2 && ($r = $q2->fetch_assoc())) {
+            $s = (int)$r['s']; $d = (int)$r['d'];
+            $cnt[$s][$d] = ($cnt[$s][$d] ?? 0) + (int)$r['c'];
+        }
+        foreach ($cnt as $s => $depts) {
+            arsort($depts);
+            $d = (int)key($depts);
+            if ($d > 0) rx_q($koneksi, "UPDATE ms_sub_department SET id_departmen='$d' WHERE id_sub_department='$s' AND id_departmen=0");
+        }
+    }
+    if (!$has('ms_sub_department', 'id_perusahaan')) {
+        rx_q($koneksi, "ALTER TABLE ms_sub_department ADD COLUMN id_perusahaan INT NOT NULL DEFAULT 0");
+    }
+    if (!$has('ms_departmen', 'id_perusahaan')) {
+        rx_q($koneksi, "ALTER TABLE ms_departmen ADD COLUMN id_perusahaan INT NOT NULL DEFAULT 0");
+    }
+    rx_q($koneksi, "CREATE TABLE IF NOT EXISTS tb_biayamobil (id_biayamobil INT AUTO_INCREMENT PRIMARY KEY, biaya_mobil INT NOT NULL)");
+}
+}
+
 if (!function_exists('rx_q')) {
 // Query aman: gagal (kolom/tabel tak ada, mysqli strict-mode) -> false, bukan fatal.
 // Semua helper di file ini memakainya agar tahan beda schema/versi PHP.

@@ -8,6 +8,7 @@ require_once __DIR__ . '/import_lib.php';
 
 // Pastikan relasi grup tersedia
 include_once __DIR__ . '/../grup_borongan/_setup.php';
+rx_ensure_schema($koneksi); // tambah otomatis kolom/tabel master yang kurang
 
 $idrkk = isset($_REQUEST['id']) ? intval($_REQUEST['id']) : 0;
 $alert = null;

@@ -8,6 +8,7 @@
 
 require_once __DIR__ . '/import_lib.php';
 include_once __DIR__ . '/../grup_borongan/_setup.php';
+rx_ensure_schema($koneksi); // tambah otomatis kolom/tabel master yang kurang
 
 $alert = null;
 $redirect = null;
