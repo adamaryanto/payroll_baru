@@ -4,6 +4,11 @@
 include "../../koneksi.php";
 include_once __DIR__ . '/../grup_borongan/_setup.php'; // pastikan ms_grup_borongan + tb_realisasi_detail.id_grup ada
 require_once __DIR__ . '/xlsx_mini.php';
+// Self-heal kolom pengganti (dipakai query di bawah)
+$ckG = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_pengganti'");
+if ($ckG && $ckG->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_pengganti INT NULL DEFAULT NULL");
+}
 
 $id = isset($_GET['id']) ? $_GET['id'] : '';
 
