@@ -280,8 +280,8 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Grup</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Status</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Shift</th>
-                                <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Department</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Posisi</th>
+                                <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Department</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase text-right">Upah</th>
                             </tr>
                         </thead>
@@ -315,13 +315,6 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                     </select>
                                 </td>
                                 <td class="py-2 px-3">
-                                    <select name="dp_<?= $idx; ?>" class="rx_dept px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
-                                        <?php foreach ($dept_opts as $do): ?>
-                                            <option value="<?= $do['id_departmen']; ?>" <?= ((int)$do['id_departmen'] === (int)($r['dept_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($do['nama_departmen']); ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </td>
-                                <td class="py-2 px-3">
                                     <select name="ps_<?= $idx; ?>" class="rx_pos px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
                                         <?php foreach ($sub_opts as $so): ?>
                                             <option value="<?= $so['id_sub_department']; ?>" data-dept="<?= (int)($so['id_departmen'] ?? 0); ?>" <?= (empty($r['posisi_baru']) && (int)$so['id_sub_department'] === (int)($r['sub_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($so['nama_sub_department']); ?></option>
@@ -329,6 +322,13 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                         <?php if (!empty($r['posisi_baru'])): ?><option value="<?= htmlspecialchars($r['posisi_baru']); ?>" selected><?= htmlspecialchars($r['posisi_baru']); ?> (baru)</option><?php endif; ?>
                                     </select>
                                     <?php if (!empty($r['posisi_baru'])): ?><div class="text-[11px] font-bold text-purple-700 mt-1">“<?= htmlspecialchars($r['posisi_baru']); ?>” baru → otomatis dibuat</div><?php endif; ?>
+                                </td>
+                                <td class="py-2 px-3">
+                                    <select name="dp_<?= $idx; ?>" class="rx_dept px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                                        <?php foreach ($dept_opts as $do): ?>
+                                            <option value="<?= $do['id_departmen']; ?>" <?= ((int)$do['id_departmen'] === (int)($r['dept_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($do['nama_departmen']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
                                 </td>
                                 <td class="py-2 px-3"><input type="number" name="up_<?= $idx; ?>" value="<?= (int)$r['upah']; ?>" min="0" class="w-28 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-right"></td>
                             </tr>
