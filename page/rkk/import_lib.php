@@ -377,6 +377,46 @@ function rx_valid_time($t) {
 }
 }
 
+if (!function_exists('rx_ensure_dept')) {
+// Cari department, buatkan bila belum ada (auto-generate). Return id_departmen atau 0.
+function rx_ensure_dept($koneksi, $name) {
+    $name = trim((string)$name);
+    if ($name === '') return 0;
+    $id = rx_lookup_id($koneksi, 'ms_departmen', 'nama_departmen', $name);
+    if ($id > 0) return $id;
+    $esc = $koneksi->real_escape_string($name);
+    $cols = [];
+    $q = $koneksi->query("SHOW COLUMNS FROM ms_departmen");
+    while ($q && ($c = $q->fetch_assoc())) $cols[] = $c['Field'];
+    if (in_array('id_perusahaan', $cols, true)) {
+        if ($koneksi->query("INSERT INTO ms_departmen (nama_departmen, id_perusahaan) VALUES ('$esc', '1')")) return (int)$koneksi->insert_id;
+    } else {
+        if ($koneksi->query("INSERT INTO ms_departmen (nama_departmen) VALUES ('$esc')")) return (int)$koneksi->insert_id;
+    }
+    return 0;
+}
+}
+
+if (!function_exists('rx_ensure_sub')) {
+// Cari posisi (sub department), buatkan bila belum ada (auto-generate, nyambung ke dept). Return id atau 0.
+function rx_ensure_sub($koneksi, $name, $dept_id = 0) {
+    $name = trim((string)$name);
+    if ($name === '') return 0;
+    $id = rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $name);
+    if ($id > 0) return $id;
+    $esc = $koneksi->real_escape_string($name);
+    $dep = (int)$dept_id;
+    $cols = [];
+    $q = $koneksi->query("SHOW COLUMNS FROM ms_sub_department");
+    while ($q && ($c = $q->fetch_assoc())) $cols[] = $c['Field'];
+    $f = ['nama_sub_department']; $v = ["'$esc'"];
+    if (in_array('id_departmen', $cols, true)) { $f[] = 'id_departmen'; $v[] = "'$dep'"; }
+    if (in_array('id_perusahaan', $cols, true)) { $f[] = 'id_perusahaan'; $v[] = "'1'"; }
+    if ($koneksi->query("INSERT INTO ms_sub_department (" . implode(',', $f) . ") VALUES (" . implode(',', $v) . ")")) return (int)$koneksi->insert_id;
+    return 0;
+}
+}
+
 if (!function_exists('rx_make_karyawan')) {
 // Buatkan karyawan baru dari data baris Excel. Return id_karyawan atau 0.
 function rx_make_karyawan($koneksi, $nama, $osdhk, $golongan, $posisi, $shift_id, $upah, $tgl_aktif, $def_dept, $def_sub) {
