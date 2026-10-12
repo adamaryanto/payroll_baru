@@ -120,8 +120,9 @@ if (isset($_GET['id'])) {
         LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
         LEFT JOIN ms_grup_borongan_anggota GA ON GA.id_grup = A.id_grup AND GA.id_karyawan = A.id_karyawan AND A.id_karyawan <> 0
         LEFT JOIN ms_grup_borongan_anggota GA_PG ON GA_PG.id_karyawan = A.id_pengganti AND A.id_pengganti <> 0
+        LEFT JOIN (SELECT id_grup, MIN(id_realisasi_detail) AS g_ord FROM tb_realisasi_detail WHERE id_realisasi = '$idrealisasi' AND id_grup IS NOT NULL GROUP BY id_grup) GO ON GO.id_grup = A.id_grup
         WHERE A.id_realisasi = '$idrealisasi'
-        ORDER BY (GB.nama_grup IS NULL), GB.nama_grup ASC, nama_tampil ASC
+        ORDER BY (GB.nama_grup IS NULL), GO.g_ord ASC, A.id_realisasi_detail ASC
     ");
 
     $tampilrkk = $koneksi->query("SELECT * FROM tb_rkk WHERE id_rkk = '$idrkk'");

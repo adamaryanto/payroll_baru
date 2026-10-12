@@ -1,0 +1,210 @@
+<?php
+// Writer .xlsx minimal multi-sheet tanpa dependensi (butuh ext ZipArchive).
+// Mendukung: teks/angka, bold/ukuran/warna font, fill, border tipis, align,
+// merge, lebar kolom, format angka Indonesia (#.##0 / #.##0,00 / Rp...).
+
+class MiniXlsx {
+    private $sheets = [];
+    private $xfs = [];
+    private $xfmap = [];
+
+    // $o: b(bool) sz(int) color(hex tanpa #) fill(hex tanpa #) border(bool)
+    //     align(left|center|right) wrap(bool) num(null|int|dec2|rp|rp2)
+    public function style($o = []) {
+        $b = !empty($o['b']);
+        $sz = isset($o['sz']) ? (int)$o['sz'] : 11;
+        $color = isset($o['color']) ? strtoupper($o['color']) : '000000';
+        $fill = isset($o['fill']) ? strtoupper($o['fill']) : '';
+        $border = !empty($o['border']);
+        $align = $o['align'] ?? '';
+        $wrap = !empty($o['wrap']);
+        $num = $o['num'] ?? null;
+        $sig = json_encode([$b, $sz, $color, $fill, $border, $align, $wrap, $num]);
+        if (isset($this->xfmap[$sig])) return $this->xfmap[$sig];
+        $idx = count($this->xfs);
+        $this->xfs[] = [$b, $sz, $color, $fill, $border, $align, $wrap, $num];
+        $this->xfmap[$sig] = $idx;
+        return $idx;
+    }
+
+    public function sheet($name) {
+        $this->sheets[] = ['name' => $name, 'rows' => [], 'merge' => [], 'widths' => [], 'maxcol' => 0];
+        return count($this->sheets) - 1;
+    }
+
+    // $v string|number|null, $s style idx. Angka otomatis jadi tipe n.
+    public function cell($sh, $r, $c, $v, $s = 0) {
+        if ($v === null) $v = '';
+        $t = (is_int($v) || is_float($v)) ? 'n' : 's';
+        $this->sheets[$sh]['rows'][(int)$r][(int)$c] = ['v' => $v, 't' => $t, 's' => (int)$s];
+        if ((int)$c > $this->sheets[$sh]['maxcol']) $this->sheets[$sh]['maxcol'] = (int)$c;
+    }
+
+    public function merge($sh, $r1, $c1, $r2, $c2) {
+        $this->sheets[$sh]['merge'][] = [$r1, $c1, $r2, $c2];
+    }
+
+    public function width($sh, $c, $px) {
+        $this->sheets[$sh]['widths'][(int)$c] = round(((float)$px) / 6, 2);
+    }
+
+    public static function col($c) {
+        $s = '';
+        while ($c > 0) { $m = ($c - 1) % 26; $s = chr(65 + $m) . $s; $c = (int)(($c - 1) / 26); }
+        return $s;
+    }
+
+    private static function esc($v) {
+        $v = (string)$v;
+        $v = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $v);
+        return htmlspecialchars($v, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+    }
+
+    private function numId($num) {
+        return $num === 'int' ? 164 : ($num === 'dec2' ? 165 : ($num === 'rp' ? 166 : ($num === 'rp2' ? 167 : 0)));
+    }
+
+    private function stylesXml() {
+        $fonts = '';
+        $fills = '<fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>';
+        $borders = '<border><left/><right/><top/><bottom/><diagonal/></border>';
+        $fxfs = '';
+        $fid = 0; $lid = 2; $bid = 1;
+        $fmap = []; $lmap = []; $bmap = [];
+        foreach ($this->xfs as $i => $x) {
+            list($b, $sz, $color, $fill, $border, $align, $wrap, $num) = $x;
+            $fsig = "$b|$sz|$color";
+            if (!isset($fmap[$fsig])) {
+                $fmap[$fsig] = $fid++;
+                $fonts .= '<font>' . ($b ? '<b/>' : '') . '<sz val="' . $sz . '"/><color rgb="FF' . $color . '"/><name val="Calibri"/></font>';
+            }
+            if ($fill !== '') {
+                if (!isset($lmap[$fill])) {
+                    $lmap[$fill] = $lid++;
+                    $fills .= '<fill><patternFill patternType="solid"><fgColor rgb="FF' . $fill . '"/><bgColor indexed="64"/></patternFill></fill>';
+                }
+            }
+            if ($border && !isset($bmap['t'])) {
+                $bmap['t'] = $bid++;
+                $borders .= '<border><left style="thin"><color rgb="FF000000"/></left><right style="thin"><color rgb="FF000000"/></right><top style="thin"><color rgb="FF000000"/></top><bottom style="thin"><color rgb="FF000000"/></bottom><diagonal/></border>';
+            }
+            $fi = $fmap[$fsig];
+            $li = ($fill !== '') ? $lmap[$fill] : 0;
+            $bi = $border ? $bmap['t'] : 0;
+            $al = '';
+            if ($align !== '' || $wrap) {
+                $al = '<alignment vertical="center"' . ($align !== '' ? ' horizontal="' . $align . '"' : '') . ($wrap ? ' wrapText="1"' : '') . '/>';
+            } else {
+                $al = '<alignment vertical="center"/>';
+            }
+            $fxfs .= '<xf numFmtId="' . $this->numId($num) . '" fontId="' . $fi . '" fillId="' . $li . '" borderId="' . $bi . '" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">' . $al . '</xf>';
+        }
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<numFmts count="4">'
+            . '<numFmt numFmtId="164" formatCode="#.##0"/>'
+            . '<numFmt numFmtId="165" formatCode="#.##0,00"/>'
+            . '<numFmt numFmtId="166" formatCode="&quot;Rp&quot;#.##0"/>'
+            . '<numFmt numFmtId="167" formatCode="&quot;Rp&quot;#.##0,00"/>'
+            . '</numFmts>'
+            . '<fonts count="' . $fid . '">' . $fonts . '</fonts>'
+            . '<fills count="' . $lid . '">' . $fills . '</fills>'
+            . '<borders count="' . $bid . '">' . $borders . '</borders>'
+            . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            . '<cellXfs count="' . count($this->xfs) . '">' . $fxfs . '</cellXfs>'
+            . '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+            . '</styleSheet>';
+    }
+
+    private function sheetXml($sh) {
+        $maxcol = max(1, $sh['maxcol']);
+        ksort($sh['rows']);
+        $maxrow = 1;
+        foreach ($sh['rows'] as $r => $_) if ($r > $maxrow) $maxrow = $r;
+        $x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<dimension ref="A1:' . self::col($maxcol) . $maxrow . '"/>'
+            . '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+            . '<sheetFormat defaultRowHeight="15"/>';
+        if (!empty($sh['widths'])) {
+            $x .= '<cols>';
+            ksort($sh['widths']);
+            foreach ($sh['widths'] as $c => $w) $x .= '<col min="' . $c . '" max="' . $c . '" width="' . $w . '" customWidth="1"/>';
+            $x .= '</cols>';
+        }
+        $x .= '<sheetData>';
+        foreach ($sh['rows'] as $r => $cols) {
+            $x .= '<row r="' . $r . '">';
+            ksort($cols);
+            foreach ($cols as $c => $cell) {
+                $ref = self::col($c) . $r;
+                if ($cell['t'] === 'n') {
+                    $x .= '<c r="' . $ref . '" s="' . $cell['s'] . '"><v>' . $cell['v'] . '</v></c>';
+                } else {
+                    $x .= '<c r="' . $ref . '" s="' . $cell['s'] . '" t="inlineStr"><is><t xml:space="preserve">' . self::esc($cell['v']) . '</t></is></c>';
+                }
+            }
+            $x .= '</row>';
+        }
+        $x .= '</sheetData>';
+        if (!empty($sh['merge'])) {
+            $x .= '<mergeCells count="' . count($sh['merge']) . '">';
+            foreach ($sh['merge'] as $m) $x .= '<mergeCell ref="' . self::col($m[1]) . $m[0] . ':' . self::col($m[3]) . $m[2] . '"/>';
+            $x .= '</mergeCells>';
+        }
+        $x .= '</worksheet>';
+        return $x;
+    }
+
+    public function send($filename) {
+        $this->style(); // pastikan xf default idx 0 ada
+        $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
+        $zip = new ZipArchive();
+        if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) { echo 'Gagal membuat Excel.'; return; }
+        $zip->addFromString('[Content_Types].xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            . '<Default Extension="rels" ContentType="application/vnd.openxml-package.relationships+xml"/>'
+            . '<Default Extension="xml" ContentType="application/xml"/>'
+            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>');
+        $rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            . '</Relationships>';
+        $zip->addFromString('_rels/.rels', $rels);
+        $wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>';
+        $wbr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        foreach ($this->sheets as $i => $sh) {
+            $n = $i + 1;
+            $wb .= '<sheet name="' . self::esc($sh['name']) . '" sheetId="' . $n . '" r:id="rId' . $n . '"/>';
+            $wbr .= '<Relationship Id="rId' . $n . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' . $n . '.xml"/>';
+            $zip->addFromString('xl/worksheets/sheet' . $n . '.xml', $this->sheetXml($sh));
+        }
+        // Daftarkan content-type tiap sheet
+        $ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            . '<Default Extension="rels" ContentType="application/vnd.openxml-package.relationships+xml"/>'
+            . '<Default Extension="xml" ContentType="application/xml"/>'
+            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
+        foreach ($this->sheets as $i => $sh) {
+            $ct .= '<Override PartName="/xl/worksheets/sheet' . ($i + 1) . '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+        }
+        $ct .= '</Types>';
+        $zip->addFromString('[Content_Types].xml', $ct);
+        $wb .= '</sheets></workbook>';
+        $wbr .= '<Relationship Id="rId' . (count($this->sheets) + 1) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+        $zip->addFromString('xl/workbook.xml', $wb);
+        $zip->addFromString('xl/_rels/workbook.xml.rels', $wbr);
+        $zip->addFromString('xl/styles.xml', $this->stylesXml());
+        $zip->close();
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . filesize($tmp));
+        readfile($tmp);
+        unlink($tmp);
+    }
+}
