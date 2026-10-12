@@ -103,7 +103,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'preview' && !empty($_FILES['fexcel
         $needzip = (strtolower(pathinfo($_FILES['fexcel']['name'] ?? '', PATHINFO_EXTENSION)) === 'xlsx' && !class_exists('ZipArchive'));
         $alert = $needzip
             ? ["icon" => "error", "title" => "PHP ZIP Mati", "text" => "File .xlsx butuh extension php_zip. Buka php.ini, hapus titik-koma di depan extension=zip, lalu restart Apache/XAMPP."]
-            : ["icon" => "error", "title" => "Gagal Baca", "text" => "File tidak bisa dibaca (harus .xlsx atau .xls hasil export aplikasi)."];
+            : ["icon" => "error", "title" => "Gagal Baca", "text" => "File tidak bisa dibaca (harus .xlsx atau .xls hasil export aplikasi). Tutup dulu file Excel-nya bila sedang dibuka. Info file: " . rx_diag_file($_FILES['fexcel']['tmp_name'], $_FILES['fexcel']['name'] ?? '')];
     } else {
         // Prioritas: sheet PERENCANAAN, lalu sheet pertama berisi baris
         $picked = null; $pickedName = '';

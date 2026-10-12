@@ -177,6 +177,23 @@ function rk_read_html_table($file) {
 }
 }
 
+if (!function_exists('rx_diag_file')) {
+// Diagnostik singkat file upload untuk pesan error (nama, ukuran, jenis isi).
+function rx_diag_file($file, $fname) {
+    $size = (is_file($file)) ? filesize($file) : -1;
+    $head = '';
+    if (is_file($file) && $size > 0) {
+        $fh = @fopen($file, 'rb');
+        if ($fh) { $head = bin2hex((string)@fread($fh, 4)); @fclose($fh); }
+    }
+    if (strpos($head, '504b') === 0) $kind = 'zip/xlsx';
+    elseif (stripos($head, '3c') === 0) $kind = 'html';
+    elseif (strpos($head, 'd0cf') === 0) $kind = 'xls-jadul';
+    else $kind = 'asing/rusak';
+    return trim($fname) . " ($size byte, $kind)";
+}
+}
+
 if (!function_exists('rk_read_any')) {
 // Baca .xlsx asli, fallback ke HTML-table .xls
 function rk_read_any($file) {
