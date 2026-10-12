@@ -139,6 +139,28 @@ function rx_read_xlsx($file) {
                 $rows[$rn][rx_col2num($m[1])] = $cellText($c, $ss);
             }
         }
+        // Merged cell: hanya sel kiri-atas yang menyimpan nilai di XML.
+        // Salin ke sel kosong lain HANYA untuk merge vertikal 1 kolom di luar A/B
+        // (mis. Posisi/Upah digabung bbrp baris). Merge horizontal/blok (judul,
+        // section, rekap) dan kolom A/B (No/Nama penentu jenis baris) dilewati
+        // agar section tidak bocor jadi karyawan.
+        $mg = $sx->children($NS)->mergeCells;
+        if ($mg) {
+            foreach ($mg->children($NS)->mergeCell as $mc) {
+                $ref = (string)$mc->attributes()->ref;
+                if (!preg_match('/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/', $ref, $mm)) continue;
+                $c1 = rx_col2num($mm[1]); $r1 = (int)$mm[2];
+                $c2 = rx_col2num($mm[3]); $r2 = (int)$mm[4];
+                if ($c1 !== $c2 || $c1 < 3 || $r2 <= $r1) continue;
+                $v = isset($rows[$r1][$c1]) ? trim((string)$rows[$r1][$c1]) : '';
+                if ($v === '') continue;
+                for ($rr = $r1; $rr <= $r2; $rr++) {
+                    for ($cc = $c1; $cc <= $c2; $cc++) {
+                        if (!isset($rows[$rr][$cc]) || trim((string)$rows[$rr][$cc]) === '') $rows[$rr][$cc] = $v;
+                    }
+                }
+            }
+        }
         ksort($rows);
         $out[$name] = $rows;
     }
@@ -203,6 +225,15 @@ function rx_parse_id_date($s) {
         if (isset($map[$m[2]])) return sprintf('%04d-%02d-%02d', (int)$m[3], (int)$map[$m[2]], (int)$m[1]);
     }
     return null;
+}
+}
+
+if (!function_exists('rx_is_header')) {
+// Kata header kolom file referensi — jangan pernah jadi kandidat nama/section
+// (baris sub-header yang ikut merge vertikal akan terbaca penuh).
+function rx_is_header($v) {
+    static $hdr = ['NO','NAMA','NAMA SESUAI KTP','PARAF','PARAF PEKERJA','OS/DHK','OS','DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','JAM','MASUK','ISTIRAHAT','JAM PULANG','PULANG','HASIL KERJA','HASIL','UPAH','UPAH DIBAYAR','DIBAYAR','POTONGAN','LEMBUR','KELUAR','TANGGAL'];
+    return in_array(strtoupper(trim((string)$v)), $hdr, true);
 }
 }
 
@@ -297,7 +328,7 @@ function rk_extract_kelola($rows, $koneksi = null) {
             $cands = [];
             for ($c = 3; $c <= 30; $c++) {
                 $v = $get($c);
-                if ($v === '' || $v === 'MASUK' || rx_is_junk($v)) continue;
+                if ($v === '' || $v === 'MASUK' || rx_is_junk($v) || rx_is_header($v)) continue;
                 if (!preg_match('/[A-Za-z]{3,}/', $v) || strlen($v) < 3) continue;
                 if (is_numeric(str_replace(['.', ',', ' '], '', $v))) continue;
                 $cands[] = $v;
