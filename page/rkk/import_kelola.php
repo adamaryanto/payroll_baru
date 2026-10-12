@@ -43,10 +43,9 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
             if (!in_array($i, $sel, true)) continue;
             $r['shift_id'] = isset($_POST["sh_$i"]) ? (int)$_POST["sh_$i"] : (int)($r['shift_id'] ?? 0);
             $r['upah'] = isset($_POST["up_$i"]) ? max(0, (int)str_replace('.', '', $_POST["up_$i"])) : (int)($r['upah'] ?? 0);
-            $r['dept_was'] = (int)($r['dept_id'] ?? 0);
-            $r['sub_was'] = (int)($r['sub_id'] ?? 0);
             $r['dept_id'] = isset($_POST["dp_$i"]) ? (int)$_POST["dp_$i"] : (int)($r['dept_id'] ?? 0);
             $r['sub_id'] = isset($_POST["ps_$i"]) ? (int)$_POST["ps_$i"] : (int)($r['sub_id'] ?? 0);
+            $r['ps_raw'] = isset($_POST["ps_$i"]) ? trim((string)$_POST["ps_$i"]) : '';
             $rows[] = $r;
         }
         if (empty($rows)) {
@@ -67,21 +66,12 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                     $kid = (int)$m['id_karyawan'];
                     $mk = $koneksi->query("SELECT id_departmen, id_sub_department, upah FROM ms_karyawan WHERE id_karyawan='$kid'")->fetch_assoc();
                     $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : (((int)($mk['id_departmen'] ?? 0) > 0) ? (int)$mk['id_departmen'] : $def_dept);
-                    $sub = (int)($r['sub_id'] ?? 0);
-                    if ($sub <= 0) $sub = ((int)($mk['id_sub_department'] ?? 0) > 0) ? (int)$mk['id_sub_department'] : 0;
-                    if (!empty($r['posisi_baru']) && ($sub <= 0 || $sub === (int)($r['sub_was'] ?? -1))) {
-                        // Posisi dari Excel belum ada di master -> generate otomatis (nyambung ke dept terpilih)
-                        $sub = rx_ensure_sub($koneksi, $r['posisi_baru'], $dep);
-                    }
-                    if ($sub <= 0) $sub = $def_sub;
+                    if ((int)($r['sub_id'] ?? 0) <= 0) $r['sub_id'] = ((int)($mk['id_sub_department'] ?? 0) > 0) ? (int)$mk['id_sub_department'] : 0;
+                    $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
                     if ((int)($r['upah'] ?? 0) <= 0) $r['upah'] = (int)($mk['upah'] ?? 0);
                 } else {
                     $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
-                    $sub = (int)($r['sub_id'] ?? 0);
-                    if (!empty($r['posisi_baru']) && ($sub <= 0 || $sub === (int)($r['sub_was'] ?? -1))) {
-                        $sub = rx_ensure_sub($koneksi, $r['posisi_baru'], $dep);
-                    }
-                    if ($sub <= 0) $sub = $def_sub;
+                    $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
                     $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $r['shift_id'] ?? 0, $r['upah'] ?? 0, $tgl_rkk, $dep, $sub);
                     if ($kid <= 0) { $c_skip++; continue; }
                     // Paksa dept/posisi master ikut pilihan preview
@@ -139,29 +129,26 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'preview' && !empty($_FILES['fexcel
             foreach ($ex['rows'] as $r) {
                 $m = rx_match_karyawan($koneksi, $r['nama']);
                 $sh = rk_match_shift($koneksi, $r['g_raw']);
-                // Department + posisi default: master bila cocok, tebakan teks Excel bila baru
+                // Department ikut master; Posisi ikut teks Excel (cocok -> kepilih, baru -> opsi "(baru)" + auto-create).
                 $dep_id = $pv_dept; $sub_id = $pv_sub; $posisi_baru = '';
+                $pos_txt0 = trim($r['posisi'] ?? '');
+                $sid0 = ($pos_txt0 !== '') ? rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt0) : 0;
                 if ($m) {
                     $qm = $koneksi->query("SELECT id_departmen, id_sub_department FROM ms_karyawan WHERE id_karyawan='" . (int)$m['id_karyawan'] . "' LIMIT 1");
                     if ($qm && ($rm = $qm->fetch_assoc())) {
                         if ((int)($rm['id_departmen'] ?? 0) > 0) $dep_id = (int)$rm['id_departmen'];
-                        if ((int)($rm['id_sub_department'] ?? 0) > 0) $sub_id = (int)$rm['id_sub_department'];
-                    }
-                    $pos_txt = trim($r['posisi'] ?? '');
-                    if ($pos_txt !== '' && rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt) <= 0) {
-                        $posisi_baru = $pos_txt; // belum ada di master -> dibuat otomatis saat simpan
-                    }
+                        if ($sid0 > 0) { $sub_id = $sid0; }
+                        elseif ($pos_txt0 !== '') { $posisi_baru = $pos_txt0; }
+                        elseif ((int)($rm['id_sub_department'] ?? 0) > 0) { $sub_id = (int)$rm['id_sub_department']; }
+                    } elseif ($sid0 > 0) { $sub_id = $sid0; }
+                    elseif ($pos_txt0 !== '') { $posisi_baru = $pos_txt0; }
                 } else {
-                    $pos_txt = trim($r['posisi'] ?? '');
-                    if ($pos_txt !== '') {
-                        $sid = rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt);
-                        if ($sid > 0) {
-                            $sub_id = $sid;
-                            $qs2 = $koneksi->query("SELECT id_departmen FROM ms_sub_department WHERE id_sub_department='$sid' LIMIT 1");
-                            if ($qs2 && ($rs2 = $qs2->fetch_assoc()) && (int)($rs2['id_departmen'] ?? 0) > 0) $dep_id = (int)$rs2['id_departmen'];
-                        } else {
-                            $posisi_baru = $pos_txt; // belum ada di master -> dibuat otomatis saat simpan
-                        }
+                    if ($sid0 > 0) {
+                        $sub_id = $sid0;
+                        $qs2 = $koneksi->query("SELECT id_departmen FROM ms_sub_department WHERE id_sub_department='$sid0' LIMIT 1");
+                        if ($qs2 && ($rs2 = $qs2->fetch_assoc()) && (int)($rs2['id_departmen'] ?? 0) > 0) $dep_id = (int)$rs2['id_departmen'];
+                    } elseif ($pos_txt0 !== '') {
+                        $posisi_baru = $pos_txt0; // belum ada di master -> dibuat otomatis saat simpan
                     }
                 }
                 $rows[] = [
@@ -271,8 +258,9 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                 <td class="py-2 px-3">
                                     <select name="ps_<?= $i; ?>" class="rk_pos px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
                                         <?php foreach ($sub_opts as $so): ?>
-                                            <option value="<?= $so['id_sub_department']; ?>" data-dept="<?= (int)($so['id_departmen'] ?? 0); ?>" <?= ((int)$so['id_sub_department'] === (int)($r['sub_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($so['nama_sub_department']); ?></option>
+                                            <option value="<?= $so['id_sub_department']; ?>" data-dept="<?= (int)($so['id_departmen'] ?? 0); ?>" <?= (empty($r['posisi_baru']) && (int)$so['id_sub_department'] === (int)($r['sub_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($so['nama_sub_department']); ?></option>
                                         <?php endforeach; ?>
+                                        <?php if (!empty($r['posisi_baru'])): ?><option value="<?= htmlspecialchars($r['posisi_baru']); ?>" selected><?= htmlspecialchars($r['posisi_baru']); ?> (baru)</option><?php endif; ?>
                                     </select>
                                     <?php if (!empty($r['posisi_baru'])): ?><div class="text-[11px] font-bold text-purple-700 mt-1">“<?= htmlspecialchars($r['posisi_baru']); ?>” baru → otomatis dibuat</div><?php endif; ?>
                                 </td>

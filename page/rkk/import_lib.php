@@ -417,6 +417,41 @@ function rx_ensure_sub($koneksi, $name, $dept_id = 0) {
 }
 }
 
+if (!function_exists('rx_commit_sub')) {
+// Tentukan id_sub_department final untuk satu baris import.
+// $r = baris session (sub_id = pilihan preview, ps_raw = mentah POST, posisi = teks Excel).
+// Aturan: opsi teks "(baru)" -> generate; pilihan user yang diubah -> menang;
+// sisanya ikut teks Posisi Excel (cocok -> pakai, baru -> generate). Tahan session lama.
+function rx_commit_sub($koneksi, $r, $dep, $def_sub) {
+    $ps_raw = trim((string)($r['ps_raw'] ?? ''));
+    $pos_txt = trim((string)($r['posisi'] ?? ''));
+    $pos_ok = ($pos_txt !== '' && !rx_is_junk($pos_txt) && preg_match('/[A-Za-z]{3,}/', $pos_txt));
+    $excel_sub = $pos_ok ? rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt) : 0;
+    if ($ps_raw !== '' && !ctype_digit($ps_raw)) {
+        // Opsi teks "(baru)" dari preview -> generate otomatis (nyambung dept terpilih)
+        $made = (!rx_is_junk($ps_raw) && preg_match('/[A-Za-z]{3,}/', $ps_raw)) ? rx_ensure_sub($koneksi, $ps_raw, $dep) : 0;
+        return $made > 0 ? $made : (int)$def_sub;
+    }
+    $sub_post = ($ps_raw !== '' ? (int)$ps_raw : 0);
+    $sub_ses = (int)($r['sub_id'] ?? 0);
+    $sub = $sub_post > 0 ? $sub_post : $sub_ses;
+    if ($sub_ses <= 0 && $pos_ok) {
+        // Session lama tanpa pilihan valid -> ikut teks Excel
+        if ($excel_sub > 0) return $excel_sub;
+        $made = rx_ensure_sub($koneksi, $pos_txt, $dep);
+        if ($made > 0) return $made;
+    } elseif ($sub_post === $sub_ses && $pos_ok) {
+        // Tak diubah user -> ikut teks Excel
+        if ($excel_sub > 0 && $sub !== $excel_sub) return $excel_sub;
+        if ($excel_sub <= 0) {
+            $made = rx_ensure_sub($koneksi, $pos_txt, $dep);
+            if ($made > 0) return $made;
+        }
+    }
+    return $sub > 0 ? $sub : (int)$def_sub;
+}
+}
+
 if (!function_exists('rx_make_karyawan')) {
 // Buatkan karyawan baru dari data baris Excel. Return id_karyawan atau 0.
 function rx_make_karyawan($koneksi, $nama, $osdhk, $golongan, $posisi, $shift_id, $upah, $tgl_aktif, $def_dept, $def_sub) {
