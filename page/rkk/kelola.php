@@ -78,8 +78,9 @@ LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal
 LEFT JOIN ms_os_dhk O ON B.id_os_dhk = O.id_os_dhk
 LEFT JOIN ms_golongan G ON B.id_golongan = G.id_golongan
 LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
+LEFT JOIN (SELECT id_grup, MIN(id_rkk_detail) AS g_ord FROM tb_rkk_detail WHERE id_rkk = '$idrkk' AND id_grup IS NOT NULL GROUP BY id_grup) GO ON GO.id_grup = A.id_grup
 WHERE A.id_rkk = '$idrkk'
-ORDER BY (GB.nama_grup IS NULL), GB.nama_grup ASC, A.id_rkk_detail ASC
+ORDER BY (GB.nama_grup IS NULL), GO.g_ord ASC, A.id_rkk_detail ASC
 ");
 } else {
   $datatglrkk = "";
