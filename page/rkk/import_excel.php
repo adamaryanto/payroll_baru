@@ -194,6 +194,13 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                     }
                 }
             }
+            if ($match && $posisi_baru === '') {
+                // Karyawan cocok master tapi teks Posisi Excel belum ada di master -> ikut Excel (auto-create)
+                $pos_txt = trim($base['posisi'] ?? '');
+                if ($pos_txt !== '' && rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt) <= 0) {
+                    $posisi_baru = $pos_txt;
+                }
+            }
             $has_real = $m['real'] && (rx_valid_time($m['real']['h_raw']) || rx_valid_time($m['real']['jam_pulang']));
             $jam_masuk = $m['real'] ? rx_frac_to_time($m['real']['h_raw']) : '';
             $jam_pulang = $m['real'] ? $m['real']['jam_pulang'] : '';

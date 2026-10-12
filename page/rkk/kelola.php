@@ -79,7 +79,7 @@ LEFT JOIN ms_os_dhk O ON B.id_os_dhk = O.id_os_dhk
 LEFT JOIN ms_golongan G ON B.id_golongan = G.id_golongan
 LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
 WHERE A.id_rkk = '$idrkk'
-ORDER BY (GB.nama_grup IS NULL), GB.nama_grup ASC, nama_tampil ASC
+ORDER BY (GB.nama_grup IS NULL), GB.nama_grup ASC, A.id_rkk_detail ASC
 ");
 } else {
   $datatglrkk = "";
