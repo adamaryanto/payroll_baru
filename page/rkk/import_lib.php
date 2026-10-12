@@ -10,6 +10,7 @@ function rx_col2num($c) { $n = 0; for ($i = 0; $i < strlen($c); $i++) $n = $n * 
 if (!function_exists('rx_read_xlsx')) {
 // Baca xlsx minimal (ZipArchive + SimpleXML). Return [sheetName => [rowNum => [colNum => val]]].
 function rx_read_xlsx($file) {
+    if (!class_exists('ZipArchive')) return false; // ext php_zip mati -> fallback / pesan ramah
     $NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
     try {
     $z = new ZipArchive();

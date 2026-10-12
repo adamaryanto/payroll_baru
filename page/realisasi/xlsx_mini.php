@@ -175,6 +175,10 @@ class MiniXlsx {
     }
 
     public function send($filename) {
+        if (!class_exists('ZipArchive')) {
+            echo 'Export Excel butuh extension php_zip. Buka php.ini, hapus titik-koma di depan extension=zip, lalu restart Apache/XAMPP.';
+            return;
+        }
         $this->style(); // pastikan xf default idx 0 ada
         $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
         $zip = new ZipArchive();

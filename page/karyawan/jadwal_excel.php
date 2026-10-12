@@ -11,6 +11,7 @@ function kj_col2num($c) { $n = 0; for ($i = 0; $i < strlen($c); $i++) $n = $n * 
 if (!function_exists('kj_read_sheet1')) {
 // Baca sheet pertama .xlsx -> [rowNum => [colNum => val]]
 function kj_read_sheet1($file) {
+    if (!class_exists('ZipArchive')) return false; // ext php_zip mati -> gagal ramah, bukan fatal
     $NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
     try {
     $z = new ZipArchive();

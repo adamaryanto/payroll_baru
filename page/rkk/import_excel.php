@@ -114,7 +114,10 @@ $preview = null;
 if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
     $sheets = rk_read_any($_FILES['fexcel']['tmp_name']);
     if ($sheets === false || empty($sheets)) {
-        $alert = ["icon" => "error", "title" => "Gagal Baca", "text" => "File tidak bisa dibaca (harus .xlsx atau .xls hasil export aplikasi)."];
+        $needzip = (strtolower(pathinfo($_FILES['fexcel']['name'] ?? '', PATHINFO_EXTENSION)) === 'xlsx' && !class_exists('ZipArchive'));
+        $alert = $needzip
+            ? ["icon" => "error", "title" => "PHP ZIP Mati", "text" => "File .xlsx butuh extension php_zip. Buka php.ini, hapus titik-koma di depan extension=zip, lalu restart Apache/XAMPP."]
+            : ["icon" => "error", "title" => "Gagal Baca", "text" => "File tidak bisa dibaca (harus .xlsx atau .xls hasil export aplikasi)."];
     } else {
         $plan = ['rows' => [], 'skipped' => []]; $real = ['rows' => [], 'skipped' => []]; $title = '';
         foreach ($sheets as $sname => $rows) {
