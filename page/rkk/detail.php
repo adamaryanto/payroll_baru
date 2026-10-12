@@ -29,6 +29,8 @@ if (isset($_GET['id'])) {
             }
             $tdepartmen = rx_valid_dept($koneksi, $tdepartmen ?? 0);
             $tsubdepartment = rx_valid_sub($koneksi, $tsubdepartment ?? 0, $tdepartmen);
+            $v_tdept = ($tdepartmen > 0) ? "'$tdepartmen'" : "NULL";
+            $v_tsub = ($tsubdepartment > 0) ? "'$tsubdepartment'" : "NULL";
 
             $tampil_j = $koneksi->query("SELECT * from tb_jadwal WHERE id_jadwal = '$tshift' ");
             $data_j = $tampil_j->fetch_assoc();
@@ -39,8 +41,8 @@ if (isset($_GET['id'])) {
 
             $sql_upd = $koneksi->query("UPDATE tb_rkk_detail SET
                 upah = '$tupah',
-                id_departmen = '$tdepartmen',
-                id_sub_department = '$tsubdepartment',
+                id_departmen = $v_tdept,
+                id_sub_department = $v_tsub,
                 id_jadwal = '$tshift',
                 potongan_telat = '$tpottelat',
                 potongan_istirahat = '$tpotistirahat',

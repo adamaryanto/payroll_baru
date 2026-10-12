@@ -78,9 +78,11 @@ if ($step === 'commit') {
                         }
                         $vg = ($id_grup === null) ? "NULL" : "'$id_grup'";
                         $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
-                        $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
+                        $sub = rx_commit_sub($koneksi, $r, $dep);
                         $dep = rx_valid_dept($koneksi, $dep);
                         $sub = rx_valid_sub($koneksi, $sub, $dep);
+                        $vdep = ($dep > 0) ? "'$dep'" : "NULL";
+                        $vsub = ($sub > 0) ? "'$sub'" : "NULL";
                         $jd = rx_commit_shift($koneksi, $r, $c_shift);
                         $kid = (int)($r['karyawan_id'] ?? 0);
                         if ($kid <= 0 && !empty($r['nama'])) {
@@ -93,7 +95,7 @@ if ($step === 'commit') {
                         }
                         if ($kid <= 0) continue;
                         $up = (float)($r['upah'] ?? 0);
-                        if (!$koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, id_grup, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$kid', NULL, '$dep', '$sub', '$up', 'Hadir', '$jd', $vg, '0', '0', '0', '$now')")) { $tx_fail = 'Gagal menyimpan detail RKK.'; break; }
+                        if (!$koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, id_grup, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$kid', NULL, $vdep, $vsub, '$up', 'Hadir', '$jd', $vg, '0', '0', '0', '$now')")) { $tx_fail = 'Gagal menyimpan detail RKK.'; break; }
                         $c_kar++;
                     }
                     // Realisasi SENGAJA tidak dibuat dari import Excel (dibuat terpisah via Tambah Realisasi + Tarik Data).
@@ -202,7 +204,7 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                     if ((int)($rm['id_departmen'] ?? 0) > 0) $dep_id = (int)$rm['id_departmen'];
                     if ($sid0 > 0) { $sub_id = $sid0; }
                     elseif ($pos_txt0 !== '') { $posisi_baru = $pos_txt0; }
-                    elseif ((int)($rm['id_sub_department'] ?? 0) > 0) { $sub_id = (int)$rm['id_sub_department']; }
+                    else { $sub_id = 0; } // Excel kosong -> kosong, jangan ngarang
                 } elseif ($sid0 > 0) { $sub_id = $sid0; }
                 elseif ($pos_txt0 !== '') { $posisi_baru = $pos_txt0; }
             } else {
@@ -212,7 +214,7 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                     if ($d0 > 0) $dep_id = $d0;
                 } elseif ($pos_txt0 !== '') {
                     $posisi_baru = $pos_txt0; // belum ada di master -> dibuat otomatis saat simpan
-                }
+                } else { $sub_id = 0; } // Excel kosong -> kosong, jangan ngarang
             }
             $has_real = $m['real'] && (rx_valid_time($m['real']['h_raw']) || rx_valid_time($m['real']['jam_pulang']));
             $jam_masuk = $m['real'] ? rx_frac_to_time($m['real']['h_raw']) : '';
@@ -361,6 +363,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                 </td>
                                 <td class="py-2 px-3">
                                     <select name="ps_<?= $idx; ?>" class="rx_pos px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                                        <option value="0"<?= ((int)($r['sub_id'] ?? 0) === 0 && empty($r['posisi_baru']) ? ' selected' : ''); ?>>- Kosong -</option>
                                         <?php foreach ($sub_opts as $so): ?>
                                             <option value="<?= $so['id_sub_department']; ?>" data-dept="<?= (int)($so['id_departmen'] ?? 0); ?>" <?= (empty($r['posisi_baru']) && (int)$so['id_sub_department'] === (int)($r['sub_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($so['nama_sub_department']); ?></option>
                                         <?php endforeach; ?>
@@ -431,7 +434,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
             </form>
             <div class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 leading-relaxed">
                 <strong>Cara kerja:</strong> tanggal diambil dari judul baris 1 (bisa dikoreksi di preview). Section di Excel = grup — kalau belum ada di master, otomatis dibuatkan.
-                Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada). Shift yang belum ada di master otomatis dibuatkan (12 jam). Department &amp; Posisi ikut master/tebakan Excel dan bisa diubah per baris — pilihan Posisi otomatis ikut Department. Posisi yang belum ada di master otomatis dibuatkan saat simpan. Rekap boneless di bawah + sheet BONLESS otomatis masuk halaman Boneless (tidak masuk kelola).
+                Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada). Shift yang belum ada di master otomatis dibuatkan (12 jam). Department &amp; Posisi ikut master/tebakan Excel dan bisa diubah per baris — pilihan Posisi otomatis ikut Department. Posisi yang belum ada di master otomatis dibuatkan saat simpan; yang kosong di Excel disimpan kosong (tidak diisi default). Rekap boneless di bawah + sheet BONLESS otomatis masuk halaman Boneless (tidak masuk kelola).
                 Nama yang tidak cocok otomatis dibuatkan karyawan baru (No. Absen = MAX+1). Baris kotor tetap diproses tapi tidak dicentang — cek manual.
             </div>
             <?php endif; ?>

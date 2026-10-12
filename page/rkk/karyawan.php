@@ -46,6 +46,8 @@ if (isset($_POST['simpan_karyawan'])) {
     }
     $id_dept = rx_valid_dept($koneksi, $id_dept ?? 0);
     $id_sub = rx_valid_sub($koneksi, $id_sub ?? 0, $id_dept);
+    $v_dep = ($id_dept > 0) ? "'$id_dept'" : "NULL";
+    $v_sub = ($id_sub > 0) ? "'$id_sub'" : "NULL";
 
     // VALIDASI
     if (($idkaryawan != 0 || $nama_manual != NULL) && !empty($id_jadwal) && $id_rkk_fix > 0) {
@@ -73,7 +75,7 @@ if (isset($_POST['simpan_karyawan'])) {
             (id_rkk, id_karyawan, nama_karyawan_manual, upah, id_departmen, id_sub_department, id_jadwal, id_grup, status_rkk, 
              potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) 
             VALUES 
-            ($id_rkk_fix, '$idkaryawan', $val_manual, '$upah', '$id_dept', '$id_sub', '$id_jadwal', $val_grup, 'Hadir', 
+            ($id_rkk_fix, '$idkaryawan', $val_manual, '$upah', $v_dep, $v_sub, '$id_jadwal', $val_grup, 'Hadir', 
              '0', '0', '0', NOW())";
 
             if ($koneksi->query($query)) {

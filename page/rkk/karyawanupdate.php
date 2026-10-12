@@ -598,13 +598,15 @@ if (isset($_POST['simpan'])) {
 
         $iddept_pengganti = rx_valid_dept($koneksi, $data_k['id_departmen'] ?? 0);
         $idsub_pengganti  = rx_valid_sub($koneksi, $data_k['id_sub_department'] ?? 0, $iddept_pengganti);
+        $vdep_ganti = ($iddept_pengganti > 0) ? "'$iddept_pengganti'" : "NULL";
+        $vsub_ganti = ($idsub_pengganti > 0) ? "'$idsub_pengganti'" : "NULL";
 
         // 1. Masukkan karyawan pengganti ke tb_rkk_detail
         $q_insert = "INSERT INTO tb_rkk_detail 
             (id_rkk, id_karyawan, upah, id_departmen, id_sub_department, id_jadwal, status_rkk, 
              potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) 
             VALUES 
-            ('$idrkk', '$idkaryawan_pengganti', '$orig_upah', '$iddept_pengganti', '$idsub_pengganti', '$orig_jadwal', 'Pengganti', 
+            ('$idrkk', '$idkaryawan_pengganti', '$orig_upah', $vdep_ganti, $vsub_ganti, '$orig_jadwal', 'Pengganti', 
              '0', '0', '0', NOW())";
 
         if ($koneksi->query($q_insert)) {

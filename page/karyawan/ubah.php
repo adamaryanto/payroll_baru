@@ -209,12 +209,14 @@ if (isset($_POST['update'])) {
                 require_once __DIR__ . '/../rkk/import_lib.php';
                 $rd_dept = rx_valid_dept($koneksi, $tdepartmen ?? 0);
                 $rd_sub = rx_valid_sub($koneksi, $tsubdept ?? 0, $rd_dept);
+                $rd_vdep = ($rd_dept > 0) ? "'$rd_dept'" : "NULL";
+                $rd_vsub = ($rd_sub > 0) ? "'$rd_sub'" : "NULL";
                 $qc2 = $koneksi->query("SELECT id_rkk_detail FROM tb_rkk_detail WHERE id_rkk='$id_rkk' AND id_karyawan='$tid_int' LIMIT 1");
                 if ($qc2 && $qc2->num_rows > 0) {
                     $cr2 = $qc2->fetch_assoc();
                     $dq = $koneksi->query("UPDATE tb_rkk_detail SET id_jadwal='$trenc_shift' WHERE id_rkk_detail='" . (int)$cr2['id_rkk_detail'] . "'");
                 } else {
-                    $dq = $koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$tid_int', NULL, '$rd_dept', '$rd_sub', '0', 'Hadir', '$trenc_shift', '0', '0', '0', NOW())");
+                    $dq = $koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$tid_int', NULL, $rd_vdep, $rd_vsub, '0', 'Hadir', '$trenc_shift', '0', '0', '0', NOW())");
                 }
                 $roster_info = $dq ? ("<br><small>Roster " . htmlspecialchars($trenc_date) . ": " . htmlspecialchars($roster_msg) . "</small>") : ("<br><small class=\"text-red-600\">Roster " . htmlspecialchars($trenc_date) . " gagal: " . htmlspecialchars($koneksi->error) . "</small>");
                 }

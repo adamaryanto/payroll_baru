@@ -70,16 +70,19 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                     $kid = (int)$m['id_karyawan'];
                     $mk = $koneksi->query("SELECT id_departmen, id_sub_department, upah FROM ms_karyawan WHERE id_karyawan='$kid'")->fetch_assoc();
                     $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : (((int)($mk['id_departmen'] ?? 0) > 0) ? (int)$mk['id_departmen'] : $def_dept);
-                    if ((int)($r['sub_id'] ?? 0) <= 0) $r['sub_id'] = ((int)($mk['id_sub_department'] ?? 0) > 0) ? (int)$mk['id_sub_department'] : 0;
-                    $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
+                    $sub = rx_commit_sub($koneksi, $r, $dep);
                     $dep = rx_valid_dept($koneksi, $dep);
                     $sub = rx_valid_sub($koneksi, $sub, $dep);
+                    $vdep = ($dep > 0) ? "'$dep'" : "NULL";
+                    $vsub = ($sub > 0) ? "'$sub'" : "NULL";
                     if ((int)($r['upah'] ?? 0) <= 0) $r['upah'] = (int)($mk['upah'] ?? 0);
                 } else {
                     $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
-                    $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
+                    $sub = rx_commit_sub($koneksi, $r, $dep);
                     $dep = rx_valid_dept($koneksi, $dep);
                     $sub = rx_valid_sub($koneksi, $sub, $dep);
+                    $vdep = ($dep > 0) ? "'$dep'" : "NULL";
+                    $vsub = ($sub > 0) ? "'$sub'" : "NULL";
                     $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $jd, $r['upah'] ?? 0, $tgl_rkk, $dep, $sub);
                     if ($kid <= 0) { $c_skip++; continue; }
                     // Paksa dept/posisi master ikut pilihan preview
@@ -91,7 +94,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                 if ($cek && $cek->num_rows > 0) { $c_skip++; continue; }
                 $up = (int)($r['upah'] ?? 0);
                 $vg = ($id_grup === null) ? "NULL" : "'$id_grup'";
-                $ok = $koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, upah, id_departmen, id_sub_department, id_jadwal, id_grup, status_rkk, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$idrkk', '$kid', NULL, '$up', '$dep', '$sub', '$jd', $vg, 'Hadir', '0', '0', '0', '$now')");
+                $ok = $koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, upah, id_departmen, id_sub_department, id_jadwal, id_grup, status_rkk, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$idrkk', '$kid', NULL, '$up', $vdep, $vsub, '$jd', $vg, 'Hadir', '0', '0', '0', '$now')");
                 if ($ok) $c_add++; else $c_skip++;
             }
             unset($_SESSION['rk_imp_kelola']);
@@ -155,7 +158,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'preview' && !empty($_FILES['fexcel
                         if ((int)($rm['id_departmen'] ?? 0) > 0) $dep_id = (int)$rm['id_departmen'];
                         if ($sid0 > 0) { $sub_id = $sid0; }
                         elseif ($pos_txt0 !== '') { $posisi_baru = $pos_txt0; }
-                        elseif ((int)($rm['id_sub_department'] ?? 0) > 0) { $sub_id = (int)$rm['id_sub_department']; }
+                        else { $sub_id = 0; } // Excel kosong -> kosong, jangan ngarang
                     } elseif ($sid0 > 0) { $sub_id = $sid0; }
                     elseif ($pos_txt0 !== '') { $posisi_baru = $pos_txt0; }
                 } else {
@@ -163,9 +166,9 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'preview' && !empty($_FILES['fexcel
                         $sub_id = $sid0;
                         $d0 = rx_sub_dept($koneksi, $sid0);
                         if ($d0 > 0) $dep_id = $d0;
-                    } elseif ($pos_txt0 !== '') {
-                        $posisi_baru = $pos_txt0; // belum ada di master -> dibuat otomatis saat simpan
-                    }
+                        } elseif ($pos_txt0 !== '') {
+                            $posisi_baru = $pos_txt0; // belum ada di master -> dibuat otomatis saat simpan
+                        } else { $sub_id = 0; } // Excel kosong -> kosong, jangan ngarang
                 }
                 $os_txt0 = trim($r['osdhk'] ?? ''); $gol_txt0 = trim($r['golongan'] ?? '');
                 $os_baru = (!$m && $os_txt0 !== '' && rx_lookup_id($koneksi, 'ms_os_dhk', 'OS_DHK', $os_txt0) <= 0) ? $os_txt0 : '';
@@ -276,6 +279,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                 </td>
                                 <td class="py-2 px-3">
                                     <select name="ps_<?= $i; ?>" class="rk_pos px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                                        <option value="0"<?= ((int)($r['sub_id'] ?? 0) === 0 && empty($r['posisi_baru']) ? ' selected' : ''); ?>>- Kosong -</option>
                                         <?php foreach ($sub_opts as $so): ?>
                                             <option value="<?= $so['id_sub_department']; ?>" data-dept="<?= (int)($so['id_departmen'] ?? 0); ?>" <?= (empty($r['posisi_baru']) && (int)$so['id_sub_department'] === (int)($r['sub_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($so['nama_sub_department']); ?></option>
                                         <?php endforeach; ?>

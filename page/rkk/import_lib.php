@@ -686,8 +686,9 @@ if (!function_exists('rx_commit_sub')) {
 // Tentukan id_sub_department final untuk satu baris import.
 // $r = baris session (sub_id = pilihan preview, ps_raw = mentah POST, posisi = teks Excel).
 // Aturan: opsi teks "(baru)" -> generate; pilihan user yang diubah -> menang;
-// sisanya ikut teks Posisi Excel (cocok -> pakai, baru -> generate). Tahan session lama.
-function rx_commit_sub($koneksi, $r, $dep, $def_sub) {
+// sisanya ikut teks Posisi Excel (cocok -> pakai, baru -> generate).
+// Tak ada sumber valid -> 0 (penulis wajib simpan NULL, jangan ngarang default).
+function rx_commit_sub($koneksi, $r, $dep) {
     $ps_raw = trim((string)($r['ps_raw'] ?? ''));
     $pos_txt = trim((string)($r['posisi'] ?? ''));
     $pos_ok = ($pos_txt !== '' && !rx_is_junk($pos_txt) && preg_match('/[A-Za-z]{3,}/', $pos_txt));
@@ -695,7 +696,7 @@ function rx_commit_sub($koneksi, $r, $dep, $def_sub) {
     if ($ps_raw !== '' && !ctype_digit($ps_raw)) {
         // Opsi teks "(baru)" dari preview -> generate otomatis (nyambung dept terpilih)
         $made = (!rx_is_junk($ps_raw) && preg_match('/[A-Za-z]{3,}/', $ps_raw)) ? rx_ensure_sub($koneksi, $ps_raw, $dep) : 0;
-        return $made > 0 ? $made : (int)$def_sub;
+        return $made > 0 ? $made : 0;
     }
     $sub_post = ($ps_raw !== '' ? (int)$ps_raw : 0);
     $sub_ses = (int)($r['sub_id'] ?? 0);
@@ -713,36 +714,32 @@ function rx_commit_sub($koneksi, $r, $dep, $def_sub) {
             if ($made > 0) return $made;
         }
     }
-    return $sub > 0 ? $sub : (int)$def_sub;
+    return $sub > 0 ? $sub : 0;
 }
 }
 
 if (!function_exists('rx_valid_dept')) {
-// Pastikan id department ada di master (tahan FK ketat). Kalau tidak,
-// pakai id pertama; kalau tabel kosong, buatkan "UMUM". Return id atau 0.
+// Pastikan id department ada di master (tahan FK ketat).
+// Tidak ada / tidak valid -> 0 (penulis wajib simpan NULL, jangan ngarang default).
 function rx_valid_dept($koneksi, $id) {
     $id = (int)$id;
     if ($id > 0) {
         $q = rx_q($koneksi, "SELECT id_departmen FROM ms_departmen WHERE id_departmen='$id' LIMIT 1");
         if ($q && $q->num_rows > 0) return $id;
     }
-    $q = rx_q($koneksi, "SELECT MIN(id_departmen) AS m FROM ms_departmen");
-    if ($q && ($r = $q->fetch_assoc()) && (int)($r['m'] ?? 0) > 0) return (int)$r['m'];
-    return rx_ensure_dept($koneksi, 'UMUM');
+    return 0;
 }
 }
 
 if (!function_exists('rx_valid_sub')) {
-// Pastikan id posisi ada di master (tahan FK ketat). Sama pola dengan dept.
+// Pastikan id posisi ada di master (tahan FK ketat). Sama: tak valid -> 0.
 function rx_valid_sub($koneksi, $id, $dep = 0) {
     $id = (int)$id;
     if ($id > 0) {
         $q = rx_q($koneksi, "SELECT id_sub_department FROM ms_sub_department WHERE id_sub_department='$id' LIMIT 1");
         if ($q && $q->num_rows > 0) return $id;
     }
-    $q = rx_q($koneksi, "SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
-    if ($q && ($r = $q->fetch_assoc()) && (int)($r['m'] ?? 0) > 0) return (int)$r['m'];
-    return rx_ensure_sub($koneksi, 'UMUM', $dep);
+    return 0;
 }
 }
 

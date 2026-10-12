@@ -253,6 +253,8 @@ if ($step === 'commit') {
         require_once __DIR__ . '/../rkk/import_lib.php';
         $def_dept = rx_valid_dept($koneksi, $def_dept);
         $def_sub = rx_valid_sub($koneksi, $def_sub, $def_dept);
+        $def_vdep = ($def_dept > 0) ? "'$def_dept'" : "NULL";
+        $def_vsub = ($def_sub > 0) ? "'$def_sub'" : "NULL";
         $ok = 0; $fail = 0; $c_new = 0; $same = 0; $m_upd = 0; $msgs = [];
         if (getenv('KJ_DEBUG')) { echo '<!--DBG'; echo ' sel=' . htmlspecialchars(json_encode($sel)); echo ' nrows=' . count($imp['rows']); echo ' -->'; }
         foreach ($imp['rows'] as $i => $r) {
@@ -287,7 +289,7 @@ if ($step === 'commit') {
                 if ($koneksi->query("UPDATE tb_rkk_detail SET id_jadwal='$sid' WHERE id_rkk_detail='" . (int)$cur['id_rkk_detail'] . "'")) $ok++;
                 else { $fail++; $msgs[] = $r['nama_excel'] . ': ' . $koneksi->error; continue; }
             } elseif (!$cur) {
-                if ($koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$kid', NULL, '$def_dept', '$def_sub', '0', 'Hadir', '$sid', '0', '0', '0', NOW())")) $ok++;
+                if ($koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$kid', NULL, $def_vdep, $def_vsub, '0', 'Hadir', '$sid', '0', '0', '0', NOW())")) $ok++;
                 else { $fail++; $msgs[] = $r['nama_excel'] . ': ' . $koneksi->error; continue; }
             } else { $same++; }
             // Roster saja: master ms_karyawan TIDAK diubah dari Excel.

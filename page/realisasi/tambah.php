@@ -56,8 +56,8 @@ $tglreal = $data_tgl['tgl_realisasi'];
             ra_istirahat_masuk, ra_istirahat_keluar, status_realisasi_detail, 
             hasil_kerja, lembur, tgl_realisasi_detail
         ) 
-        select '$iddetail', A.id_rkk_detail, A.id_rkk, A.id_karyawan, 
-               A.nama_karyawan_manual, COALESCE(A.id_departmen, 0), COALESCE(A.id_sub_department, 0),
+         select '$iddetail', A.id_rkk_detail, A.id_rkk, A.id_karyawan,
+                A.nama_karyawan_manual, A.id_departmen, A.id_sub_department,
                A.upah, 
                COALESCE(B.jam_masuk, '00:00:00'), 
                COALESCE(B.jam_keluar, '00:00:00'), 
