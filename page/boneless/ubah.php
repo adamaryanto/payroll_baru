@@ -74,25 +74,24 @@ if ($simpan) {
     // Sync Details: Hapus yang lama, masukkan yang baru
     $koneksi->query("DELETE FROM tb_boneless_detail WHERE id_boneless = '$id'");
 
-    $nama_items = $_POST['nama_item'];
-    $qtys = $_POST['qty'];
-    $hargas = $_POST['harga'];
-    $types = $_POST['type'];
+    $nama_items = (array)($_POST['nama_item'] ?? []);
+    $qtys = (array)($_POST['qty'] ?? []);
+    $hargas = (array)($_POST['harga'] ?? []);
+    $types = (array)($_POST['type'] ?? []);
 
     if (!empty($nama_items)) {
         for ($i = 0; $i < count($nama_items); $i++) {
-            $item = $koneksi->real_escape_string($nama_items[$i]);
-            if ($item != "") {
-                $qty = (float)($qtys[$i] ?: 0);
-                $hrg = (float)($hargas[$i] ?: 0);
-                $type = $koneksi->real_escape_string($types[$i]);
+            $item = $koneksi->real_escape_string($nama_items[$i] ?? '');
+            if ($item === '') continue;
+            $qty = (float)(($qtys[$i] ?? 0) ?: 0);
+            $hrg = (float)(($hargas[$i] ?? 0) ?: 0);
+            $type = $koneksi->real_escape_string($types[$i] ?? 'plus');
 
-                // MODIFIKASI: Simpan total selalu POSITIF (Absolute)
-                $ttl = abs($qty * $hrg);
+            // MODIFIKASI: Simpan total selalu POSITIF (Absolute)
+            $ttl = abs($qty * $hrg);
 
-                $koneksi->query("INSERT INTO tb_boneless_detail (id_boneless, nama_item, qty, harga, total, jenis)
-                                 VALUES ('$id', '$item', '$qty', '$hrg', '$ttl', '$type')");
-            }
+            $koneksi->query("INSERT INTO tb_boneless_detail (id_boneless, nama_item, qty, harga, total, jenis)
+                             VALUES ('$id', '$item', '$qty', '$hrg', '$ttl', '$type')");
         }
     }
 

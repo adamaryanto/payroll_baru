@@ -45,16 +45,16 @@ if ($simpan) {
     $id_header = $koneksi->insert_id;
 
     if ($id_header) {
-        $nama_items = $_POST['nama_item'];
-        $qtys       = $_POST['qty'];
-        $hargas     = $_POST['harga'];
-        $jenis_items = $_POST['jenis_item'];
+        $nama_items = (array)($_POST['nama_item'] ?? []);
+        $qtys       = (array)($_POST['qty'] ?? []);
+        $hargas     = (array)($_POST['harga'] ?? []);
+        $jenis_items = (array)($_POST['jenis_item'] ?? []);
 
         for ($i = 0; $i < count($nama_items); $i++) {
-            $item = $koneksi->real_escape_string($nama_items[$i]);
-            $qty  = (float)($qtys[$i] ?: 0);
-            $hrg  = (float)($hargas[$i] ?: 0);
-            $jenis = $koneksi->real_escape_string($jenis_items[$i]);
+            $item = $koneksi->real_escape_string($nama_items[$i] ?? '');
+            $qty  = (float)(($qtys[$i] ?? 0) ?: 0);
+            $hrg  = (float)(($hargas[$i] ?? 0) ?: 0);
+            $jenis = $koneksi->real_escape_string($jenis_items[$i] ?? 'plus');
 
             if ($item != "") {
                 // MODIFIKASI: Simpan total sebagai nilai positif (absolute)
