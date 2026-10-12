@@ -25,6 +25,8 @@ if ($step === 'commit') {
             if (!in_array($i, $sel, true)) continue;
             $r['shift_id'] = isset($_POST["sh_$i"]) ? (int)$_POST["sh_$i"] : (int)($r['shift_id'] ?? 0);
             $r['upah'] = isset($_POST["up_$i"]) ? max(0, (int)str_replace('.', '', $_POST["up_$i"])) : (int)($r['upah'] ?? 0);
+            $r['dept_id'] = isset($_POST["dp_$i"]) ? (int)$_POST["dp_$i"] : (int)($r['dept_id'] ?? 0);
+            $r['sub_id'] = isset($_POST["ps_$i"]) ? (int)$_POST["ps_$i"] : (int)($r['sub_id'] ?? 0);
             $rows[] = $r;
         }
         if (empty($rows)) {
@@ -72,15 +74,21 @@ if ($step === 'commit') {
                             $id_grup = $grup_map[$uk];
                         }
                         $vg = ($id_grup === null) ? "NULL" : "'$id_grup'";
+                        $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
+                        $sub = (int)($r['sub_id'] ?? 0) > 0 ? (int)$r['sub_id'] : $def_sub;
                         $kid = (int)($r['karyawan_id'] ?? 0);
                         if ($kid <= 0 && !empty($r['nama'])) {
-                            $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $r['shift_id'] ?? 0, $r['upah'] ?? 0, $tgl, $def_dept, $def_sub);
-                            if ($kid > 0) $c_new++;
+                            $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $r['shift_id'] ?? 0, $r['upah'] ?? 0, $tgl, $dep, $sub);
+                            if ($kid > 0) {
+                                $c_new++;
+                                // Paksa dept/posisi master ikut pilihan preview (bukan tebakan teks Excel)
+                                $koneksi->query("UPDATE ms_karyawan SET id_departmen='$dep', id_sub_department='$sub' WHERE id_karyawan='$kid'");
+                            }
                         }
                         if ($kid <= 0) continue;
                         $up = (float)($r['upah'] ?? 0);
                         $jd = (int)($r['shift_id'] ?? 0);
-                        if (!$koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, id_grup, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$kid', NULL, '$def_dept', '$def_sub', '$up', 'Hadir', '$jd', $vg, '0', '0', '0', '$now')")) { $tx_fail = 'Gagal menyimpan detail RKK.'; break; }
+                        if (!$koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, id_grup, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$kid', NULL, '$dep', '$sub', '$up', 'Hadir', '$jd', $vg, '0', '0', '0', '$now')")) { $tx_fail = 'Gagal menyimpan detail RKK.'; break; }
                         $c_kar++;
                     }
                     // Realisasi SENGAJA tidak dibuat dari import Excel (dibuat terpisah via Tambah Realisasi + Tarik Data).
@@ -148,12 +156,35 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
         $tol = ['masuk' => (int)($td['toleransi_masuk'] ?? 10), 'ist_keluar' => (int)($td['toleransi_istirahat_keluar'] ?? 5),
             'ist_masuk' => (int)($td['toleransi_istirahat_masuk'] ?? 10), 'pulang' => (int)($td['toleransi_pulang'] ?? 5)];
         $rows = [];
+        $qdd = $koneksi->query("SELECT MIN(id_departmen) AS m FROM ms_departmen");
+        $pv_dept = ($qdd && ($rdd = $qdd->fetch_assoc()) && $rdd['m']) ? (int)$rdd['m'] : 0;
+        $qss = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
+        $pv_sub = ($qss && ($rss = $qss->fetch_assoc()) && $rss['m']) ? (int)$rss['m'] : 0;
         foreach ($merged as $m) {
             $base = $m['plan'] ?: $m['real'];
             $nama = $base['nama'];
             $g_raw = ($m['plan'] ? $m['plan']['g_raw'] : '') ?: ($m['real'] ? $m['real']['g_raw'] : '');
             $shift = rk_match_shift($koneksi, $g_raw);
             $match = rx_match_karyawan($koneksi, $nama);
+            // Department + posisi default: master bila cocok, tebakan teks Excel bila baru
+            $dep_id = $pv_dept; $sub_id = $pv_sub;
+            if ($match) {
+                $qm = $koneksi->query("SELECT id_departmen, id_sub_department FROM ms_karyawan WHERE id_karyawan='" . (int)$match['id_karyawan'] . "' LIMIT 1");
+                if ($qm && ($rm = $qm->fetch_assoc())) {
+                    if ((int)($rm['id_departmen'] ?? 0) > 0) $dep_id = (int)$rm['id_departmen'];
+                    if ((int)($rm['id_sub_department'] ?? 0) > 0) $sub_id = (int)$rm['id_sub_department'];
+                }
+            } else {
+                $pos_txt = trim($base['posisi'] ?? '');
+                if ($pos_txt !== '') {
+                    $sid = rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt);
+                    if ($sid > 0) {
+                        $sub_id = $sid;
+                        $qs2 = $koneksi->query("SELECT id_departmen FROM ms_sub_department WHERE id_sub_department='$sid' LIMIT 1");
+                        if ($qs2 && ($rs2 = $qs2->fetch_assoc()) && (int)($rs2['id_departmen'] ?? 0) > 0) $dep_id = (int)$rs2['id_departmen'];
+                    }
+                }
+            }
             $has_real = $m['real'] && (rx_valid_time($m['real']['h_raw']) || rx_valid_time($m['real']['jam_pulang']));
             $jam_masuk = $m['real'] ? rx_frac_to_time($m['real']['h_raw']) : '';
             $jam_pulang = $m['real'] ? $m['real']['jam_pulang'] : '';
@@ -180,6 +211,8 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                 'osdhk' => $base['osdhk'] ?? '',
                 'golongan' => $base['golongan'] ?? '',
                 'posisi' => $base['posisi'] ?? '',
+                'dept_id' => $dep_id,
+                'sub_id' => $sub_id,
                 'in_plan' => !empty($m['plan']),
                 'has_real' => $has_real,
                 'jam_masuk' => $jam_masuk,
@@ -199,6 +232,12 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
 $list_jadwal_prev = $koneksi->query("SELECT * FROM tb_jadwal ORDER BY id_jadwal ASC");
 $jadwal_opts = [];
 while ($list_jadwal_prev && ($jj = $list_jadwal_prev->fetch_assoc())) $jadwal_opts[] = $jj;
+$dept_opts = [];
+$qd_prev = $koneksi->query("SELECT * FROM ms_departmen ORDER BY nama_departmen ASC");
+while ($qd_prev && ($dd = $qd_prev->fetch_assoc())) $dept_opts[] = $dd;
+$sub_opts = [];
+$qs_prev = $koneksi->query("SELECT * FROM ms_sub_department ORDER BY nama_sub_department ASC");
+while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
 ?>
 <div class="max-w-5xl mx-auto px-2 sm:px-6 lg:px-8 mt-4 sm:mt-10 mb-10">
     <div class="bg-white shadow-xl border border-gray-200 rounded-2xl overflow-hidden">
@@ -227,7 +266,7 @@ while ($list_jadwal_prev && ($jj = $list_jadwal_prev->fetch_assoc())) $jadwal_op
                     <input type="date" name="rx_date" value="<?= htmlspecialchars($preview['date'] ?: date('Y-m-d')); ?>" required class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm">
                 </div>
                 <div class="rounded-lg border border-gray-300 mb-4" style="overflow-x:auto;">
-                    <table class="text-left border-collapse" style="min-width:1200px;width:100%;">
+                    <table class="text-left border-collapse" style="min-width:1500px;width:100%;">
                         <thead class="bg-gray-100">
                             <tr style="white-space:nowrap;">
                                 <th class="py-2 px-3 w-10"><input type="checkbox" id="rx_all" checked style="width:16px;height:16px;"></th>
@@ -236,6 +275,8 @@ while ($list_jadwal_prev && ($jj = $list_jadwal_prev->fetch_assoc())) $jadwal_op
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Grup</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Status</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Shift</th>
+                                <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Department</th>
+                                <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Posisi</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase text-right">Upah</th>
                             </tr>
                         </thead>
@@ -268,6 +309,20 @@ while ($list_jadwal_prev && ($jj = $list_jadwal_prev->fetch_assoc())) $jadwal_op
                                         <?php endforeach; ?>
                                     </select>
                                 </td>
+                                <td class="py-2 px-3">
+                                    <select name="dp_<?= $idx; ?>" class="rx_dept px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                                        <?php foreach ($dept_opts as $do): ?>
+                                            <option value="<?= $do['id_departmen']; ?>" <?= ((int)$do['id_departmen'] === (int)($r['dept_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($do['nama_departmen']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                                <td class="py-2 px-3">
+                                    <select name="ps_<?= $idx; ?>" class="rx_pos px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
+                                        <?php foreach ($sub_opts as $so): ?>
+                                            <option value="<?= $so['id_sub_department']; ?>" data-dept="<?= (int)($so['id_departmen'] ?? 0); ?>" <?= ((int)$so['id_sub_department'] === (int)($r['sub_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($so['nama_sub_department']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
                                 <td class="py-2 px-3"><input type="number" name="up_<?= $idx; ?>" value="<?= (int)$r['upah']; ?>" min="0" class="w-28 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-right"></td>
                             </tr>
                         <?php endforeach; ?>
@@ -291,6 +346,25 @@ while ($list_jadwal_prev && ($jj = $list_jadwal_prev->fetch_assoc())) $jadwal_op
                 document.getElementById('rx_all').addEventListener('change', function() {
                     document.querySelectorAll('.rx_sel').forEach(function(c) { c.checked = document.getElementById('rx_all').checked; });
                 });
+                // Posisi ikut department: pilihan posisi difilter per baris
+                function rxFilterRow(tr) {
+                    var d = tr.querySelector('.rx_dept');
+                    var p = tr.querySelector('.rx_pos');
+                    if (!d || !p) return;
+                    var dv = d.value;
+                    Array.prototype.forEach.call(p.options, function(o) {
+                        if (!o.value) return;
+                        var od = o.getAttribute('data-dept');
+                        o.hidden = (od && od !== '0' && dv && od !== dv);
+                    });
+                    var sel = p.selectedOptions && p.selectedOptions[0];
+                    if (sel && sel.hidden) p.selectedIndex = 0;
+                }
+                document.querySelectorAll('.rx_dept').forEach(function(d) {
+                    d.addEventListener('change', function() { rxFilterRow(d.closest('tr')); });
+                });
+                document.querySelectorAll('#rx_all, .rx_sel, table tbody tr').forEach(function() {});
+                document.querySelectorAll('table tbody tr').forEach(function(tr) { rxFilterRow(tr); });
             </script>
             <?php else: ?>
             <form method="POST" enctype="multipart/form-data" class="max-w-xl">
@@ -305,7 +379,7 @@ while ($list_jadwal_prev && ($jj = $list_jadwal_prev->fetch_assoc())) $jadwal_op
             </form>
             <div class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 leading-relaxed">
                 <strong>Cara kerja:</strong> tanggal diambil dari judul baris 1 (bisa dikoreksi di preview). Section di Excel = grup — kalau belum ada di master, otomatis dibuatkan.
-                Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada). Potongan dihitung otomatis ikut aturan denda + toleransi.
+                Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada). Department &amp; Posisi ikut master/tebakan Excel dan bisa diubah per baris — pilihan Posisi otomatis ikut Department.
                 Nama yang tidak cocok otomatis dibuatkan karyawan baru (No. Absen = MAX+1). Baris kotor tetap diproses tapi tidak dicentang — cek manual.
             </div>
             <?php endif; ?>
