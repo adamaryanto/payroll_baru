@@ -45,7 +45,8 @@ class MiniXlsx {
     }
 
     public function width($sh, $c, $px) {
-        $this->sheets[$sh]['widths'][(int)$c] = round(((float)$px) / 6, 2);
+        // 1 unit lebar kolom Excel = ~7px (Calibri 11) — sama seperti render col HTML sebelumnya.
+        $this->sheets[$sh]['widths'][(int)$c] = round(((float)$px) / 7, 2);
     }
 
     public static function col($c) {
