@@ -89,6 +89,9 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                     $koneksi->query("UPDATE ms_karyawan SET id_departmen='$dep', id_sub_department='$sub' WHERE id_karyawan='$kid'");
                     $c_new_kar++;
                 }
+                // 2b. Lengkapi OS/Golongan master yang masih kosong dari Excel
+                // (jalan juga saat barisnya dilewati duplikat di bawah)
+                if ($kid > 0) rx_fill_master_osgol($koneksi, $kid, $r['osdhk'] ?? '', $r['golongan'] ?? '');
                 // 3. Lewati duplikat di RKK ini
                 $cek = $koneksi->query("SELECT id_rkk_detail FROM tb_rkk_detail WHERE id_rkk='$idrkk' AND id_karyawan='$kid' LIMIT 1");
                 if ($cek && $cek->num_rows > 0) { $c_skip++; continue; }

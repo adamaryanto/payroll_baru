@@ -769,6 +769,27 @@ function rx_ensure_golongan($koneksi, $name) {
 }
 }
 
+if (!function_exists('rx_fill_master_osgol')) {
+// Lengkapi OS/Golongan master yang masih kosong dari teks Excel (auto-generate master).
+// Hanya mengisi yang kosong; yang sudah ada tidak diubah.
+function rx_fill_master_osgol($koneksi, $kid, $osdhk_txt, $gol_txt) {
+    $kid = (int)$kid;
+    if ($kid <= 0) return;
+    $mk = rx_q($koneksi, "SELECT id_os_dhk, id_golongan FROM ms_karyawan WHERE id_karyawan='$kid' LIMIT 1");
+    if (!($mk && ($m = $mk->fetch_assoc()))) return;
+    $os_txt = trim((string)$osdhk_txt);
+    if (empty($m['id_os_dhk']) && $os_txt !== '') {
+        $oid = rx_ensure_osdhk($koneksi, $os_txt);
+        if ($oid > 0) rx_q($koneksi, "UPDATE ms_karyawan SET id_os_dhk='$oid' WHERE id_karyawan='$kid'");
+    }
+    $gol_txt = trim((string)$gol_txt);
+    if (empty($m['id_golongan']) && $gol_txt !== '') {
+        $gid = rx_ensure_golongan($koneksi, $gol_txt);
+        if ($gid > 0) rx_q($koneksi, "UPDATE ms_karyawan SET id_golongan='$gid' WHERE id_karyawan='$kid'");
+    }
+}
+}
+
 if (!function_exists('rx_make_karyawan')) {
 // Buatkan karyawan baru dari data baris Excel. Return id_karyawan atau 0.
 function rx_make_karyawan($koneksi, $nama, $osdhk, $golongan, $posisi, $shift_id, $upah, $tgl_aktif, $def_dept, $def_sub) {

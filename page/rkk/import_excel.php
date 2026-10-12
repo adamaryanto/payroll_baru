@@ -94,6 +94,8 @@ if ($step === 'commit') {
                             }
                         }
                         if ($kid <= 0) continue;
+                        // Lengkapi OS/Golongan master yang masih kosong dari Excel
+                        rx_fill_master_osgol($koneksi, $kid, $r['osdhk'] ?? '', $r['golongan'] ?? '');
                         $up = (float)($r['upah'] ?? 0);
                         if (!$koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, id_grup, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$kid', NULL, $vdep, $vsub, '$up', 'Hadir', '$jd', $vg, '0', '0', '0', '$now')")) { $tx_fail = 'Gagal menyimpan detail RKK.'; break; }
                         $c_kar++;
