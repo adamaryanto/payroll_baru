@@ -207,8 +207,8 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
             } else {
                 if ($sid0 > 0) {
                     $sub_id = $sid0;
-                    $qs2 = $koneksi->query("SELECT id_departmen FROM ms_sub_department WHERE id_sub_department='$sid0' LIMIT 1");
-                    if ($qs2 && ($rs2 = $qs2->fetch_assoc()) && (int)($rs2['id_departmen'] ?? 0) > 0) $dep_id = (int)$rs2['id_departmen'];
+                    $d0 = rx_sub_dept($koneksi, $sid0);
+                    if ($d0 > 0) $dep_id = $d0;
                 } elseif ($pos_txt0 !== '') {
                     $posisi_baru = $pos_txt0; // belum ada di master -> dibuat otomatis saat simpan
                 }

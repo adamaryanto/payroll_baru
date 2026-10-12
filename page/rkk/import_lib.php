@@ -3,6 +3,28 @@
 // Isi: baca .xlsx (ZipArchive), baca .xls HTML hasil export, normalisasi,
 // cocok grup/karyawan/shift, auto-generate grup & karyawan.
 
+if (!function_exists('rx_q')) {
+// Query aman: gagal (kolom/tabel tak ada, mysqli strict-mode) -> false, bukan fatal.
+// Semua helper di file ini memakainya agar tahan beda schema/versi PHP.
+function rx_q($koneksi, $sql) {
+    try { return $koneksi->query($sql); }
+    catch (Throwable $e) { return false; }
+}
+}
+
+if (!function_exists('rx_sub_dept')) {
+// Ambil id_departmen milik satu sub (0 bila tabel tak punya kolomnya).
+function rx_sub_dept($koneksi, $sid) {
+    $sid = (int)$sid;
+    if ($sid <= 0) return 0;
+    $c = rx_q($koneksi, "SHOW COLUMNS FROM ms_sub_department LIKE 'id_departmen'");
+    if (!($c && $c->num_rows > 0)) return 0;
+    $q = rx_q($koneksi, "SELECT id_departmen FROM ms_sub_department WHERE id_sub_department='$sid' LIMIT 1");
+    if ($q && ($r = $q->fetch_assoc())) return (int)($r['id_departmen'] ?? 0);
+    return 0;
+}
+}
+
 if (!function_exists('rx_col2num')) {
 function rx_col2num($c) { $n = 0; for ($i = 0; $i < strlen($c); $i++) $n = $n * 26 + ord($c[$i]) - 64; return $n; }
 }
@@ -277,7 +299,7 @@ function rk_find_shift($koneksi, $g_raw) {
     $t = rx_frac_to_time($g_raw);
     if ($t === '' || $t === '00:00:00') return null;
     $esc = $koneksi->real_escape_string(substr($t, 0, 5));
-    $q = $koneksi->query("SELECT * FROM tb_jadwal WHERE SUBSTR(jam_masuk,1,5)='$esc' LIMIT 1");
+    $q = rx_q($koneksi, "SELECT * FROM tb_jadwal WHERE SUBSTR(jam_masuk,1,5)='$esc' LIMIT 1");
     if ($q && $q->num_rows > 0) return $q->fetch_assoc();
     return null;
 }
@@ -299,10 +321,10 @@ function rk_ensure_shift($koneksi, $g_raw, &$c_new = null) {
     $esc = $koneksi->real_escape_string($ket);
     $jm = $fm($in); $jk = $fm($in + 12 * 3600);
     $ik = $fm($in + 5 * 3600); $im = $fm($in + 6 * 3600);
-    if (!$koneksi->query("INSERT INTO tb_jadwal (keterangan, jam_masuk, jam_keluar, istirahat_masuk, istirahat_keluar) VALUES ('$esc', '$jm', '$jk', '$im', '$ik')")) return null;
+    if (!rx_q($koneksi, "INSERT INTO tb_jadwal (keterangan, jam_masuk, jam_keluar, istirahat_masuk, istirahat_keluar) VALUES ('$esc', '$jm', '$jk', '$im', '$ik')")) return null;
     $nid = (int)$koneksi->insert_id;
     if ($c_new !== null) $c_new++;
-    $q = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal='$nid' LIMIT 1");
+    $q = rx_q($koneksi, "SELECT * FROM tb_jadwal WHERE id_jadwal='$nid' LIMIT 1");
     return ($q && ($rw = $q->fetch_assoc())) ? $rw : null;
 }
 }
@@ -392,7 +414,7 @@ function rk_extract_satuan($rows) {
 if (!function_exists('rk_ensure_satuan_table')) {
 // Pastikan tabel + kolom tb_boneless_satuan ada (salinan pola tambah.php).
 function rk_ensure_satuan_table($koneksi) {
-    $koneksi->query("CREATE TABLE IF NOT EXISTS tb_boneless_satuan (
+    rx_q($koneksi, "CREATE TABLE IF NOT EXISTS tb_boneless_satuan (
       id_satuan INT AUTO_INCREMENT PRIMARY KEY,
       id_boneless INT NOT NULL,
       nama VARCHAR(255) NOT NULL,
@@ -400,10 +422,10 @@ function rk_ensure_satuan_table($koneksi) {
       upah INT NOT NULL DEFAULT 0,
       KEY idx_boneless (id_boneless)
     ) ENGINE=InnoDB");
-    $a = $koneksi->query("SHOW COLUMNS FROM tb_boneless_satuan LIKE 'satuan'");
-    if ($a && $a->num_rows == 0) $koneksi->query("ALTER TABLE tb_boneless_satuan ADD COLUMN satuan VARCHAR(10) NOT NULL DEFAULT 'KG'");
-    $b = $koneksi->query("SHOW COLUMNS FROM tb_boneless_satuan LIKE 'harga'");
-    if ($b && $b->num_rows == 0) $koneksi->query("ALTER TABLE tb_boneless_satuan ADD COLUMN harga INT NOT NULL DEFAULT 0");
+    $a = rx_q($koneksi, "SHOW COLUMNS FROM tb_boneless_satuan LIKE 'satuan'");
+    if ($a && $a->num_rows == 0) rx_q($koneksi, "ALTER TABLE tb_boneless_satuan ADD COLUMN satuan VARCHAR(10) NOT NULL DEFAULT 'KG'");
+    $b = rx_q($koneksi, "SHOW COLUMNS FROM tb_boneless_satuan LIKE 'harga'");
+    if ($b && $b->num_rows == 0) rx_q($koneksi, "ALTER TABLE tb_boneless_satuan ADD COLUMN harga INT NOT NULL DEFAULT 0");
 }
 }
 
@@ -416,14 +438,14 @@ function rx_save_boneless($koneksi, $tgl, $id_rkk, $bon, $title = '') {
     $items = $bon['items'] ?? [];
     $satuan = $bon['satuan'] ?? [];
     if ($mobil <= 0 && empty($items) && empty($satuan)) return '';
-    $cek = $koneksi->query("SELECT id_boneless FROM tb_boneless WHERE tgl='$tgl' LIMIT 1");
+    $cek = rx_q($koneksi, "SELECT id_boneless FROM tb_boneless WHERE tgl='$tgl' LIMIT 1");
     if ($cek && $cek->num_rows > 0) return ' (boneless tgl tsb sudah ada, dilewati)';
     $id_bm = 'NULL';
-    $qb = $koneksi->query("SELECT id_biayamobil FROM tb_biayamobil LIMIT 1");
+    $qb = rx_q($koneksi, "SELECT id_biayamobil FROM tb_biayamobil LIMIT 1");
     if ($qb && ($rb = $qb->fetch_assoc()) && (int)($rb['id_biayamobil'] ?? 0) > 0) $id_bm = "'" . (int)$rb['id_biayamobil'] . "'";
     $id_rkk = (int)$id_rkk;
     $ket = $koneksi->real_escape_string(trim('Auto import Excel ' . $title));
-    if (!$koneksi->query("INSERT INTO tb_boneless (id_rkk, id_biayamobil, tgl, jumlah_mobil, keterangan, tgl_updt) VALUES ('$id_rkk', $id_bm, '$tgl', '$mobil', '$ket', NOW())")) return ' (boneless gagal tersimpan)';
+    if (!rx_q($koneksi, "INSERT INTO tb_boneless (id_rkk, id_biayamobil, tgl, jumlah_mobil, keterangan, tgl_updt) VALUES ('$id_rkk', $id_bm, '$tgl', '$mobil', '$ket', NOW())")) return ' (boneless gagal tersimpan)';
     $id_bon = (int)$koneksi->insert_id;
     $c_it = 0;
     foreach ($items as $it) {
@@ -434,7 +456,7 @@ function rx_save_boneless($koneksi, $tgl, $id_rkk, $bon, $title = '') {
         $ttl = $qty * $hrg;
         $jn = (($it['jenis'] ?? 'plus') === 'minus') ? 'minus' : 'plus';
         $nm_esc = $koneksi->real_escape_string($nm);
-        if ($koneksi->query("INSERT INTO tb_boneless_detail (id_boneless, nama_item, qty, harga, total, jenis) VALUES ('$id_bon', '$nm_esc', '$qty', '$hrg', '$ttl', '$jn')")) $c_it++;
+        if (rx_q($koneksi, "INSERT INTO tb_boneless_detail (id_boneless, nama_item, qty, harga, total, jenis) VALUES ('$id_bon', '$nm_esc', '$qty', '$hrg', '$ttl', '$jn')")) $c_it++;
     }
     $c_sat = 0;
     if (!empty($satuan)) {
@@ -447,7 +469,7 @@ function rx_save_boneless($koneksi, $tgl, $id_rkk, $bon, $title = '') {
             if ($q <= 0 && $u <= 0) continue;
             $h = (int)($st['harga'] ?? 0);
             $nm_esc = $koneksi->real_escape_string($nm);
-            if ($koneksi->query("INSERT INTO tb_boneless_satuan (id_boneless, nama, hasil, upah, satuan, harga) VALUES ('$id_bon', '$nm_esc', '$q', '$u', 'KG', '$h')")) $c_sat++;
+            if (rx_q($koneksi, "INSERT INTO tb_boneless_satuan (id_boneless, nama, hasil, upah, satuan, harga) VALUES ('$id_bon', '$nm_esc', '$q', '$u', 'KG', '$h')")) $c_sat++;
         }
     }
     return " + boneless ($mobil mobil, $c_it item" . ($c_sat > 0 ? ", $c_sat satuan" : "") . ")";
@@ -458,7 +480,7 @@ if (!function_exists('rk_match_shift')) {
 // Cocokkan string jam (fraksi/"08:00") ke tb_jadwal.jam_masuk; fallback jadwal pertama
 function rk_match_shift($koneksi, $g_raw) {
     $map = [];
-    $q = $koneksi->query("SELECT * FROM tb_jadwal ORDER BY id_jadwal ASC");
+    $q = rx_q($koneksi, "SELECT * FROM tb_jadwal ORDER BY id_jadwal ASC");
     $first = null;
     while ($q && ($r = $q->fetch_assoc())) {
         if (!$first) $first = $r;
@@ -479,7 +501,7 @@ function rk_find_grup($koneksi, $name) {
     $name = trim((string)$name);
     if ($name === '') return null;
     $esc = $koneksi->real_escape_string($name);
-    $q = $koneksi->query("SELECT id_grup, nama_grup FROM ms_grup_borongan WHERE UPPER(TRIM(nama_grup))=UPPER('$esc') LIMIT 1");
+    $q = rx_q($koneksi, "SELECT id_grup, nama_grup FROM ms_grup_borongan WHERE UPPER(TRIM(nama_grup))=UPPER('$esc') LIMIT 1");
     if ($q && $q->num_rows > 0) return $q->fetch_assoc();
     return null;
 }
@@ -494,7 +516,7 @@ function rk_ensure_grup($koneksi, $section, &$c_new) {
     if ($g) return (int)$g['id_grup'];
     $nm = $koneksi->real_escape_string($section);
     $now = date('Y-m-d H:i:s');
-    if ($koneksi->query("INSERT INTO ms_grup_borongan (nama_grup, keterangan, tgl_updt) VALUES ('$nm', 'Auto import Excel', '$now')")) {
+    if (rx_q($koneksi, "INSERT INTO ms_grup_borongan (nama_grup, keterangan, tgl_updt) VALUES ('$nm', 'Auto import Excel', '$now')")) {
         $c_new++;
         return (int)$koneksi->insert_id;
     }
@@ -506,7 +528,7 @@ if (!function_exists('rx_guess_shift')) {
 // Tebak shift dari durasi jam kerja -> baris tb_jadwal (durasi terdekat)
 function rx_guess_shift($koneksi, $hours) {
     $best = null; $bestDiff = null;
-    $q = $koneksi->query("SELECT * FROM tb_jadwal");
+    $q = rx_q($koneksi, "SELECT * FROM tb_jadwal");
     if (!$q) return null;
     while ($r = $q->fetch_assoc()) {
         $in = strtotime($r['jam_masuk'] ?? '00:00:00');
@@ -526,7 +548,7 @@ function rx_match_karyawan($koneksi, $name) {
     $n = rx_norm_name($name);
     if ($n === '') return null;
     $esc = $koneksi->real_escape_string($n);
-    $q = $koneksi->query("SELECT id_karyawan, no_absen, nama_karyawan, id_jadwal, upah, id_os_dhk, id_golongan FROM ms_karyawan WHERE TRIM(nama_karyawan)='$esc' OR LOWER(TRIM(nama_karyawan))=LOWER('$esc') LIMIT 1");
+    $q = rx_q($koneksi, "SELECT id_karyawan, no_absen, nama_karyawan, id_jadwal, upah, id_os_dhk, id_golongan FROM ms_karyawan WHERE TRIM(nama_karyawan)='$esc' OR LOWER(TRIM(nama_karyawan))=LOWER('$esc') LIMIT 1");
     if ($q && $q->num_rows > 0) return $q->fetch_assoc();
     return null;
 }
@@ -537,11 +559,11 @@ function rx_lookup_id($koneksi, $table, $col, $val) {
     $val = trim((string)$val);
     if ($val === '') return 0;
     $pk = null;
-    $q = $koneksi->query("SHOW COLUMNS FROM $table");
+    $q = rx_q($koneksi, "SHOW COLUMNS FROM $table");
     if ($q) { $first = $q->fetch_assoc(); $pk = $first['Field']; }
     if (!$pk) return 0;
     $esc = $koneksi->real_escape_string($val);
-    $qr = $koneksi->query("SELECT $pk FROM $table WHERE UPPER(TRIM($col))=UPPER('$esc') LIMIT 1");
+    $qr = rx_q($koneksi, "SELECT $pk FROM $table WHERE UPPER(TRIM($col))=UPPER('$esc') LIMIT 1");
     if ($qr && $qr->num_rows > 0) { $rw = $qr->fetch_assoc(); return (int)$rw[$pk]; }
     return 0;
 }
@@ -549,11 +571,11 @@ function rx_lookup_id($koneksi, $table, $col, $val) {
 
 if (!function_exists('rx_next_no_absen')) {
 function rx_next_no_absen($koneksi) {
-    $q = $koneksi->query("SELECT MAX(no_absen) AS mx FROM ms_karyawan");
+    $q = rx_q($koneksi, "SELECT MAX(no_absen) AS mx FROM ms_karyawan");
     $mx = ($q && ($r = $q->fetch_assoc())) ? (int)$r['mx'] : 0;
     $cand = max($mx + 1, 1);
     do {
-        $cek = $koneksi->query("SELECT id_karyawan FROM ms_karyawan WHERE no_absen='$cand' LIMIT 1");
+        $cek = rx_q($koneksi, "SELECT id_karyawan FROM ms_karyawan WHERE no_absen='$cand' LIMIT 1");
         $taken = $cek && $cek->num_rows > 0;
         if ($taken) $cand++;
     } while ($taken);
@@ -587,12 +609,12 @@ function rx_ensure_dept($koneksi, $name) {
     if ($id > 0) return $id;
     $esc = $koneksi->real_escape_string($name);
     $cols = [];
-    $q = $koneksi->query("SHOW COLUMNS FROM ms_departmen");
+    $q = rx_q($koneksi, "SHOW COLUMNS FROM ms_departmen");
     while ($q && ($c = $q->fetch_assoc())) $cols[] = $c['Field'];
     if (in_array('id_perusahaan', $cols, true)) {
-        if ($koneksi->query("INSERT INTO ms_departmen (nama_departmen, id_perusahaan) VALUES ('$esc', '1')")) return (int)$koneksi->insert_id;
+        if (rx_q($koneksi, "INSERT INTO ms_departmen (nama_departmen, id_perusahaan) VALUES ('$esc', '1')")) return (int)$koneksi->insert_id;
     } else {
-        if ($koneksi->query("INSERT INTO ms_departmen (nama_departmen) VALUES ('$esc')")) return (int)$koneksi->insert_id;
+        if (rx_q($koneksi, "INSERT INTO ms_departmen (nama_departmen) VALUES ('$esc')")) return (int)$koneksi->insert_id;
     }
     return 0;
 }
@@ -608,12 +630,12 @@ function rx_ensure_sub($koneksi, $name, $dept_id = 0) {
     $esc = $koneksi->real_escape_string($name);
     $dep = (int)$dept_id;
     $cols = [];
-    $q = $koneksi->query("SHOW COLUMNS FROM ms_sub_department");
+    $q = rx_q($koneksi, "SHOW COLUMNS FROM ms_sub_department");
     while ($q && ($c = $q->fetch_assoc())) $cols[] = $c['Field'];
     $f = ['nama_sub_department']; $v = ["'$esc'"];
     if (in_array('id_departmen', $cols, true)) { $f[] = 'id_departmen'; $v[] = "'$dep'"; }
     if (in_array('id_perusahaan', $cols, true)) { $f[] = 'id_perusahaan'; $v[] = "'1'"; }
-    if ($koneksi->query("INSERT INTO ms_sub_department (" . implode(',', $f) . ") VALUES (" . implode(',', $v) . ")")) return (int)$koneksi->insert_id;
+    if (rx_q($koneksi, "INSERT INTO ms_sub_department (" . implode(',', $f) . ") VALUES (" . implode(',', $v) . ")")) return (int)$koneksi->insert_id;
     return 0;
 }
 }
@@ -659,10 +681,10 @@ if (!function_exists('rx_valid_dept')) {
 function rx_valid_dept($koneksi, $id) {
     $id = (int)$id;
     if ($id > 0) {
-        $q = $koneksi->query("SELECT id_departmen FROM ms_departmen WHERE id_departmen='$id' LIMIT 1");
+        $q = rx_q($koneksi, "SELECT id_departmen FROM ms_departmen WHERE id_departmen='$id' LIMIT 1");
         if ($q && $q->num_rows > 0) return $id;
     }
-    $q = $koneksi->query("SELECT MIN(id_departmen) AS m FROM ms_departmen");
+    $q = rx_q($koneksi, "SELECT MIN(id_departmen) AS m FROM ms_departmen");
     if ($q && ($r = $q->fetch_assoc()) && (int)($r['m'] ?? 0) > 0) return (int)$r['m'];
     return rx_ensure_dept($koneksi, 'UMUM');
 }
@@ -673,10 +695,10 @@ if (!function_exists('rx_valid_sub')) {
 function rx_valid_sub($koneksi, $id, $dep = 0) {
     $id = (int)$id;
     if ($id > 0) {
-        $q = $koneksi->query("SELECT id_sub_department FROM ms_sub_department WHERE id_sub_department='$id' LIMIT 1");
+        $q = rx_q($koneksi, "SELECT id_sub_department FROM ms_sub_department WHERE id_sub_department='$id' LIMIT 1");
         if ($q && $q->num_rows > 0) return $id;
     }
-    $q = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
+    $q = rx_q($koneksi, "SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
     if ($q && ($r = $q->fetch_assoc()) && (int)($r['m'] ?? 0) > 0) return (int)$r['m'];
     return rx_ensure_sub($koneksi, 'UMUM', $dep);
 }
@@ -690,7 +712,7 @@ function rx_ensure_osdhk($koneksi, $name) {
     $id = rx_lookup_id($koneksi, 'ms_os_dhk', 'OS_DHK', $name);
     if ($id > 0) return $id;
     $esc = $koneksi->real_escape_string($name);
-    if ($koneksi->query("INSERT INTO ms_os_dhk (OS_DHK) VALUES ('$esc')")) return (int)$koneksi->insert_id;
+    if (rx_q($koneksi, "INSERT INTO ms_os_dhk (OS_DHK) VALUES ('$esc')")) return (int)$koneksi->insert_id;
     return 0;
 }
 }
@@ -703,7 +725,7 @@ function rx_ensure_golongan($koneksi, $name) {
     $id = rx_lookup_id($koneksi, 'ms_golongan', 'golongan', $name);
     if ($id > 0) return $id;
     $esc = $koneksi->real_escape_string($name);
-    if ($koneksi->query("INSERT INTO ms_golongan (golongan) VALUES ('$esc')")) return (int)$koneksi->insert_id;
+    if (rx_q($koneksi, "INSERT INTO ms_golongan (golongan) VALUES ('$esc')")) return (int)$koneksi->insert_id;
     return 0;
 }
 }
@@ -722,7 +744,7 @@ function rx_make_karyawan($koneksi, $nama, $osdhk, $golongan, $posisi, $shift_id
         if ($sid > 0) $sub = $sid;
     }
     $jd = (int)$shift_id; $up = (int)$upah;
-    $ok = $koneksi->query("INSERT INTO ms_karyawan (id_departmen, id_jabatan, no_absen, nama_karyawan, tempat_lahir, tgl_lahir, agama, status_kawin, jenis_kelamin, no_ktp, no_bpjs, alamat_ktp, alamat_tinggal, status_karyawan, tgl_aktif, id_sub_department, id_os_dhk, id_golongan, id_jadwal, upah, target_mingguan, target_bulanan) VALUES ('$def_dept','0','$no_absen','$nm_esc','',NULL,'',NULL,NULL,'','','','','Aktif','$tgl_aktif','$sub','$os','$gol','$jd','$up','20.00','40.00')");
+    $ok = rx_q($koneksi, "INSERT INTO ms_karyawan (id_departmen, id_jabatan, no_absen, nama_karyawan, tempat_lahir, tgl_lahir, agama, status_kawin, jenis_kelamin, no_ktp, no_bpjs, alamat_ktp, alamat_tinggal, status_karyawan, tgl_aktif, id_sub_department, id_os_dhk, id_golongan, id_jadwal, upah, target_mingguan, target_bulanan) VALUES ('$def_dept','0','$no_absen','$nm_esc','',NULL,'',NULL,NULL,'','','','','Aktif','$tgl_aktif','$sub','$os','$gol','$jd','$up','20.00','40.00')");
     return $ok ? (int)$koneksi->insert_id : 0;
 }
 }
