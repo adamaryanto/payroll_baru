@@ -271,6 +271,56 @@ function rk_extract_kelola($rows, $koneksi = null) {
 }
 }
 
+if (!function_exists('rk_find_shift')) {
+// Cari shift persis jam masuk (tanpa fallback). Return baris tb_jadwal atau null.
+function rk_find_shift($koneksi, $g_raw) {
+    $t = rx_frac_to_time($g_raw);
+    if ($t === '' || $t === '00:00:00') return null;
+    $esc = $koneksi->real_escape_string(substr($t, 0, 5));
+    $q = $koneksi->query("SELECT * FROM tb_jadwal WHERE SUBSTR(jam_masuk,1,5)='$esc' LIMIT 1");
+    if ($q && $q->num_rows > 0) return $q->fetch_assoc();
+    return null;
+}
+}
+
+if (!function_exists('rk_ensure_shift')) {
+// Cari shift, buatkan bila belum ada (pola 12 jam: keluar=masuk+12,
+// istirahat keluar=masuk+5, istirahat masuk=masuk+6, ket "Shift H - H").
+// Return baris tb_jadwal atau null. $c_new bertambah bila baru dibuat.
+function rk_ensure_shift($koneksi, $g_raw, &$c_new = null) {
+    $f = rk_find_shift($koneksi, $g_raw);
+    if ($f) return $f;
+    $t = rx_frac_to_time($g_raw);
+    if ($t === '' || $t === '00:00:00') return null;
+    $in = strtotime($t);
+    $fm = function($ts) { return date('H:i', $ts); };
+    $hlab = function($ts) { $h = (int)date('H', $ts); $m = date('i', $ts); if ($h === 0 && $m === '00') return '24'; return $m === '00' ? (string)$h : ($h . ':' . $m); };
+    $ket = 'Shift ' . $hlab($in) . ' - ' . $hlab($in + 12 * 3600);
+    $esc = $koneksi->real_escape_string($ket);
+    $jm = $fm($in); $jk = $fm($in + 12 * 3600);
+    $ik = $fm($in + 5 * 3600); $im = $fm($in + 6 * 3600);
+    if (!$koneksi->query("INSERT INTO tb_jadwal (keterangan, jam_masuk, jam_keluar, istirahat_masuk, istirahat_keluar) VALUES ('$esc', '$jm', '$jk', '$im', '$ik')")) return null;
+    $nid = (int)$koneksi->insert_id;
+    if ($c_new !== null) $c_new++;
+    $q = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal='$nid' LIMIT 1");
+    return ($q && ($rw = $q->fetch_assoc())) ? $rw : null;
+}
+}
+
+if (!function_exists('rx_commit_shift')) {
+// Tentukan id_jadwal final satu baris import: opsi "(baru)" -> generate;
+// numerik -> pakai; selain itu fallback session.
+function rx_commit_shift($koneksi, $r, &$c_new = null) {
+    $raw = trim((string)($r['sh_raw'] ?? ''));
+    if ($raw !== '' && !ctype_digit($raw) && strpos($raw, 'baru:') === 0) {
+        $ns = rk_ensure_shift($koneksi, substr($raw, 5), $c_new);
+        if ($ns) return (int)$ns['id_jadwal'];
+    }
+    if ($raw !== '' && ctype_digit($raw) && (int)$raw > 0) return (int)$raw;
+    return (int)($r['shift_id'] ?? 0);
+}
+}
+
 if (!function_exists('rk_match_shift')) {
 // Cocokkan string jam (fraksi/"08:00") ke tb_jadwal.jam_masuk; fallback jadwal pertama
 function rk_match_shift($koneksi, $g_raw) {

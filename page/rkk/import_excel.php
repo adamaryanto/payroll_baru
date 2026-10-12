@@ -23,7 +23,8 @@ if ($step === 'commit') {
         $rows = [];
         foreach (($imp['rows'] ?? []) as $i => $r) {
             if (!in_array($i, $sel, true)) continue;
-            $r['shift_id'] = isset($_POST["sh_$i"]) ? (int)$_POST["sh_$i"] : (int)($r['shift_id'] ?? 0);
+            $r['shift_id'] = (isset($_POST["sh_$i"]) && ctype_digit((string)$_POST["sh_$i"])) ? (int)$_POST["sh_$i"] : (int)($r['shift_id'] ?? 0);
+            $r['sh_raw'] = isset($_POST["sh_$i"]) ? trim((string)$_POST["sh_$i"]) : '';
             $r['upah'] = isset($_POST["up_$i"]) ? max(0, (int)str_replace('.', '', $_POST["up_$i"])) : (int)($r['upah'] ?? 0);
             $r['dept_id'] = isset($_POST["dp_$i"]) ? (int)$_POST["dp_$i"] : (int)($r['dept_id'] ?? 0);
             $r['sub_id'] = isset($_POST["ps_$i"]) ? (int)$_POST["ps_$i"] : (int)($r['sub_id'] ?? 0);
@@ -60,7 +61,7 @@ if ($step === 'commit') {
                     $jamkerja = $jamkerja > 0 ? (int)round($jamkerja) : 12;
                     if (!$koneksi->query("INSERT INTO tb_rkk (tgl_rkk, keterangan, jam_kerja, detail_rkk, status_rkk, tgl_status) VALUES ('$tgl', '$ket', '$jamkerja', '$now', '0', '$now')")) $tx_fail = 'Gagal menyimpan header RKK.';
                     $id_rkk = $koneksi->insert_id;
-                    $c_kar = 0; $c_new = 0; $c_grup = 0;
+                    $c_kar = 0; $c_new = 0; $c_grup = 0; $c_shift = 0;
                     $qd = $koneksi->query("SELECT MIN(id_departmen) AS m FROM ms_departmen");
                     $def_dept = ($qd && ($rd = $qd->fetch_assoc()) && $rd['m']) ? (int)$rd['m'] : 0;
                     $qs = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
@@ -77,9 +78,10 @@ if ($step === 'commit') {
                         $vg = ($id_grup === null) ? "NULL" : "'$id_grup'";
                         $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
                         $sub = rx_commit_sub($koneksi, $r, $dep, $def_sub);
+                        $jd = rx_commit_shift($koneksi, $r, $c_shift);
                         $kid = (int)($r['karyawan_id'] ?? 0);
                         if ($kid <= 0 && !empty($r['nama'])) {
-                            $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $r['shift_id'] ?? 0, $r['upah'] ?? 0, $tgl, $dep, $sub);
+                            $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $jd, $r['upah'] ?? 0, $tgl, $dep, $sub);
                             if ($kid > 0) {
                                 $c_new++;
                                 // Paksa dept/posisi master ikut pilihan preview (bukan tebakan teks Excel)
@@ -88,7 +90,6 @@ if ($step === 'commit') {
                         }
                         if ($kid <= 0) continue;
                         $up = (float)($r['upah'] ?? 0);
-                        $jd = (int)($r['shift_id'] ?? 0);
                         if (!$koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, id_grup, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) VALUES ('$id_rkk', '$kid', NULL, '$dep', '$sub', '$up', 'Hadir', '$jd', $vg, '0', '0', '0', '$now')")) { $tx_fail = 'Gagal menyimpan detail RKK.'; break; }
                         $c_kar++;
                     }
@@ -100,7 +101,7 @@ if ($step === 'commit') {
                         $koneksi->commit();
                     unset($_SESSION['rx_import']);
                     $alert = ["icon" => "success", "title" => "Import Selesai",
-                        "text" => "RKK#$id_rkk ($tgl): $c_kar karyawan" . ($c_new > 0 ? " ($c_new karyawan baru)" : "") . ($c_grup > 0 ? ", $c_grup grup baru" : "") . "."]; 
+                        "text" => "RKK#$id_rkk ($tgl): $c_kar karyawan" . ($c_new > 0 ? " ($c_new karyawan baru)" : "") . ($c_grup > 0 ? ", $c_grup grup baru" : "") . ($c_shift > 0 ? ", $c_shift shift baru" : "") . "."]; 
                     $redirect = "?page=rkk";
                 }
                 }
@@ -168,7 +169,13 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
             $base = $m['plan'] ?: $m['real'];
             $nama = $base['nama'];
             $g_raw = ($m['plan'] ? $m['plan']['g_raw'] : '') ?: ($m['real'] ? $m['real']['g_raw'] : '');
-            $shift = rk_match_shift($koneksi, $g_raw);
+            $shift = rk_find_shift($koneksi, $g_raw);
+            $shift_baru = '';
+            if (!$shift) {
+                $st = rx_frac_to_time($g_raw);
+                if ($st !== '' && $st !== '00:00:00') $shift_baru = substr($st, 0, 5);
+                $shift = rk_match_shift($koneksi, $g_raw); // fallback tampilan
+            }
             $match = rx_match_karyawan($koneksi, $nama);
             // Department ikut master; Posisi ikut teks Excel (cocok -> kepilih, baru -> opsi "(baru)" + auto-create).
             $dep_id = $pv_dept; $sub_id = $pv_sub; $posisi_baru = '';
@@ -213,6 +220,7 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                 'grup_baru' => trim($section) !== '' && !rk_find_grup($koneksi, $section),
                 'shift_id' => $shift ? (int)$shift['id_jadwal'] : 0,
                 'shift' => $shift,
+                'shift_baru' => $shift_baru,
                 'jam_kerja' => rx_frac_to_hours($g_raw),
                 'upah' => $m['plan'] ? (float)$m['plan']['upah_excel'] : (float)($m['real']['upah_excel'] ?? 0),
                 'osdhk' => $base['osdhk'] ?? '',
@@ -313,9 +321,11 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                 <td class="py-2 px-3">
                                     <select name="sh_<?= $idx; ?>" class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
                                         <?php foreach ($jadwal_opts as $jo): ?>
-                                            <option value="<?= $jo['id_jadwal']; ?>" <?= ((int)$jo['id_jadwal'] === (int)$r['shift_id']) ? 'selected' : ''; ?>><?= htmlspecialchars($jo['keterangan']); ?></option>
+                                            <option value="<?= $jo['id_jadwal']; ?>" <?= (empty($r['shift_baru']) && (int)$jo['id_jadwal'] === (int)$r['shift_id']) ? 'selected' : ''; ?>><?= htmlspecialchars($jo['keterangan']); ?></option>
                                         <?php endforeach; ?>
+                                        <?php if (!empty($r['shift_baru'])): ?><option value="baru:<?= htmlspecialchars($r['shift_baru']); ?>" selected>Jam <?= htmlspecialchars($r['shift_baru']); ?> (baru)</option><?php endif; ?>
                                     </select>
+                                    <?php if (!empty($r['shift_baru'])): ?><div class="text-[11px] font-bold text-purple-700 mt-1">Shift jam <?= htmlspecialchars($r['shift_baru']); ?> baru → otomatis dibuat (12 jam)</div><?php endif; ?>
                                 </td>
                                 <td class="py-2 px-3">
                                     <select name="ps_<?= $idx; ?>" class="rx_pos px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
@@ -389,7 +399,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
             </form>
             <div class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 leading-relaxed">
                 <strong>Cara kerja:</strong> tanggal diambil dari judul baris 1 (bisa dikoreksi di preview). Section di Excel = grup — kalau belum ada di master, otomatis dibuatkan.
-                Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada).                 Department &amp; Posisi ikut master/tebakan Excel dan bisa diubah per baris — pilihan Posisi otomatis ikut Department. Posisi yang belum ada di master otomatis dibuatkan saat simpan.
+                Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada). Shift yang belum ada di master otomatis dibuatkan (12 jam). Department &amp; Posisi ikut master/tebakan Excel dan bisa diubah per baris — pilihan Posisi otomatis ikut Department. Posisi yang belum ada di master otomatis dibuatkan saat simpan.
                 Nama yang tidak cocok otomatis dibuatkan karyawan baru (No. Absen = MAX+1). Baris kotor tetap diproses tapi tidak dicentang — cek manual.
             </div>
             <?php endif; ?>
