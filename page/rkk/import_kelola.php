@@ -38,6 +38,24 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
     if (!$imp || (int)($imp['id_rkk'] ?? 0) !== $idrkk) {
         $alert = ["icon" => "error", "title" => "Kedaluwarsa", "text" => "Data preview kedaluwarsa. Upload ulang filenya."];
     } else {
+        $sel = [];
+        // Payload JSON dari JS (1 variabel, kebal max_input_vars): uraikan ke $_POST agar logika bawah tetap sama.
+        // Tanpa JS (fallback) alur lama via rk_sel[] + sh_/up_/dp_/ps_ tetap jalan.
+        if (!empty($_POST['rk_payload'])) {
+            $dec = json_decode((string)$_POST['rk_payload'], true);
+            if (is_array($dec)) {
+                $_POST['rk_sel'] = [];
+                foreach ($dec as $pr) {
+                    if (!is_array($pr)) continue;
+                    $pi = (int)($pr['i'] ?? -1);
+                    if ($pi < 0) continue;
+                    $_POST['rk_sel'][] = $pi;
+                    foreach (['sh', 'up', 'dp', 'ps'] as $kk) {
+                        if (array_key_exists($kk, $pr)) $_POST[$kk . '_' . $pi] = $pr[$kk];
+                    }
+                }
+            }
+        }
         $sel = array_map('intval', (array)($_POST['rk_sel'] ?? []));
         $rows = [];
         foreach (($imp['rows'] ?? []) as $i => $r) {
@@ -46,6 +64,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
             $r['sh_raw'] = isset($_POST["sh_$i"]) ? trim((string)$_POST["sh_$i"]) : '';
             $r['upah'] = isset($_POST["up_$i"]) ? max(0, (int)str_replace('.', '', $_POST["up_$i"])) : (int)($r['upah'] ?? 0);
             $r['dept_id'] = isset($_POST["dp_$i"]) ? (int)$_POST["dp_$i"] : (int)($r['dept_id'] ?? 0);
+            $r['dp_raw'] = isset($_POST["dp_$i"]) ? trim((string)$_POST["dp_$i"]) : '';
             $r['sub_id'] = isset($_POST["ps_$i"]) ? (int)$_POST["ps_$i"] : (int)($r['sub_id'] ?? 0);
             $r['ps_raw'] = isset($_POST["ps_$i"]) ? trim((string)$_POST["ps_$i"]) : '';
             $rows[] = $r;
@@ -58,7 +77,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
             $def_dept = ($qd && ($rd = $qd->fetch_assoc()) && $rd['m']) ? (int)$rd['m'] : 0;
             $qs = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
             $def_sub = ($qs && ($rs = $qs->fetch_assoc()) && $rs['m']) ? (int)$rs['m'] : 0;
-            $c_add = 0; $c_new_kar = 0; $c_new_grup = 0; $c_skip = 0; $c_new_shift = 0;
+            $c_add = 0; $c_new_kar = 0; $c_new_grup = 0; $c_skip = 0; $c_new_shift = 0; $c_agt = 0;
             foreach ($rows as $r) {
                 // 1. Grup: cari / buat otomatis
                 $id_grup = rk_ensure_grup($koneksi, $r['section'] ?? '', $c_new_grup);
@@ -70,6 +89,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                     $kid = (int)$m['id_karyawan'];
                     $mk = $koneksi->query("SELECT id_departmen, id_sub_department, upah FROM ms_karyawan WHERE id_karyawan='$kid'")->fetch_assoc();
                     $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : (((int)($mk['id_departmen'] ?? 0) > 0) ? (int)$mk['id_departmen'] : $def_dept);
+                    $dep = rx_commit_dept($koneksi, $r, $dep); // opsi teks "(baru)" -> generate otomatis
                     $sub = rx_commit_sub($koneksi, $r, $dep);
                     $dep = rx_valid_dept($koneksi, $dep);
                     $sub = rx_valid_sub($koneksi, $sub, $dep);
@@ -78,6 +98,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                     if ((int)($r['upah'] ?? 0) <= 0) $r['upah'] = (int)($mk['upah'] ?? 0);
                 } else {
                     $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
+                    $dep = rx_commit_dept($koneksi, $r, $dep); // opsi teks "(baru)" -> generate otomatis
                     $sub = rx_commit_sub($koneksi, $r, $dep);
                     $dep = rx_valid_dept($koneksi, $dep);
                     $sub = rx_valid_sub($koneksi, $sub, $dep);
@@ -92,6 +113,13 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                 // 2b. Lengkapi OS/Golongan master yang masih kosong dari Excel
                 // (jalan juga saat barisnya dilewati duplikat di bawah)
                 if ($kid > 0) rx_fill_master_osgol($koneksi, $kid, $r['osdhk'] ?? '', $r['golongan'] ?? '');
+                // 2c. Auto-masuk master grup: section Excel = grupnya (boleh rangkap, tidak mengeluarkan dari grup lama)
+                if ($kid > 0 && $id_grup !== null) {
+                    $gid_ins = (int)$id_grup;
+                    if ($koneksi->query("INSERT IGNORE INTO ms_grup_borongan_anggota (id_grup, id_karyawan, tarif, is_borongan) VALUES ('$gid_ins', '$kid', NULL, 0)")) {
+                        if ((int)$koneksi->affected_rows > 0) $c_agt++;
+                    }
+                }
                 // 3. Lewati duplikat di RKK ini
                 $cek = $koneksi->query("SELECT id_rkk_detail FROM tb_rkk_detail WHERE id_rkk='$idrkk' AND id_karyawan='$kid' LIMIT 1");
                 if ($cek && $cek->num_rows > 0) { $c_skip++; continue; }
@@ -101,7 +129,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'commit') {
                 if ($ok) $c_add++; else $c_skip++;
             }
             unset($_SESSION['rk_imp_kelola']);
-            $msg = "$c_add ditambahkan" . ($c_new_kar > 0 ? ", $c_new_kar karyawan baru dibuat" : "") . ($c_new_grup > 0 ? ", $c_new_grup grup baru dibuat" : "") . ($c_new_shift > 0 ? ", $c_new_shift shift baru dibuat" : "") . ($c_skip > 0 ? ", $c_skip dilewati (sudah ada/gagal)" : "");
+            $msg = "$c_add ditambahkan" . ($c_new_kar > 0 ? ", $c_new_kar karyawan baru dibuat" : "") . ($c_new_grup > 0 ? ", $c_new_grup grup baru dibuat" : "") . ($c_new_shift > 0 ? ", $c_new_shift shift baru dibuat" : "") . ($c_agt > 0 ? ", $c_agt anggota masuk master grup" : "") . ($c_skip > 0 ? ", $c_skip dilewati (sudah ada/gagal)" : "");
             $alert = ["icon" => $c_add > 0 ? "success" : "warning", "title" => $c_add > 0 ? "Import Selesai" : "Tidak Ada yang Disimpan", "text" => $msg];
             $redirect = "?page=rkk&aksi=kelola&id=$idrkk";
         }
@@ -152,7 +180,8 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'preview' && !empty($_FILES['fexcel
                     $sh = rk_match_shift($koneksi, $r['g_raw']); // fallback tampilan
                 }
                 // Department ikut master; Posisi ikut teks Excel (cocok -> kepilih, baru -> opsi "(baru)" + auto-create).
-                $dep_id = $pv_dept; $sub_id = $pv_sub; $posisi_baru = '';
+                // Bila department belum ketemu tapi posisinya baru -> department ikut teks posisi (opsi "(baru)" + auto-create).
+                $dep_id = $pv_dept; $sub_id = $pv_sub; $posisi_baru = ''; $dept_baru = '';
                 $pos_txt0 = trim($r['posisi'] ?? '');
                 $sid0 = ($pos_txt0 !== '') ? rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt0) : 0;
                 if ($m) {
@@ -173,6 +202,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'preview' && !empty($_FILES['fexcel
                             $posisi_baru = $pos_txt0; // belum ada di master -> dibuat otomatis saat simpan
                         } else { $sub_id = 0; } // Excel kosong -> kosong, jangan ngarang
                 }
+                if ($dep_id <= 0 && $posisi_baru !== '') $dept_baru = $posisi_baru; // dept ngikutin posisi baru di Excel
                 $os_txt0 = trim($r['osdhk'] ?? ''); $gol_txt0 = trim($r['golongan'] ?? '');
                 $os_baru = (!$m && $os_txt0 !== '' && rx_lookup_id($koneksi, 'ms_os_dhk', 'OS_DHK', $os_txt0) <= 0) ? $os_txt0 : '';
                 $gol_baru = (!$m && $gol_txt0 !== '' && rx_lookup_id($koneksi, 'ms_golongan', 'golongan', $gol_txt0) <= 0) ? $gol_txt0 : '';
@@ -193,6 +223,7 @@ if (!$alert && ($_POST['rk_step'] ?? '') === 'preview' && !empty($_FILES['fexcel
                     'dept_id' => $dep_id,
                     'sub_id' => $sub_id,
                     'posisi_baru' => $posisi_baru,
+                    'dept_baru' => $dept_baru,
                 ];
             }
             $_SESSION['rk_imp_kelola'] = ['id_rkk' => $idrkk, 'rows' => $rows];
@@ -229,8 +260,9 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                 <strong>File:</strong> <?= htmlspecialchars($preview['fname']); ?> | <strong>Sheet:</strong> <?= htmlspecialchars($preview['sheet']); ?> |
                 <strong><?= count($preview['rows']); ?></strong> baris karyawan
             </div>
-            <form method="POST">
+            <form method="POST" id="rk_commit_form">
                 <input type="hidden" name="rk_step" value="commit">
+                <input type="hidden" name="rk_payload" id="rk_payload" value="">
                 <input type="hidden" name="id" value="<?= $idrkk; ?>">
                 <div class="rounded-lg border border-gray-300 mb-4" style="overflow-x:auto;">
                     <table class="text-left border-collapse" style="min-width:1200px;width:100%;">
@@ -293,9 +325,11 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                 <td class="py-2 px-3">
                                     <select name="dp_<?= $i; ?>" class="rk_dept px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
                                         <?php foreach ($dept_opts as $do): ?>
-                                            <option value="<?= $do['id_departmen']; ?>" <?= ((int)$do['id_departmen'] === (int)($r['dept_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($do['nama_departmen']); ?></option>
+                                            <option value="<?= $do['id_departmen']; ?>" <?= (empty($r['dept_baru']) && (int)$do['id_departmen'] === (int)($r['dept_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($do['nama_departmen']); ?></option>
                                         <?php endforeach; ?>
+                                        <?php if (!empty($r['dept_baru'])): ?><option value="<?= htmlspecialchars($r['dept_baru']); ?>" selected><?= htmlspecialchars($r['dept_baru']); ?> (baru)</option><?php endif; ?>
                                     </select>
+                                    <?php if (!empty($r['dept_baru'])): ?><div class="text-[11px] font-bold text-purple-700 mt-1">“<?= htmlspecialchars($r['dept_baru']); ?>” baru → otomatis dibuat</div><?php endif; ?>
                                 </td>
                                 <td class="py-2 px-3"><input type="number" name="up_<?= $i; ?>" value="<?= (int)$r['upah']; ?>" min="0" class="w-28 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-right"></td>
                             </tr>
@@ -338,6 +372,17 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                     d.addEventListener('change', function() { rkFilterRow(d.closest('tr')); });
                 });
                 document.querySelectorAll('table tbody tr').forEach(function(tr) { rkFilterRow(tr); });
+                // Packing anti max_input_vars: kirim baris tercentang sebagai 1 JSON, input per-baris di-disable agar tidak ikut ter-post
+                document.getElementById('rk_commit_form').addEventListener('submit', function() {
+                    var rows = [];
+                    document.querySelectorAll('.rk_sel:checked').forEach(function(c) {
+                        var idx = c.value;
+                        function v(pref) { var el = document.querySelector('[name="' + pref + idx + '"]'); return el ? el.value : ''; }
+                        rows.push({ i: parseInt(idx, 10), sh: v('sh_'), up: v('up_'), dp: v('dp_'), ps: v('ps_') });
+                    });
+                    document.getElementById('rk_payload').value = JSON.stringify(rows);
+                    document.querySelectorAll('.rk_sel, select[name^="sh_"], input[name^="up_"], select[name^="dp_"], select[name^="ps_"]').forEach(function(el) { el.disabled = true; });
+                });
             </script>
             <?php else: ?>
             <form method="POST" enctype="multipart/form-data" class="max-w-xl">

@@ -43,6 +43,14 @@ function ex_num($v) {
 function ex_cell($v, $style, $align = 'center') {
     return "<td align='$align' style='$style'>$v</td>";
 }
+// JAM KERJA ala file acuan: fraksi hari dari jam masuk shift (08:00 -> 0.333..., 06:00 -> 0.25)
+function ex_frac($t) {
+    $t = trim((string)$t);
+    if (!preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $t, $m)) return '';
+    $sec = ((int)$m[1]) * 3600 + ((int)$m[2]) * 60 + (isset($m[3]) ? (int)$m[3] : 0);
+    if ($sec <= 0 || $sec >= 86400) return '';
+    return ex_num($sec / 86400);
+}
 
 // Data Boneless (urut input, seperti contoh)
 $queryBoneless = $koneksi->query("
@@ -96,29 +104,36 @@ while ($row = $result->fetch_assoc()) {
 $erow = 0;
 ?>
 <table border="1" style="border-collapse:collapse;">
-<?php $erow++; // R1 judul ?>
-    <tr><td colspan="9" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?> height:23px;">FORMAT ABSENSI KARYAWAN HARI <?= $judul_hari . ' ' . $judul_tgl ?></td></tr>
+<?php $erow++; // R1 judul (kolom ikut file acuan PERENCANAAN: 15 kolom) ?>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?> height:23px;">FORMAT ABSENSI KARYAWAN HARI <?= $judul_hari . ' ' . $judul_tgl ?></td></tr>
 <?php $erow++; // R2 aturan ?>
-    <tr><td colspan="9" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000</td></tr>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000</td></tr>
 <?php $erow++; // R3 jam ?>
-    <tr><td colspan="9" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td></tr>
+    <tr><td colspan="15" align="center" style="<?= $fB ?> <?= $thC ?> <?= $cWhite ?><?= $bd ?>">MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.</td></tr>
 <?php
 $hdr_gray = "$fB$thC$cHdr$bd";
 $hdr_light = "$fB$thC$cHdrL$bd";
 foreach ($data_per_bagian as $nama_grup => $karyawans):
     $erow++; // bar ungu (nama grup borongan)
 ?>
-    <tr><td colspan="9" style="<?= $fB ?> <?= $thC ?> <?= $cSection ?><?= $bd ?>"><?= $nama_grup ?></td></tr>
-    <?php $erow++; // header kolom absensi (1 baris, kolom ISTIRAHAT MASUK dibuang) ?>
+    <tr><td colspan="15" style="<?= $fB ?> <?= $thC ?> <?= $cSection ?><?= $bd ?>"><?= $nama_grup ?></td></tr>
+    <?php $erow++; // header kolom absensi (15 kolom persis acuan) ?>
     <tr>
         <?php
-        foreach (['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','JAM PULANG'] as $h) echo "<th style='$hdr_gray'>$h</th>";
+        foreach (['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','ISTIRAHAT','JAM PULANG','HASIL KERJA','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'] as $h) echo "<th style='$hdr_gray'>$h</th>";
+        ?>
+    </tr>
+    <?php $erow++; // sub-header (ISTIRAHAT -> MASUK, persis acuan) ?>
+    <tr>
+        <?php
+        foreach (['','', 'PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','MASUK','JAM PULANG','HASIL KERJA','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'] as $h) echo "<th style='$hdr_gray'>$h</th>";
         ?>
     </tr>
     <?php $no_rkk = 1; ?>
     <?php foreach ($karyawans as $k):
         $erow++;
         $upah = (float)($k['upah'] ?? 0);
+        $upah_disp = ($upah != 0) ? ex_num($upah) : '';
     ?>
     <tr style="<?= $fB ?>">
         <?= ex_cell($no_rkk++, "$cWhite$bd") ?>
@@ -127,9 +142,15 @@ foreach ($data_per_bagian as $nama_grup => $karyawans):
         <?= ex_cell($k['label_os'] ?? '', "$cWhite$bd") ?>
         <?= ex_cell($k['label_gol'] ?? '', "$cWhite$bd") ?>
         <td align="left" style="<?= $cWhite ?><?= $bd ?>"><?= $k['posisi'] ?? '' ?></td>
-        <?= ex_cell($k['j_masuk'] ?? '', "$cWhite$bd") ?>
+        <?= ex_cell(ex_frac($k['j_masuk'] ?? ''), "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell($upah_disp, "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell('', "$cWhite$bd") ?>
+        <?= ex_cell($upah_disp, "$cWhite$bd") ?>
     </tr>
     <?php endforeach; ?>
 <?php endforeach; ?>

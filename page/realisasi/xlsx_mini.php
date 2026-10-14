@@ -58,6 +58,11 @@ class MiniXlsx {
     private static function esc($v) {
         $v = (string)$v;
         $v = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $v);
+        // Koneksi DB latin1 bisa mengembalikan byte non-UTF8 (nama karyawan) ->
+        // XML wajib UTF-8 valid, kalau tidak Excel minta repair. Konversi dulu.
+        if (function_exists('mb_check_encoding') && !mb_check_encoding($v, 'UTF-8')) {
+            $v = mb_convert_encoding($v, 'UTF-8', 'Windows-1252');
+        }
         return htmlspecialchars($v, ENT_XML1 | ENT_COMPAT, 'UTF-8');
     }
 
@@ -103,10 +108,10 @@ class MiniXlsx {
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             . '<numFmts count="4">'
-            . '<numFmt numFmtId="164" formatCode="#.##0"/>'
-            . '<numFmt numFmtId="165" formatCode="#.##0,00"/>'
-            . '<numFmt numFmtId="166" formatCode="&quot;Rp&quot;#.##0"/>'
-            . '<numFmt numFmtId="167" formatCode="&quot;Rp&quot;#.##0,00"/>'
+            . '<numFmt numFmtId="164" formatCode="#,##0"/>'
+            . '<numFmt numFmtId="165" formatCode="#,##0.00"/>'
+            . '<numFmt numFmtId="166" formatCode="&quot;Rp&quot;#,##0"/>'
+            . '<numFmt numFmtId="167" formatCode="&quot;Rp&quot;#,##0.00"/>'
             . '</numFmts>'
             . '<fonts count="' . $fid . '">' . $fonts . '</fonts>'
             . '<fills count="' . $lid . '">' . $fills . '</fills>'
@@ -193,10 +198,12 @@ class MiniXlsx {
         $rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
+            . '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>'
             . '</Relationships>';
         $zip->addFromString('_rels/.rels', $rels);
         $wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>';
+            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="16384" windowHeight="8192"/></bookViews><sheets>';
         $wbr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
         foreach ($this->sheets as $i => $sh) {
@@ -205,13 +212,15 @@ class MiniXlsx {
             $wbr .= '<Relationship Id="rId' . $n . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' . $n . '.xml"/>';
             $zip->addFromString('xl/worksheets/sheet' . $n . '.xml', $this->sheetXml($sh));
         }
-        // Daftarkan content-type tiap sheet
+        // Daftarkan content-type tiap sheet + docProps
         $ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
             . '<Default Extension="rels" ContentType="application/vnd.openxml-package.relationships+xml"/>'
             . '<Default Extension="xml" ContentType="application/xml"/>'
             . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
+            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            . '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+            . '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
         foreach ($this->sheets as $i => $sh) {
             $ct .= '<Override PartName="/xl/worksheets/sheet' . ($i + 1) . '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
         }
@@ -222,6 +231,19 @@ class MiniXlsx {
         $zip->addFromString('xl/workbook.xml', $wb);
         $zip->addFromString('xl/_rels/workbook.xml.rels', $wbr);
         $zip->addFromString('xl/styles.xml', $this->stylesXml());
+        $now = gmdate('Y-m-d\TH:i:s\Z');
+        $zip->addFromString('docProps/core.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+            . '<dc:creator>payroll</dc:creator><cp:lastModifiedBy>payroll</cp:lastModifiedBy>'
+            . '<dcterms:created xsi:type="dcterms:W3CDTF">' . $now . '</dcterms:created>'
+            . '<dcterms:modified xsi:type="dcterms:W3CDTF">' . $now . '</dcterms:modified>'
+            . '</cp:coreProperties>');
+        $zip->addFromString('docProps/app.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">'
+            . '<Application>payroll</Application>'
+            . '</Properties>');
         $zip->close();
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . $filename . '"');

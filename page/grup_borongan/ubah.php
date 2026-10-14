@@ -53,9 +53,28 @@ if ($simpan) {
             $fb = isset($flags[$i]) ? 1 : 0;
             $koneksi->query("INSERT IGNORE INTO ms_grup_borongan_anggota (id_grup, id_karyawan, tarif, is_borongan) VALUES ('$id', '$kid', NULL, '$fb')");
         }
+        $gid = (int)$id;
+        $newkids = array_keys($seen);
+        // Rangkap grup: anggota boleh ada di banyak grup (tidak dikeluarkan dari grup lama).
+        // Baris rencana (RKK draft) + realisasi (belum ACC) disesuaikan: tiap anggota dapat 1 baris per grup.
+        $sync = grup_sync_drafts($koneksi, $gid, $newkids);
+        $n_rkk = (int)$sync['rkk']; $n_real = (int)$sync['realisasi'];
+        // 3. Yang dikeluarkan dari grup ini -> jadi TANPA GRUP di draft (hanya baris yang masih menunjuk grup ini).
+        $removed = array_diff($agt_ids, $newkids);
+        $n_lepas = 0;
+        if (!empty($removed)) {
+            $inR = implode(',', array_map('intval', $removed));
+            $koneksi->query("UPDATE tb_rkk_detail d JOIN tb_rkk h ON d.id_rkk = h.id_rkk SET d.id_grup = NULL WHERE d.id_karyawan IN ($inR) AND d.id_grup = '$gid' AND h.status_rkk IN (0,1)");
+            $n_lepas += (int)$koneksi->affected_rows;
+            $koneksi->query("UPDATE tb_realisasi_detail d JOIN tb_realisasi h ON d.id_realisasi = h.id_realisasi SET d.id_grup = NULL WHERE d.id_karyawan IN ($inR) AND d.id_grup = '$gid' AND h.status_realisasi IN (0,1)");
+            $n_lepas += (int)$koneksi->affected_rows;
+        }
+        $info = 'Grup berhasil diubah.';
+        if ($n_rkk > 0 || $n_real > 0) $info .= " Rencana ($n_rkk baris) + realisasi ($n_real baris) yang belum approve disesuaikan (tiap anggota ada baris di grup ini).";
+        if ($n_lepas > 0) $info .= " $n_lepas baris draft kembali tanpa grup.";
         echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body>
             <script>
-                Swal.fire({ icon: "success", title: "Berhasil", text: "Grup berhasil diubah", confirmButtonColor: "#2563eb" })
+                Swal.fire({ icon: "success", title: "Berhasil", text: "' . $info . '", confirmButtonColor: "#2563eb" })
                 .then(() => { window.location.href = "?page=grup_borongan"; });
             </script></body></html>';
         exit;

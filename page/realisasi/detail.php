@@ -342,22 +342,40 @@ if (!function_exists('rupiah')) {
                 <div class="row">
                     <div class="form-group col-md-6">
                         <label>GANTI KARYAWAN <span class="text-muted">(nama tetap — tercatat "Digantikan oleh ...", ikut tersimpan saat Simpan)</span></label>
-                        <select name="tukar_id_karyawan" class="form-control">
+                        <input type="text" id="tukar_search" class="form-control mb-2" placeholder="Ketik untuk cari karyawan..." autocomplete="off">
+                        <select name="tukar_id_karyawan" id="tukar_select" class="form-control">
                             <option value="">- Tidak ganti -</option>
                             <?php
                             $tukar_cur = (int)($datadetail['id_pengganti'] ?? 0);
+                            // Semua karyawan aktif tampil; yang sudah masuk rencana dikunci (disabled),
+                            // hanya yang belum masuk rencana yang bisa dipilih jadi pengganti.
                             $tukar_in = [];
                             $q_in = $koneksi->query("SELECT DISTINCT id_karyawan FROM tb_realisasi_detail WHERE id_realisasi = '" . (int)$dataidrealisasi . "' AND id_karyawan <> 0");
                             while ($q_in && ($rr = $q_in->fetch_assoc())) $tukar_in[(int)$rr['id_karyawan']] = true;
                             $q_tukar = $koneksi->query("SELECT K.id_karyawan, K.nama_karyawan, O.OS_DHK as os FROM ms_karyawan K LEFT JOIN ms_os_dhk O ON K.id_os_dhk = O.id_os_dhk WHERE K.status_karyawan = 'Aktif' ORDER BY K.nama_karyawan ASC");
                             while ($q_tukar && ($tk = $q_tukar->fetch_assoc())) {
                                 $tid = (int)$tk['id_karyawan'];
-                                if ($tid !== $tukar_cur && isset($tukar_in[$tid])) continue; // sudah ada di realisasi ini
-                                $lbl = $tk['nama_karyawan'] . ' — ' . ($tk['os'] ?: '-');
-                                echo "<option value=\"$tid\"" . ($tid === $tukar_cur ? ' selected' : '') . ">" . htmlspecialchars($lbl) . "</option>";
+                                $locked = ($tid !== $tukar_cur && isset($tukar_in[$tid]));
+                                $lbl = $tk['nama_karyawan'] . ' — ' . ($tk['os'] ?: '-') . ($locked ? ' (sudah di rencana)' : '');
+                                echo "<option value=\"$tid\"" . ($tid === $tukar_cur ? ' selected' : '') . ($locked ? ' disabled' : '') . ">" . htmlspecialchars($lbl) . "</option>";
                             }
                             ?>
                         </select>
+                        <script>
+                        (function() {
+                            var inp = document.getElementById('tukar_search');
+                            var sel = document.getElementById('tukar_select');
+                            if (!inp || !sel) return;
+                            inp.addEventListener('input', function() {
+                                var q = inp.value.toLowerCase().trim();
+                                for (var i = 0; i < sel.options.length; i++) {
+                                    var o = sel.options[i];
+                                    if (o.selected || o.value === '') { o.hidden = false; continue; }
+                                    o.hidden = (q !== '' && o.text.toLowerCase().indexOf(q) === -1);
+                                }
+                            });
+                        })();
+                        </script>
                     </div>
                 </div>
 
@@ -467,12 +485,13 @@ if (isset($_POST['simpan'])) {
             } elseif ($tukar_new === (int)($datadetail['id_karyawan'] ?? 0)) {
                 $tukar_err = 'Pengganti sama dengan karyawan baris ini!';
             } else {
+                // Pengganti harus yang belum masuk rencana (pengaman server untuk opsi disabled di form).
                 $mk = $koneksi->query("SELECT id_karyawan FROM ms_karyawan WHERE id_karyawan = '$tukar_new' AND status_karyawan = 'Aktif' LIMIT 1")->fetch_assoc();
                 if (!$mk) {
                     $tukar_err = 'Karyawan pengganti tidak valid / nonaktif!';
                 } else {
                     $dup = $koneksi->query("SELECT id_realisasi_detail FROM tb_realisasi_detail WHERE id_realisasi = '" . (int)$datadetail['id_realisasi'] . "' AND id_karyawan = '$tukar_new' AND id_realisasi_detail <> '$id' LIMIT 1");
-                    if ($dup && $dup->num_rows > 0) $tukar_err = 'Karyawan ini sudah ada di realisasi ini!';
+                    if ($dup && $dup->num_rows > 0) $tukar_err = 'Karyawan ini sudah masuk rencana (terkunci)!';
                 }
             }
             if ($tukar_err !== '') {
@@ -636,6 +655,11 @@ if (isset($_POST['simpan'])) {
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
 $(document).ready(function() {
+    // Dropdown Ganti Karyawan searchable (ketik di dalam dropdown). Fallback: input filter di atas bila select2 gagal dimuat.
+    if ($.fn.select2) {
+        $('#tukar_select').select2({ theme: 'bootstrap4', width: '100%', placeholder: '- Tidak ganti -', allowClear: true });
+        $('#tukar_search').hide();
+    }
     // 1. Data Jadwal & Denda Global dari PHP
     const shiftData = {
         <?php 

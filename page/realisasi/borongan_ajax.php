@@ -8,8 +8,13 @@ $koneksi->query("CREATE TABLE IF NOT EXISTS tb_realisasi_borongan (
   nama_pekerjaan VARCHAR(100) NOT NULL,
   qty DECIMAL(12,2) NOT NULL DEFAULT 0,
   tarif INT NOT NULL DEFAULT 0,
+  satuan VARCHAR(10) NOT NULL DEFAULT 'kg',
   KEY idx_detail (id_realisasi_detail)
 ) ENGINE=InnoDB");
+$ckSat = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_borongan LIKE 'satuan'");
+if ($ckSat && $ckSat->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_realisasi_borongan ADD COLUMN satuan VARCHAR(10) NOT NULL DEFAULT 'kg'");
+}
 
 header('Content-Type: application/json');
 
@@ -17,19 +22,24 @@ function bor_fmt_qty($v) {
     return rtrim(rtrim(number_format((float)$v, 2, '.', ''), '0'), '.');
 }
 
-// Fragment: detail "NAMA(qtykg)" + jumlah kg (harga masuk upah, bukan di sini)
+// Fragment: detail "NAMA(qty satuan)" + jumlah hasil (harga masuk upah, bukan di sini)
 function bor_fragments($lines) {
     if (empty($lines)) return ['detail' => '-', 'hasil_sum' => '', 'total' => 0];
     $parts = [];
     $tot = 0;
-    $kg = 0;
+    $sum_by_unit = [];
     foreach ($lines as $ln) {
+        $sat = strtolower(trim($ln['satuan'] ?? 'kg'));
+        if ($sat !== 'ekor') $sat = 'kg';
         $lt = (int)round((float)$ln['qty'] * (int)$ln['tarif']);
         $tot += $lt;
-        $kg += (float)$ln['qty'];
-        $parts[] = htmlspecialchars(strtoupper($ln['nama_pekerjaan'])) . ' : ' . bor_fmt_qty($ln['qty']) . ' kg x ' . number_format($ln['tarif'], 0, ',', '.') . ' = Rp' . number_format($lt, 0, ',', '.');
+        if (!isset($sum_by_unit[$sat])) $sum_by_unit[$sat] = 0;
+        $sum_by_unit[$sat] += (float)$ln['qty'];
+        $parts[] = htmlspecialchars(strtoupper($ln['nama_pekerjaan'])) . ' : ' . bor_fmt_qty($ln['qty']) . ' ' . $sat . ' x ' . number_format($ln['tarif'], 0, ',', '.') . ' = Rp' . number_format($lt, 0, ',', '.');
     }
-    return ['detail' => implode(', ', $parts), 'hasil_sum' => bor_fmt_qty($kg), 'total' => $tot];
+    $hs = [];
+    foreach ($sum_by_unit as $u => $q) $hs[] = bor_fmt_qty($q) . ' ' . $u;
+    return ['detail' => implode(', ', $parts), 'hasil_sum' => implode(', ', $hs), 'total' => $tot];
 }
 
 function bor_detail_info($koneksi, $id) {
@@ -57,7 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nm_esc = $koneksi->real_escape_string($nm);
         $qq = (float)($ln['qty'] ?? 0);
         $tt = (int)($ln['tarif'] ?? 0);
-        $koneksi->query("INSERT INTO tb_realisasi_borongan (id_realisasi_detail, nama_pekerjaan, qty, tarif) VALUES ('$id', '$nm_esc', '$qq', '$tt')");
+        $st = strtolower(trim($ln['satuan'] ?? 'kg'));
+        if ($st !== 'ekor') $st = 'kg';
+        $st_esc = $koneksi->real_escape_string($st);
+        $koneksi->query("INSERT INTO tb_realisasi_borongan (id_realisasi_detail, nama_pekerjaan, qty, tarif, satuan) VALUES ('$id', '$nm_esc', '$qq', '$tt', '$st_esc')");
     }
     $saved = [];
     $qs = $koneksi->query("SELECT * FROM tb_realisasi_borongan WHERE id_realisasi_detail = '$id' ORDER BY id_borongan ASC");

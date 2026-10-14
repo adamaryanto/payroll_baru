@@ -1,35 +1,42 @@
 <?php
 // Query utama
+// Baris rangkap (1 orang di 2 grup) dihitung 1x: yang dipakai baris pertama (MIN id_realisasi_detail) per orang.
+// Kunci orang: id_karyawan untuk karyawan master, nama manual untuk karyawan manual.
+$person_key_rd = "IF(RD.id_karyawan = 0, CONCAT('M:', IFNULL(RD.nama_karyawan_manual, '')), CONCAT('K:', RD.id_karyawan))";
+$person_key_d2 = "IF(d2.id_karyawan = 0, CONCAT('M:', IFNULL(d2.nama_karyawan_manual, '')), CONCAT('K:', d2.id_karyawan))";
+$first_row = "RD.id_realisasi_detail = (SELECT MIN(d2.id_realisasi_detail) FROM tb_realisasi_detail d2 WHERE d2.id_realisasi = RD.id_realisasi AND $person_key_d2 = $person_key_rd)";
 $where_real = "";
-$tampil = $koneksi->query("SELECT A.*, 
-    (SELECT COUNT(RD.id_realisasi_detail) 
-     FROM tb_realisasi_detail RD 
-     LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail 
+$tampil = $koneksi->query("SELECT A.*,
+    (SELECT COUNT(DISTINCT $person_key_rd)
+     FROM tb_realisasi_detail RD
+     LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail
      WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan')
     ) as jml,
     (SELECT SUM(
-        (IFNULL(RD.r_upah, 0) + IFNULL(RD.lembur, 0)) - 
-        (IFNULL(RD.r_potongan_telat, 0) + 
-         IFNULL(RD.r_potongan_istirahat_awal, 0) + 
-         IFNULL(RD.r_potongan_istirahat_telat, 0) + 
-         IFNULL(RD.r_potongan_pulang, 0) + 
-         IFNULL(RD.r_potongan_tidak_lengkap, 0) + 
+        (IFNULL(RD.r_upah, 0) + IFNULL(RD.lembur, 0)) -
+        (IFNULL(RD.r_potongan_telat, 0) +
+         IFNULL(RD.r_potongan_istirahat_awal, 0) +
+         IFNULL(RD.r_potongan_istirahat_telat, 0) +
+         IFNULL(RD.r_potongan_pulang, 0) +
+         IFNULL(RD.r_potongan_tidak_lengkap, 0) +
          IFNULL(RD.r_potongan_lainnya, 0))
-    ) 
-    FROM tb_realisasi_detail RD 
+    )
+    FROM tb_realisasi_detail RD
     LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail
-    WHERE RD.id_realisasi = A.id_realisasi 
+    WHERE RD.id_realisasi = A.id_realisasi
     AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan')
-    ) as ttl, 
-    (SELECT SUM(IFNULL(RD.r_potongan_lainnya, 0)) 
-     FROM tb_realisasi_detail RD 
-     LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail 
+    AND $first_row
+    ) as ttl,
+    (SELECT SUM(IFNULL(RD.r_potongan_lainnya, 0))
+     FROM tb_realisasi_detail RD
+     LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail
      WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan')
+     AND $first_row
     ) as potlainnya,
-    (SELECT SUM(IFNULL(RD.r_potongan_telat, 0)) FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan')) as p_telat,
-    (SELECT SUM(IFNULL(RD.r_potongan_istirahat_awal, 0) + IFNULL(RD.r_potongan_istirahat_telat, 0)) FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan')) as p_istirahat,
-    (SELECT SUM(IFNULL(RD.r_potongan_pulang, 0)) FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan')) as p_pulang,
-    (SELECT SUM(IFNULL(RD.r_potongan_tidak_lengkap, 0)) FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan')) as p_log
+    (SELECT SUM(IFNULL(RD.r_potongan_telat, 0)) FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan') AND $first_row) as p_telat,
+    (SELECT SUM(IFNULL(RD.r_potongan_istirahat_awal, 0) + IFNULL(RD.r_potongan_istirahat_telat, 0)) FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan') AND $first_row) as p_istirahat,
+    (SELECT SUM(IFNULL(RD.r_potongan_pulang, 0)) FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan') AND $first_row) as p_pulang,
+    (SELECT SUM(IFNULL(RD.r_potongan_tidak_lengkap, 0)) FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = A.id_realisasi AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan') AND $first_row) as p_log
     FROM tb_realisasi A $where_real ORDER BY A.tgl_realisasi ASC, A.id_realisasi ASC");
 
 // Logika Akses: Owner dan Admin Master yang bisa Approve/Unapprove Realisasi

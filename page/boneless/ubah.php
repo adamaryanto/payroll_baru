@@ -135,11 +135,8 @@ if ($simpan) {
                         <h3 class="text-xl font-bold m-0" style="color: #2563eb;">Ubah Data Boneless</h3>
                     </div>
                     <div class="flex items-center gap-2">
-                        <a href="page/boneless/excel.php?id=<?= $id ?>" class="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded shadow-sm transition-colors">
-                            <i class="fas fa-file-excel mr-1.5"></i> Download Excel
-                        </a>
-                        <a href="page/boneless/excel_baru.php?id=<?= $id ?>" class="inline-flex items-center bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-2 px-4 rounded shadow-sm transition-colors">
-                            <i class="fas fa-file-excel mr-1.5"></i> Excel Baru
+                        <a href="page/boneless/excel_gabung.php?id=<?= $id ?>" class="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold py-2 px-4 rounded shadow-sm transition-colors">
+                            <i class="fas fa-file-excel mr-1.5"></i> Download Excel (2 sheets)
                         </a>
                         <span class="text-xs font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded">ID: #<?= $id ?></span>
                     </div>

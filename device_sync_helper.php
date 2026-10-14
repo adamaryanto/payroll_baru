@@ -1232,4 +1232,57 @@ function create_sync_log_table($koneksi) {
     try { $koneksi->query("ALTER TABLE tb_sync_log MODIFY status VARCHAR(50) NOT NULL"); } catch (Throwable $e) {}
 }
 
+if (!function_exists('hapus_karyawan_dari_grup')) {
+// Bersihkan keanggotaan master grup saat karyawan dihapus (cegah baris yatim NULL di halaman grup).
+// Aman di DB lama tanpa tabel grup (di-skip). Return jumlah baris anggota yang dibersihkan.
+function hapus_karyawan_dari_grup($koneksi, $id_karyawan) {
+    $id_karyawan = (int)$id_karyawan;
+    if ($id_karyawan <= 0) return 0;
+    try {
+        $cek = $koneksi->query("SHOW TABLES LIKE 'ms_grup_borongan_anggota'");
+        if (!$cek || $cek->num_rows == 0) return 0;
+        $koneksi->query("DELETE FROM ms_grup_borongan_anggota WHERE id_karyawan = '$id_karyawan'");
+        return (int)$koneksi->affected_rows;
+    } catch (Throwable $e) { return 0; }
+}
+}
+
+if (!function_exists('get_device_user_names')) {
+// Peta PIN => Nama yang tersimpan di mesin (semua mesin online, pertama menang).
+// Dipakai untuk menampilkan nama PIN yang belum terdaftar di master karyawan.
+function get_device_user_names($koneksi) {
+    $map = [];
+    if (!function_exists('get_all_devices')) return $map;
+    foreach (get_all_devices($koneksi) as $device) {
+        if (empty($device['ip_mesin'])) continue;
+        if (function_exists('test_device_connection') && !test_device_connection($device['ip_mesin'], $device['port'])) continue;
+        if (($device['protocol'] ?? 'soap') === 'zkudp') {
+            if (!function_exists('zkb_get_users')) continue;
+            $zr = zkb_get_users($device['ip_mesin'], $device['port'] ?? 4370, intval($device['comm_key'] ?? 0));
+            if (empty($zr['success'])) continue;
+            foreach (($zr['users'] ?? []) as $u) {
+                $pin = trim((string)($u['pin'] ?? ''));
+                $nm = trim((string)($u['nama'] ?? ''));
+                if ($pin !== '' && $nm !== '' && !isset($map[$pin])) $map[$pin] = $nm;
+            }
+            continue;
+        }
+        if (!function_exists('send_soap_request')) continue;
+        $comm_key = $device['comm_key'] ?? 0;
+        $resp = send_soap_request($device['ip_mesin'], $device['port'], "<GetAllUserInfo><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></GetAllUserInfo>");
+        if (!$resp) continue;
+        $pos = 0;
+        while (($start = strpos($resp, '<Row>', $pos)) !== false && ($end = strpos($resp, '</Row>', $start)) !== false) {
+            $row = substr($resp, $start + 5, $end - $start - 5);
+            $pin = $name = '';
+            if (preg_match('/<PIN>([^<]*)<\/PIN>/', $row, $m)) $pin = trim($m[1]);
+            if (preg_match('/<Name>([^<]*)<\/Name>/', $row, $m)) $name = trim($m[1]);
+            if ($pin !== '' && $name !== '' && !isset($map[$pin])) $map[$pin] = $name;
+            $pos = $end + 6;
+        }
+    }
+    return $map;
+}
+}
+
 ?>

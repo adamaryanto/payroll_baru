@@ -42,6 +42,7 @@ if ($action === 'exec') {
         }
     }
     $del = $koneksi->query("DELETE FROM ms_karyawan WHERE id_karyawan=$id");
+    if ($del) hapus_karyawan_dari_grup($koneksi, $id);
     echo json_encode(['success'=>(bool)$del,'results'=>$results,'db_only'=>$dbOnly,
         'msg'=>$del ? 'Data karyawan berhasil dihapus dari database.' : 'Gagal hapus database']);
     exit;
@@ -69,6 +70,7 @@ if ($action === 'delete_direct') {
         }
     }
     $del = $koneksi->query("DELETE FROM ms_karyawan WHERE id_karyawan=$id");
+    if ($del) hapus_karyawan_dari_grup($koneksi, $id);
     echo json_encode(['success'=>(bool)$del,'results'=>$results,'db_only'=>$dbOnly,
         'msg'=>$del ? 'Data karyawan berhasil dihapus.' : 'Gagal hapus database']);
     exit;
@@ -119,6 +121,7 @@ if ($action === 'exec_bulk') {
             }
         }
         $del = $koneksi->query("DELETE FROM ms_karyawan WHERE id_karyawan=$kid");
+        if ($del) hapus_karyawan_dari_grup($koneksi, $kid);
         $per[] = ['id'=>$kid,'nama'=>$emp['nama_karyawan'],'db_deleted'=>(bool)$del,'results'=>$results];
     }
     echo json_encode(['success'=>true,'per'=>$per,'db_only'=>$dbOnly]);

@@ -517,7 +517,7 @@ function rx_save_boneless($koneksi, $tgl, $id_rkk, $bon, $title = '') {
     $qb = rx_q($koneksi, "SELECT id_biayamobil FROM tb_biayamobil LIMIT 1");
     if ($qb && ($rb = $qb->fetch_assoc()) && (int)($rb['id_biayamobil'] ?? 0) > 0) $id_bm = "'" . (int)$rb['id_biayamobil'] . "'";
     $id_rkk = (int)$id_rkk;
-    $ket = $koneksi->real_escape_string(trim('Auto import Excel ' . $title));
+    $ket = $koneksi->real_escape_string(trim($title));
     if (!rx_q($koneksi, "INSERT INTO tb_boneless (id_rkk, id_biayamobil, tgl, jumlah_mobil, keterangan, tgl_updt) VALUES ('$id_rkk', $id_bm, '$tgl', '$mobil', '$ket', NOW())")) return ' (boneless gagal tersimpan)';
     $id_bon = (int)$koneksi->insert_id;
     $c_it = 0;
@@ -722,11 +722,14 @@ if (!function_exists('rx_commit_sub')) {
 function rx_commit_sub($koneksi, $r, $dep) {
     $ps_raw = trim((string)($r['ps_raw'] ?? ''));
     $pos_txt = trim((string)($r['posisi'] ?? ''));
-    $pos_ok = ($pos_txt !== '' && !rx_is_junk($pos_txt) && preg_match('/[A-Za-z]{3,}/', $pos_txt));
+    $pos_ok = ($pos_txt !== '' && mb_strlen($pos_txt) >= 2 && !rx_is_junk($pos_txt));
     $excel_sub = $pos_ok ? rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt) : 0;
     if ($ps_raw !== '' && !ctype_digit($ps_raw)) {
-        // Opsi teks "(baru)" dari preview -> generate otomatis (nyambung dept terpilih)
-        $made = (!rx_is_junk($ps_raw) && preg_match('/[A-Za-z]{3,}/', $ps_raw)) ? rx_ensure_sub($koneksi, $ps_raw, $dep) : 0;
+        // Opsi teks "(baru)" dari preview -> generate otomatis (nyambung dept terpilih).
+        // Syarat longgar: panjang >= 2 dan bukan baris sampah (TOTAL/MASUK/dll),
+        // agar selaras dengan preview yang menampilkan "(baru)" untuk semua teks posisi baru.
+        $ok_name = (mb_strlen($ps_raw) >= 2 && !rx_is_junk($ps_raw));
+        $made = $ok_name ? rx_ensure_sub($koneksi, $ps_raw, $dep) : 0;
         return $made > 0 ? $made : 0;
     }
     $sub_post = ($ps_raw !== '' ? (int)$ps_raw : 0);
@@ -746,6 +749,22 @@ function rx_commit_sub($koneksi, $r, $dep) {
         }
     }
     return $sub > 0 ? $sub : 0;
+}
+}
+
+if (!function_exists('rx_commit_dept')) {
+// Tentukan id_departmen final untuk satu baris import.
+// Aturan: opsi teks "(baru)" -> generate otomatis; numerik -> pakai; selain itu ikut $dep.
+// Dipanggil SEBELUM rx_commit_sub agar posisi baru nyambung ke department yang baru dibuat.
+// Tak ada sumber valid -> 0 (penulis wajib simpan NULL, jangan ngarang default).
+function rx_commit_dept($koneksi, $r, $dep) {
+    $dp_raw = trim((string)($r['dp_raw'] ?? ''));
+    if ($dp_raw !== '' && !ctype_digit($dp_raw)) {
+        $ok = (mb_strlen($dp_raw) >= 2 && !rx_is_junk($dp_raw));
+        $made = $ok ? rx_ensure_dept($koneksi, $dp_raw) : 0;
+        return $made > 0 ? $made : 0;
+    }
+    return (int)$dep;
 }
 }
 

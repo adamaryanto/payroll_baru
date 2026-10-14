@@ -33,9 +33,16 @@ if ($simpan) {
             $fb = isset($flags[$i]) ? 1 : 0;
             $koneksi->query("INSERT IGNORE INTO ms_grup_borongan_anggota (id_grup, id_karyawan, tarif, is_borongan) VALUES ('$id_grup', '$kid', NULL, '$fb')");
         }
+        // Rangkap grup: anggota boleh ada di banyak grup + samakan baris rencana/realisasi draft.
+        $gid = (int)$id_grup;
+        $newkids = array_keys($seen);
+        $sync = grup_sync_drafts($koneksi, $gid, $newkids);
+        $n_rkk = (int)$sync['rkk']; $n_real = (int)$sync['realisasi'];
+        $info = 'Grup berhasil disimpan.';
+        if ($n_rkk > 0 || $n_real > 0) $info .= " Rencana ($n_rkk baris) + realisasi ($n_real baris) yang belum approve disesuaikan (tiap anggota ada baris di grup ini).";
         echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body>
             <script>
-                Swal.fire({ icon: "success", title: "Berhasil", text: "Grup berhasil disimpan", confirmButtonColor: "#2563eb" })
+                Swal.fire({ icon: "success", title: "Berhasil", text: "' . $info . '", confirmButtonColor: "#2563eb" })
                 .then(() => { window.location.href = "?page=grup_borongan"; });
             </script></body></html>';
         exit;

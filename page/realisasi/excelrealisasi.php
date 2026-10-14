@@ -46,15 +46,26 @@ $koneksi->query("CREATE TABLE IF NOT EXISTS tb_realisasi_borongan (
   nama_pekerjaan VARCHAR(100) NOT NULL,
   qty DECIMAL(12,2) NOT NULL DEFAULT 0,
   tarif INT NOT NULL DEFAULT 0,
+  satuan VARCHAR(10) NOT NULL DEFAULT 'kg',
   KEY idx_detail (id_realisasi_detail)
 ) ENGINE=InnoDB");
+$ckSatX = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_borongan LIKE 'satuan'");
+if ($ckSatX && $ckSatX->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_realisasi_borongan ADD COLUMN satuan VARCHAR(10) NOT NULL DEFAULT 'kg'");
+}
 $bor_map = [];
 $qb = $koneksi->query("SELECT b.* FROM tb_realisasi_borongan b JOIN tb_realisasi_detail d ON b.id_realisasi_detail = d.id_realisasi_detail WHERE d.id_realisasi = '$id' ORDER BY b.id_borongan ASC");
 while ($qb && ($rb = $qb->fetch_assoc())) {
     $nm = strtoupper(trim($rb['nama_pekerjaan']));
     if ($nm === '') continue;
-    $bor_map[$rb['id_realisasi_detail']][] = ['nama' => $nm, 'qty' => (float)$rb['qty'], 'tarif' => (int)$rb['tarif']];
+    $sat = strtolower(trim($rb['satuan'] ?? 'kg'));
+    if ($sat !== 'ekor') $sat = 'kg';
+    $bor_map[$rb['id_realisasi_detail']][] = ['nama' => $nm, 'qty' => (float)$rb['qty'], 'tarif' => (int)$rb['tarif'], 'satuan' => $sat];
 }
+// Baris pertama per orang (MIN id) yang dijumlah; baris rangkap tetap tampil bertanda
+$keep_ids = [];
+$qk = $koneksi->query("SELECT MIN(id_realisasi_detail) AS k FROM tb_realisasi_detail WHERE id_realisasi = '$id' GROUP BY IF(id_karyawan = 0, CONCAT('M:', IFNULL(nama_karyawan_manual, '')), CONCAT('K:', id_karyawan))");
+while ($qk && ($rkk = $qk->fetch_assoc())) $keep_ids[(int)$rkk['k']] = true;
 function ex_qty($v) {
     $v = (float)$v;
     if (abs($v - round($v)) < 1e-9) return (string)(int)round($v);
@@ -62,7 +73,14 @@ function ex_qty($v) {
 }
 
 // Karyawan per GRUP (urutan grup ikut kemunculan pertama, seperti di RKK kelola)
+// Tap mesin per tanggal (dipakai sheet KARYAWAN TIDAK MASUK)
+$taps_all = [];
+if ($tanggal_sql !== '') {
+    $qt0 = $koneksi->query("SELECT DISTINCT TRIM(userid) AS pin FROM tb_record WHERE tgl='$tanggal_sql' AND TRIM(userid)<>''");
+    while ($qt0 && ($rt0 = $qt0->fetch_assoc())) $taps_all[trim((string)$rt0['pin'])] = true;
+}
 $tampil = $koneksi->query("SELECT A.*, IF(A.id_karyawan = 0, A.nama_karyawan_manual, B.nama_karyawan) as nama_karyawan,
+    TRIM(B.no_absen) as pin_kar,
     O.OS_DHK as label_os, G.golongan as label_gol, S.nama_sub_department as posisi, J.jam_masuk as j_masuk,
     GB.nama_grup as grup,
     PG.nama_karyawan as pengganti_nama
@@ -81,18 +99,27 @@ $tampil = $koneksi->query("SELECT A.*, IF(A.id_karyawan = 0, A.nama_karyawan_man
 
 $rows_per_grup = [];
 while ($tampil && ($r = $tampil->fetch_assoc())) {
+    // Sheet REALISASI tampil semua baris persis halaman kelola (tidak difilter);
+    // baris rangkap tetap tampil, yang dijumlah cuma baris pertama per orang.
     $pot = ($r['r_potongan_telat'] ?? 0) + ($r['r_potongan_istirahat_awal'] ?? 0) + ($r['r_potongan_istirahat_telat'] ?? 0)
          + ($r['r_potongan_pulang'] ?? 0) + ($r['r_potongan_tidak_lengkap'] ?? 0) + ($r['r_potongan_lainnya'] ?? 0);
     $upah = (float)($r['r_upah'] ?? 0);
     $lembur = (float)($r['lembur'] ?? 0);
     if (($r['r_status'] ?? '') == 'Tidak Hadir') { $upah = 0; $lembur = 0; $pot = 0; }
     // Upah ikut total borongan orang ini (muncul di HASIL KERJA / UPAH)
-    $bt = 0; $k_sum = 0;
+    $bt = 0; $sum_unit = [];
     foreach ($bor_map[$r['id_realisasi_detail']] ?? [] as $bln) {
         $bt += (int)round((float)$bln['qty'] * (int)$bln['tarif']);
-        $k_sum += (float)$bln['qty'];
+        $su = $bln['satuan'] ?? 'kg';
+        if (!isset($sum_unit[$su])) $sum_unit[$su] = 0;
+        $sum_unit[$su] += (float)$bln['qty'];
     }
-    if ($bt > 0) { $upah = $bt; $lembur = 0; $pot = 0; $r['_bor_kg'] = $k_sum; }
+    if ($bt > 0) {
+        $upah = $bt; $lembur = 0; $pot = 0;
+        $hs_parts = [];
+        foreach ($sum_unit as $u => $q) $hs_parts[] = ex_qty($q) . ' ' . $u;
+        $r['_bor_hasil'] = implode(', ', $hs_parts);
+    }
     $r['_pot'] = $pot;
     $r['_upah'] = $upah;
     $r['_lembur'] = $lembur;
@@ -101,13 +128,22 @@ while ($tampil && ($r = $tampil->fetch_assoc())) {
     $rows_per_grup[$key][] = $r;
 }
 
-// ===== KARYAWAN RENCANA TIDAK MASUK (rencana RKK vs tap mesin tb_record) =====
+// ===== KARYAWAN RENCANA TIDAK MASUK (rencana RKK vs tap mesin tb_record + status Tarik Data ra_*) =====
+// Dianggap tidak masuk bila: tidak ada tap di tb_record ATAU belum Tarik Data (ra_* masih kosong di realisasi ini).
 $tm_grup = []; // grup => rows (urutan kemunculan di RKK)
 $id_rkk_link = (int)($info['id_rkk'] ?? 0);
 if ($tanggal_sql !== '' && $id_rkk_link > 0) {
-    $taps = [];
-    $qt = $koneksi->query("SELECT DISTINCT TRIM(userid) AS pin FROM tb_record WHERE tgl='$tanggal_sql' AND TRIM(userid)<>''");
-    while ($qt && ($rt = $qt->fetch_assoc())) $taps[trim((string)$rt['pin'])] = true;
+    $taps = $taps_all; // pakai hasil query yang sama dengan filter sheet REALISASI di atas
+    // Peta ra_* per karyawan di realisasi ini (untuk deteksi sudah Tarik Data atau belum)
+    $ra_map = [];
+    $qra = $koneksi->query("SELECT id_karyawan, ra_masuk, ra_keluar, ra_istirahat_masuk, ra_istirahat_keluar FROM tb_realisasi_detail WHERE id_realisasi='$id' AND id_karyawan<>0");
+    while ($qra && ($rar = $qra->fetch_assoc())) {
+        $rm = trim((string)($rar['ra_masuk'] ?? ''));
+        $rk = trim((string)($rar['ra_keluar'] ?? ''));
+        $rim = trim((string)($rar['ra_istirahat_masuk'] ?? ''));
+        $rik = trim((string)($rar['ra_istirahat_keluar'] ?? ''));
+        $ra_map[(int)$rar['id_karyawan']] = (($rm !== '' && $rm !== '00:00:00') || ($rk !== '' && $rk !== '00:00:00') || ($rim !== '' && $rim !== '00:00:00') || ($rik !== '' && $rik !== '00:00:00'));
+    }
     // Pengganti per karyawan di realisasi ini (untuk keterangan)
     $pgmap = [];
     $qp = $koneksi->query("SELECT RD.id_karyawan, PG.nama_karyawan AS nm FROM tb_realisasi_detail RD LEFT JOIN ms_karyawan PG ON PG.id_karyawan=RD.id_pengganti WHERE RD.id_realisasi='$id' AND RD.id_karyawan<>0 AND RD.id_pengganti IS NOT NULL AND RD.id_pengganti<>0");
@@ -115,9 +151,18 @@ if ($tanggal_sql !== '' && $id_rkk_link > 0) {
     $qr = $koneksi->query("SELECT RD.id_rkk_detail, K.id_karyawan, TRIM(K.no_absen) AS pin, K.nama_karyawan, O.OS_DHK AS oslbl, G.golongan AS gollbl, S.nama_sub_department AS posisi, J.jam_masuk AS sm, GB.nama_grup AS grup FROM tb_rkk_detail RD JOIN ms_karyawan K ON K.id_karyawan=RD.id_karyawan LEFT JOIN ms_os_dhk O ON O.id_os_dhk=K.id_os_dhk LEFT JOIN ms_golongan G ON G.id_golongan=K.id_golongan LEFT JOIN ms_sub_department S ON S.id_sub_department=RD.id_sub_department LEFT JOIN tb_jadwal J ON J.id_jadwal=RD.id_jadwal LEFT JOIN ms_grup_borongan GB ON GB.id_grup=RD.id_grup WHERE RD.id_rkk='$id_rkk_link' AND RD.id_karyawan<>0 ORDER BY RD.id_rkk_detail ASC");
     while ($qr && ($rr = $qr->fetch_assoc())) {
         $p = trim((string)($rr['pin'] ?? ''));
-        if ($p === '' || isset($taps[$p])) continue;
+        if ($p === '') continue;
         $kid = (int)$rr['id_karyawan'];
-        $rr['ket'] = isset($pgmap[$kid]) ? ('Digantikan oleh ' . $pgmap[$kid]) : 'Tidak ada tap mesin';
+        $has_tap = isset($taps[$p]);
+        $has_ra = !empty($ra_map[$kid]);
+        if ($has_tap && $has_ra) continue; // sudah tap + sudah Tarik Data = hadir, jangan masuk sheet tidak masuk
+        if (isset($pgmap[$kid])) {
+            $rr['ket'] = 'Digantikan oleh ' . $pgmap[$kid];
+        } elseif (!$has_tap) {
+            $rr['ket'] = 'Tidak ada tap mesin';
+        } else {
+            $rr['ket'] = 'Sudah tap, belum Tarik Data';
+        }
         $gk = !empty($rr['grup']) ? strtoupper(trim($rr['grup'])) : 'TANPA GRUP';
         if (!isset($tm_grup[$gk])) $tm_grup[$gk] = [];
         $tm_grup[$gk][] = $rr;
@@ -155,7 +200,10 @@ $x->cell($s1, $r, 1, 'REALISASI ABSENSI KARYAWAN HARI ' . $judul_hari . ' ' . $j
 $x->cell($s1, $r, 1, 'JIKA NAMA YANG TERTERA DIABSEN TELAT LEBIH DARI 10 MENIT MAKA AKAN DIPOTONG RP 25.000', $stT); $x->merge($s1, $r, 1, $r, 16); $r++;
 $x->cell($s1, $r, 1, 'MASUK JAM 07:00 ISTIRAHAT JAM 11:50 MASUK JAM 10:00 ISTIRAHAT JAM 13:00.', $stT); $x->merge($s1, $r, 1, $r, 16); $r++;
 $hdrL = ['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','ISTIRAHAT','JAM PULANG'];
-$hdrR = ['HASIL KERJA (kg)','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'];
+$hdrR = ['HASIL KERJA','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'];
+if (empty($rows_per_grup)) {
+    $x->cell($s1, $r, 1, 'Belum ada karyawan yang tap mesin / tarik data pada tanggal ini — lihat sheet KARYAWAN TIDAK MASUK. Setelah tap + Tarik Data, export ulang untuk memunculkan data.', $stCB); $x->merge($s1, $r, 1, $r, 16); $r++;
+}
 foreach ($rows_per_grup as $nama_grup => $rows) {
     $x->cell($s1, $r, 1, $nama_grup, $stSEC); $x->merge($s1, $r, 1, $r, 16); $r++;
     foreach ($hdrL as $i => $h) $x->cell($s1, $r, $i + 1, $h, $stTH);
@@ -168,11 +216,12 @@ foreach ($rows_per_grup as $nama_grup => $rows) {
         $ra_masuk = ($data['ra_masuk'] ?? '00:00:00') != '00:00:00' ? $data['ra_masuk'] : '';
         $ra_ist = ($data['ra_istirahat_masuk'] ?? '00:00:00') != '00:00:00' ? $data['ra_istirahat_masuk'] : '';
         $ra_pulang = ($data['ra_keluar'] ?? '00:00:00') != '00:00:00' ? $data['ra_keluar'] : '';
-        $hasil = isset($data['_bor_kg']) ? ex_qty($data['_bor_kg']) : ($data['hasil_kerja'] ?? '');
+        $hasil = isset($data['_bor_hasil']) ? $data['_bor_hasil'] : ($data['hasil_kerja'] ?? '');
         $parts = [];
         foreach ($bor_map[$data['id_realisasi_detail']] ?? [] as $ln) {
             $lt = (int)round((float)$ln['qty'] * (int)$ln['tarif']);
-            $parts[] = $ln['nama'] . ' : ' . ex_qty($ln['qty']) . ' kg x ' . number_format($ln['tarif'], 0, ',', '.') . ' = Rp' . number_format($lt, 0, ',', '.');
+            $su = $ln['satuan'] ?? 'kg';
+            $parts[] = $ln['nama'] . ' : ' . ex_qty($ln['qty']) . ' ' . $su . ' x ' . number_format($ln['tarif'], 0, ',', '.') . ' = Rp' . number_format($lt, 0, ',', '.');
         }
         $bor_detail = implode(', ', $parts);
         $nama = strtoupper($data['nama_karyawan'] ?? '') . (!empty($data['pengganti_nama']) ? ' (Digantikan oleh ' . $data['pengganti_nama'] . ')' : '');
@@ -187,7 +236,7 @@ foreach ($rows_per_grup as $nama_grup => $rows) {
         $x->cell($s1, $r, 9, $ra_ist, $stCC);
         $x->cell($s1, $r, 10, $ra_pulang, $stCC);
         $x->cell($s1, $r, 11, $bor_detail, $bor_detail !== '' ? $stW : $stC);
-        $x->cell($s1, $r, 12, $hasil !== '' ? ($hasil . ' kg') : '', $stCC);
+        $x->cell($s1, $r, 12, $hasil, $stCC);
         $x->cell($s1, $r, 13, (int)round($data['_upah']), $stCRB);
         $x->cell($s1, $r, 14, $data['_pot'] ? (int)round($data['_pot']) : '', $data['_pot'] ? $stCR : $stC);
         $x->cell($s1, $r, 15, $data['_lembur'] ? (int)round($data['_lembur']) : '', $data['_lembur'] ? $stCR : $stC);
@@ -195,10 +244,56 @@ foreach ($rows_per_grup as $nama_grup => $rows) {
         $r++;
     }
 }
+// Karyawan TERDAFTAR yang tap tapi di luar rencana: section otomatis (tampil saja, tidak dijumlah, tanpa DB)
+$tdr_rows = [];
+if ($tanggal_sql !== '') {
+    $qtdr = $koneksi->query("SELECT k.nama_karyawan, TRIM(k.no_absen) AS pin, O.OS_DHK AS oslbl, G.golongan AS gollbl, S.nama_sub_department AS posisi, k.upah,
+        (SELECT MIN(r.detail_waktu) FROM tb_record r WHERE r.tgl = '$tanggal_sql' AND TRIM(r.userid) = TRIM(k.no_absen)) AS first_tap,
+        (SELECT MAX(r.detail_waktu) FROM tb_record r WHERE r.tgl = '$tanggal_sql' AND TRIM(r.userid) = TRIM(k.no_absen)) AS last_tap
+        FROM ms_karyawan k
+        LEFT JOIN ms_os_dhk O ON O.id_os_dhk = k.id_os_dhk
+        LEFT JOIN ms_golongan G ON G.id_golongan = k.id_golongan
+        LEFT JOIN ms_sub_department S ON S.id_sub_department = k.id_sub_department
+        WHERE k.status_karyawan = 'Aktif' AND k.no_absen IS NOT NULL AND TRIM(k.no_absen) <> ''
+        AND EXISTS (SELECT 1 FROM tb_record r WHERE r.tgl = '$tanggal_sql' AND TRIM(r.userid) = TRIM(k.no_absen))
+        AND NOT EXISTS (SELECT 1 FROM tb_realisasi_detail d WHERE d.id_realisasi = '$id' AND d.id_karyawan = k.id_karyawan)
+        ORDER BY k.nama_karyawan ASC");
+    while ($qtdr && ($rtdr = $qtdr->fetch_assoc())) $tdr_rows[] = $rtdr;
+}
+if (!empty($tdr_rows)) {
+    $x->cell($s1, $r, 1, 'TIDAK DALAM RENCANA (terdaftar, di luar rencana — tidak dijumlah)', $stSEC); $x->merge($s1, $r, 1, $r, 16); $r++;
+    foreach ($hdrL as $i => $h) $x->cell($s1, $r, $i + 1, $h, $stTH);
+    $x->cell($s1, $r, 11, 'Detail Borongan', $stTH);
+    foreach ($hdrR as $i => $h) $x->cell($s1, $r, 12 + $i, $h, $stTHG);
+    $r++;
+    $x->cell($s1, $r, 9, 'MASUK', $stTH); $r++;
+    $no = 1;
+    foreach ($tdr_rows as $td) {
+        $ft = $td['first_tap'] ?? ''; $lt = $td['last_tap'] ?? '';
+        $x->cell($s1, $r, 1, $no++, $stCCB);
+        $x->cell($s1, $r, 2, strtoupper($td['nama_karyawan'] ?? ''), $stWrap);
+        $x->cell($s1, $r, 3, '', $stC);
+        $x->cell($s1, $r, 4, $td['oslbl'] ?? '', $stCCB);
+        $x->cell($s1, $r, 5, $td['gollbl'] ?? '', $stCCB);
+        $x->cell($s1, $r, 6, $td['posisi'] ?? '', $stW);
+        $x->cell($s1, $r, 7, '', $stCCB);
+        $x->cell($s1, $r, 8, $ft !== '' ? substr($ft, 11, 8) : '', $stCC);
+        $x->cell($s1, $r, 9, '', $stCC);
+        $x->cell($s1, $r, 10, ($lt !== '' && $lt !== $ft) ? substr($lt, 11, 8) : '', $stCC);
+        $x->cell($s1, $r, 11, '', $stC);
+        $x->cell($s1, $r, 12, '', $stCC);
+        $x->cell($s1, $r, 13, (int)round((float)($td['upah'] ?? 0)), $stCRB);
+        $x->cell($s1, $r, 14, '', $stC);
+        $x->cell($s1, $r, 15, '', $stC);
+        $x->cell($s1, $r, 16, (int)round((float)($td['upah'] ?? 0)), $stCRB);
+        $r++;
+    }
+}
 // Total paten (angka, bukan rumus) — posisi persis contoh (kolom UPAH & UPAH DIBAYAR)
 $tot_upah = 0; $tot_dibayar = 0;
 foreach ($rows_per_grup as $gt) {
     foreach ($gt as $rr) {
+        if (!isset($keep_ids[(int)$rr['id_realisasi_detail']])) continue; // rangkap: tidak dijumlah 2x
         $tot_upah += $rr['_upah'];
         $tot_dibayar += ($rr['_upah'] - $rr['_pot'] + $rr['_lembur']);
     }
@@ -257,42 +352,34 @@ $x->cell($s1, $r, 9, round($val_permobil, 2), $stRp2); $x->merge($s1, $r, 9, $r,
 $r++; $r++;
 $x->cell($s1, $r, 3, $stamp_text, $stStamp); $r++;
 
-// ---------- SHEET 2: KARYAWAN TIDAK MASUK ----------
+// ---------- SHEET 2: KARYAWAN TIDAK MASUK (simple) ----------
 $s2 = $x->sheet('KARYAWAN TIDAK MASUK');
 $r2 = 1;
-$x->cell($s2, $r2, 1, 'KARYAWAN RENCANA TIDAK MASUK (TIDAK ADA TAP MESIN) TGL ' . $judul_tgl, $stT); $x->merge($s2, $r2, 1, $r2, 16); $r2++;
-$x->cell($s2, $r2, 1, 'Sumber rencana: RKK. Karyawan dinyatakan tidak masuk bila tidak ada tap mesin (tb_record) pada tanggal tersebut.', $stTH); $x->merge($s2, $r2, 1, $r2, 16); $r2++;
-$hdr2L = ['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','ISTIRAHAT','JAM PULANG'];
-$hdr2R = ['HASIL KERJA (kg)','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'];
-foreach ($hdr2L as $i => $h) $x->cell($s2, $r2, $i + 1, $h, $stTH);
-foreach ($hdr2R as $i => $h) $x->cell($s2, $r2, 11 + $i, $h, $stTHG);
-$x->cell($s2, $r2, 16, 'KETERANGAN', $stTH);
+$x->cell($s2, $r2, 1, 'KARYAWAN TIDAK MASUK HARI ' . $judul_hari . ' ' . $judul_tgl, $stT); $x->merge($s2, $r2, 1, $r2, 5); $r2++;
+$hdr2 = ['No','NAMA SESUAI KTP','OS/DHK','POSISI','KETERANGAN'];
+foreach ($hdr2 as $i => $h) $x->cell($s2, $r2, $i + 1, $h, $stTH);
 $r2++;
+$total_tm = 0;
+foreach ($tm_grup as $gtm) $total_tm += count($gtm);
 if (empty($tm_grup)) {
-    $x->cell($s2, $r2, 1, 'Semua karyawan rencana ada tap mesin (tidak ada yang tidak masuk).', $stCB); $x->merge($s2, $r2, 1, $r2, 16); $r2++;
+    $x->cell($s2, $r2, 1, 'Semua karyawan rencana sudah tap mesin / tarik data (tidak ada yang tidak masuk).', $stCB); $x->merge($s2, $r2, 1, $r2, 5); $r2++;
 } else {
+    $ntm = 1;
     foreach ($tm_grup as $gk => $trows) {
-        $x->cell($s2, $r2, 1, $gk, $stSEC); $x->merge($s2, $r2, 1, $r2, 16); $r2++;
-        $ntm = 1;
+        $x->cell($s2, $r2, 1, $gk, $stSEC); $x->merge($s2, $r2, 1, $r2, 5); $r2++;
         foreach ($trows as $tm) {
             $x->cell($s2, $r2, 1, $ntm++, $stCCB);
             $x->cell($s2, $r2, 2, strtoupper($tm['nama_karyawan'] ?? ''), $stWrap);
-            $x->cell($s2, $r2, 3, '', $stC);
-            $x->cell($s2, $r2, 4, $tm['oslbl'] ?? '', $stCCB);
-            $x->cell($s2, $r2, 5, $tm['gollbl'] ?? '', $stCCB);
-            $x->cell($s2, $r2, 6, $tm['posisi'] ?? '', $stC);
-            $x->cell($s2, $r2, 7, $tm['sm'] ?? '', $stCCB);
-            for ($c = 8; $c <= 11; $c++) $x->cell($s2, $r2, $c, '', $stC);
-            $x->cell($s2, $r2, 12, 0, $stCRB);
-            $x->cell($s2, $r2, 13, '', $stC);
-            $x->cell($s2, $r2, 14, '', $stC);
-            $x->cell($s2, $r2, 15, 0, $stCRB);
-            $x->cell($s2, $r2, 16, $tm['ket'] ?? '', $stC);
+            $x->cell($s2, $r2, 3, $tm['oslbl'] ?? '', $stCCB);
+            $x->cell($s2, $r2, 4, $tm['posisi'] ?? '', $stW);
+            $x->cell($s2, $r2, 5, $tm['ket'] ?? '', $stC);
             $r2++;
         }
     }
 }
+$x->cell($s2, $r2, 1, 'TOTAL KARYAWAN TIDAK MASUK', $stTOT); $x->merge($s2, $r2, 1, $r2, 4);
+$x->cell($s2, $r2, 5, $total_tm . ' Orang', $stTOT); $r2++;
 
-$x->autofit($s1);
-$x->autofit($s2);
+$x->autofit($s1, 30);
+$x->autofit($s2, 30);
 $x->send("Laporan_Realisasi_Upah_$tanggal.xlsx");

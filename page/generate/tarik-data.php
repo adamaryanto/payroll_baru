@@ -511,6 +511,13 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 			$per_hal_ns = $show_all_ns ? 0 : (int)$per_hal_ns_raw;
 			if (!$show_all_ns && !in_array($per_hal_ns, $per_hal_ns_opts, true)) $per_hal_ns = 25;
 			$cari_ns = trim((string)($_GET['cari_ns'] ?? ''));
+			// Param pagination tabel TIDAK DALAM RENCANA (dibedakan: hal_tdr / per_hal_tdr / cari_tdr)
+			$per_hal_tdr_opts = [10, 25, 50, 100];
+			$per_hal_tdr_raw = $_GET['per_hal_tdr'] ?? 25;
+			$show_all_tdr = ((string)$per_hal_tdr_raw === '-1' || strtolower((string)$per_hal_tdr_raw) === 'semua');
+			$per_hal_tdr = $show_all_tdr ? 0 : (int)$per_hal_tdr_raw;
+			if (!$show_all_tdr && !in_array($per_hal_tdr, $per_hal_tdr_opts, true)) $per_hal_tdr = 25;
+			$cari_tdr = trim((string)($_GET['cari_tdr'] ?? ''));
 			?>
 
 			<form action="" method="GET">
@@ -725,6 +732,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Sub Bagian</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">OS/DHK</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Golongan</th>
+								<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Grup</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Masuk</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Jam Pulang</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Istirahat Keluar</th>
@@ -1063,7 +1071,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 									$cari_lower = strtolower($cari_tarik);
 									foreach ($grouped as $gk_cari => $gr_cari) {
 										$em_cari = $emp_map_cari[trim((string)$gr_cari['pin'])] ?? null;
-										$hay = strtolower($gr_cari['pin'] . ' ' . $gr_cari['date'] . ' ' . date('d-m-Y', strtotime($gr_cari['date'])) . ' ' . ($em_cari['nama_karyawan'] ?? '') . ' ' . ($em_cari['nama_departmen'] ?? '') . ' ' . ($em_cari['nama_sub_department'] ?? ''));
+										$hay = strtolower($gr_cari['pin'] . ' ' . $gr_cari['date'] . ' ' . date('d-m-Y', strtotime($gr_cari['date'])) . ' ' . ($em_cari['nama_karyawan'] ?? '') . ' ' . ($dev_names_map[trim((string)$gr_cari['pin'])] ?? '') . ' ' . ($em_cari['nama_departmen'] ?? '') . ' ' . ($em_cari['nama_sub_department'] ?? ''));
 										if (strpos($hay, $cari_lower) !== false) $filtered_grouped[$gk_cari] = $gr_cari;
 									}
 								}
@@ -1082,6 +1090,18 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 								}
 
 								$no = $offset_hal + 1;
+								// Peta PIN -> grup master (1x query). PIN tak dikenal = TIDAK TERDAFTAR.
+								$grup_map_pin = [];
+								$ckGa = $koneksi->query("SHOW TABLES LIKE 'ms_grup_borongan_anggota'");
+								if ($ckGa && $ckGa->num_rows > 0) {
+									$qg = $koneksi->query("SELECT TRIM(k.no_absen) AS pin, GROUP_CONCAT(DISTINCT gb.nama_grup ORDER BY gb.nama_grup SEPARATOR ', ') AS grps FROM ms_grup_borongan_anggota ga JOIN ms_karyawan k ON k.id_karyawan = ga.id_karyawan JOIN ms_grup_borongan gb ON gb.id_grup = ga.id_grup WHERE TRIM(k.no_absen) <> '' GROUP BY TRIM(k.no_absen)");
+									while ($qg && ($rg = $qg->fetch_assoc())) $grup_map_pin[$rg['pin']] = $rg['grps'];
+								}
+								// Peta PIN -> nama di mesin (untuk PIN yang belum ada di master).
+								// Hanya ditarik bila memang ada PIN tak dikenal di rentang ini (hemat waktu bila mesin offline).
+								$dev_names_map = [];
+								$qneed = $koneksi->query("SELECT 1 FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' AND TRIM(userid) <> '' AND NOT EXISTS (SELECT 1 FROM ms_karyawan k WHERE k.no_absen IS NOT NULL AND TRIM(k.no_absen) <> '' AND TRIM(k.no_absen) = TRIM(tb_record.userid)) LIMIT 1");
+								if ($qneed && $qneed->num_rows > 0 && function_exists('get_device_user_names')) $dev_names_map = get_device_user_names($koneksi);
 								foreach ($paged_grouped as $key => $row) :
 									$PIN = $row['pin'];
 									$date = $row['date'];
@@ -1102,13 +1122,19 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 																LEFT JOIN ms_os_dhk o ON k.id_os_dhk = o.id_os_dhk
 																LEFT JOIN ms_golongan g ON k.id_golongan = g.id_golongan
 																WHERE k.no_absen = '$PIN' LIMIT 1");
-									$emp = $empQuery->fetch_assoc();
-									$nama_karyawan = $emp['nama_karyawan'] ?? 'Karyawan Tidak Dikenal';
+								$emp = $empQuery->fetch_assoc();
+								$pin_trim_early = trim((string)$PIN);
+								$nama_karyawan = $emp['nama_karyawan'] ?? ($dev_names_map[$pin_trim_early] ?? 'Karyawan Tidak Dikenal');
 									$bagian = $emp['nama_departmen'] ?? '-';
 									$sub_bagian = $emp['nama_sub_department'] ?? '-';
-									$os_dhk = $emp['label_os'] ?? 'MHS';
-									$golongan = $emp['label_gol'] ?? 'Harian';
-									$upah = $emp['upah'] ?? 0;
+								$os_dhk = $emp['label_os'] ?? 'MHS';
+								$golongan = $emp['label_gol'] ?? 'Harian';
+								$upah = $emp['upah'] ?? 0;
+								// Grup master per PIN; yang tidak terdaftar di master = TIDAK TERDAFTAR
+								$pin_trim_tarik = trim((string)$PIN);
+								if (!$emp) $grup_tarik = 'TIDAK TERDAFTAR';
+								elseif (!empty($grup_map_pin[$pin_trim_tarik])) $grup_tarik = $grup_map_pin[$pin_trim_tarik];
+								else $grup_tarik = '-';
 
 									// Acuan shift: roster tanggal ini bila ada, else master (fallback).
 									// Jadi ubah roster tgl 8 tidak merembet ke tgl 7.
@@ -1381,6 +1407,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 										<td data-label="Sub Bagian" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($sub_bagian); ?></td>
 										<td data-label="OS/DHK" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($os_dhk); ?></td>
 										<td data-label="Golongan" class="py-2 px-2 text-[15px] text-gray-700"><?php echo htmlspecialchars($golongan); ?></td>
+									<td data-label="Grup" class="py-2 px-2 text-[15px] text-gray-700"><?php if ($grup_tarik === 'TIDAK TERDAFTAR'): ?><span class="px-2 py-0.5 rounded-full font-bold text-xs" style="background:#fee2e2;color:#b91c1c;">TIDAK TERDAFTAR</span><?php else: ?><?php echo htmlspecialchars($grup_tarik); ?><?php endif; ?></td>
 										<td data-label="Jam Masuk" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_masuk); ?></td>
 										<td data-label="Jam Pulang" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_keluar); ?></td>
 										<td data-label="Istirahat Keluar" class="py-2 px-2 text-[15px] text-center text-gray-600"><?php echo htmlspecialchars($s_ist_keluar); ?></td>
@@ -1561,9 +1588,35 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 				    $qg = $koneksi->query("SELECT g.*, k2.nama_karyawan AS nama_ganti FROM tb_ganti g LEFT JOIN ms_karyawan k2 ON k2.id_karyawan=g.id_karyawan_ganti WHERE g.tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
 				    if ($qg) while ($rg = $qg->fetch_assoc()) $ganti_map[$rg['tgl'] . '|' . $rg['id_karyawan_absen']] = $rg;
 				}
-				$opsi_kar = [];
-				$qk = $koneksi->query("SELECT k.id_karyawan, k.no_absen, k.nama_karyawan, o.OS_DHK AS oslbl, d.nama_departmen AS dept FROM ms_karyawan k LEFT JOIN ms_os_dhk o ON o.id_os_dhk=k.id_os_dhk LEFT JOIN ms_departmen d ON d.id_departmen=k.id_departmen WHERE k.status_karyawan='Aktif' ORDER BY k.nama_karyawan");
-				if ($qk) while ($rk = $qk->fetch_assoc()) $opsi_kar[] = $rk;
+			$opsi_kar = [];
+			$qk = $koneksi->query("SELECT k.id_karyawan, k.no_absen, k.nama_karyawan, o.OS_DHK AS oslbl, d.nama_departmen AS dept FROM ms_karyawan k LEFT JOIN ms_os_dhk o ON o.id_os_dhk=k.id_os_dhk LEFT JOIN ms_departmen d ON d.id_departmen=k.id_departmen WHERE k.status_karyawan='Aktif' ORDER BY k.nama_karyawan");
+			if ($qk) while ($rk = $qk->fetch_assoc()) $opsi_kar[] = $rk;
+			// ===== PANEL TIDAK DALAM RENCANA (tap ada tapi tidak masuk rencana RKK) =====
+			$tdr_rows = [];
+			if (!empty($TanggalAwal) && !empty($TanggalAkhir)) {
+			    $taps_fl = [];
+			    $qt2 = $koneksi->query("SELECT TRIM(userid) AS pin, tgl, MIN(detail_waktu) AS ft, MAX(detail_waktu) AS lt, COUNT(*) AS n FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' AND TRIM(userid) <> '' GROUP BY TRIM(userid), tgl");
+			    if ($qt2) while ($rt2 = $qt2->fetch_assoc()) $taps_fl[$rt2['tgl'] . '|' . $rt2['pin']] = $rt2;
+			    $master_pin = [];
+			    foreach ($opsi_kar as $ok) $master_pin[trim((string)$ok['no_absen'])] = $ok;
+			    foreach ($taps_fl as $tk => $tv) {
+			        if (isset($rosterShift[$tk])) continue; // ada di rencana -> bukan panel ini
+			        $dt = $tv['tgl']; $pin = $tv['pin'];
+			        $em = $master_pin[$pin] ?? null;
+			        if ($em) {
+			            $nama = $em['nama_karyawan'];
+			            $osdept = ($em['oslbl'] ?: '-') . ' / ' . ($em['dept'] ?: '-');
+			        } else {
+			            $nm_d = isset($dev_names_map) ? ($dev_names_map[$pin] ?? '') : '';
+			            $nama = ($nm_d !== '' ? $nm_d : 'Karyawan Tidak Dikenal') . " ($pin)";
+			            $osdept = '- / -';
+			        }
+			        $tdr_rows[] = ['tgl' => $dt, 'nama' => $nama, 'pin' => $pin, 'osdept' => $osdept,
+			            'masuk' => substr($tv['ft'], 11, 5), 'pulang' => substr($tv['lt'], 11, 5), 'n' => (int)$tv['n'],
+			            'ket' => 'Tap di luar rencana'];
+			    }
+			    usort($tdr_rows, function($a, $b) { $c = strcmp($a['tgl'], $b['tgl']); return $c !== 0 ? $c : strcmp($a['nama'], $b['nama']); });
+			}
 				?>
 				<?php if (!empty($ganti_msg)): ?>
 					<div class="p-3 mb-3 rounded-lg border text-sm <?= strpos($ganti_msg, 'Gagal') === false ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800' ?>"><?= htmlspecialchars($ganti_msg) ?></div>
@@ -1778,6 +1831,151 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 				</div>
 				</div>
 				</form>
+				<div class="mt-4 p-4 rounded-xl border border-gray-200 bg-white">
+					<div class="d-flex justify-content-between align-items-center flex-wrap mb-1" style="gap:10px;">
+						<h4 class="font-bold text-sm m-0">Tidak Dalam Rencana (<?= count($tdr_rows) ?> orang)</h4>
+						<?php if (!empty($tdr_rows)): ?>
+						<div class="download-btn-container d-flex flex-wrap" style="gap:8px;">
+							<a href="excel_tidak_rencana.php?tanggal_awal=<?= htmlspecialchars($TanggalAwal) ?>&tanggal_akhir=<?= htmlspecialchars($TanggalAkhir) ?>" target="_blank" class="btn btn-success font-semibold text-white d-inline-flex align-items-center shadow-sm download-btn">
+								<i class="fas fa-file-excel mr-2"></i> Download Excel
+							</a>
+							<a href="pdf_tidak_rencana.php?tanggal_awal=<?= htmlspecialchars($TanggalAwal) ?>&tanggal_akhir=<?= htmlspecialchars($TanggalAkhir) ?>" target="_blank" class="btn btn-danger font-semibold text-white d-inline-flex align-items-center shadow-sm download-btn">
+								<i class="fas fa-file-pdf mr-2"></i> Download PDF
+							</a>
+						</div>
+						<?php endif; ?>
+					</div>
+					<p class="text-xs text-gray-500 mb-3">Tap tercatat di mesin tapi tidak masuk rencana RKK pada rentang tanggal ini.</p>
+					<?php if (empty($tdr_rows)): ?>
+						<p class="text-xs text-gray-500">Tidak ada data — seluruh tap masuk rencana.</p>
+					<?php else:
+						$filtered_tdr = $tdr_rows;
+						if ($cari_tdr !== '') {
+							$filtered_tdr = [];
+							$cari_tdr_lower = strtolower($cari_tdr);
+							foreach ($tdr_rows as $tr_item) {
+								$hay_tdr = strtolower($tr_item['tgl'] . ' ' . date('d-m-Y', strtotime($tr_item['tgl'])) . ' ' . $tr_item['pin'] . ' ' . $tr_item['nama'] . ' ' . ($tr_item['osdept'] ?? '') . ' ' . ($tr_item['ket'] ?? ''));
+								if (strpos($hay_tdr, $cari_tdr_lower) !== false) $filtered_tdr[] = $tr_item;
+							}
+						}
+						$total_tdr = count($filtered_tdr);
+						if ($show_all_tdr || $total_tdr === 0) {
+							$total_hal_tdr = 1; $hal_tdr = 1; $offset_tdr = 0;
+							$paged_tdr = $filtered_tdr;
+							$per_hal_tdr_eff = $total_tdr > 0 ? $total_tdr : 25;
+						} else {
+							$per_hal_tdr_eff = $per_hal_tdr;
+							$total_hal_tdr = max(1, (int)ceil($total_tdr / $per_hal_tdr_eff));
+							$hal_tdr = isset($_GET['hal_tdr']) ? max(1, (int)$_GET['hal_tdr']) : 1;
+							if ($hal_tdr > $total_hal_tdr) $hal_tdr = $total_hal_tdr;
+							$offset_tdr = ($hal_tdr - 1) * $per_hal_tdr_eff;
+							$paged_tdr = array_slice($filtered_tdr, $offset_tdr, $per_hal_tdr_eff);
+						}
+					?>
+					<div class="d-flex justify-content-between align-items-center flex-wrap mb-3" style="gap:10px;">
+						<div class="d-flex align-items-center" style="gap:8px;font-size:13px;color:#334155;">
+							<label class="m-0" for="per-hal-tdr-select">Tampilkan</label>
+							<select id="per-hal-tdr-select" class="form-control" style="width:auto;display:inline-block;padding:4px 8px;border:1px solid #e0e6ed;border-radius:8px;font-size:13px;">
+								<option value="10" <?php echo (!$show_all_tdr && $per_hal_tdr == 10) ? 'selected' : ''; ?>>10</option>
+								<option value="25" <?php echo (!$show_all_tdr && $per_hal_tdr == 25) ? 'selected' : ''; ?>>25</option>
+								<option value="50" <?php echo (!$show_all_tdr && $per_hal_tdr == 50) ? 'selected' : ''; ?>>50</option>
+								<option value="100" <?php echo (!$show_all_tdr && $per_hal_tdr == 100) ? 'selected' : ''; ?>>100</option>
+								<option value="-1" <?php echo $show_all_tdr ? 'selected' : ''; ?>>Semua</option>
+							</select>
+							<span>data</span>
+						</div>
+						<div class="d-flex align-items-center" style="gap:8px;font-size:13px;color:#334155;">
+							<label class="m-0" for="cari-tdr-input">Cari:</label>
+							<input type="text" id="cari-tdr-input" value="<?php echo htmlspecialchars($cari_tdr); ?>" placeholder="Cari nama / no absen..." class="form-control" style="width:180px;padding:5px 10px;border:1px solid #e0e6ed;border-radius:8px;font-size:13px;" />
+							<button type="button" id="cari-tdr-btn" class="btn btn-primary btn-sm shadow-sm">Cari</button>
+							<?php if ($cari_tdr !== '') :
+								$reset_tdr = $_GET;
+								$reset_tdr['page'] = 'generate';
+								$reset_tdr['aksi'] = 'tarik';
+								unset($reset_tdr['cari_tdr'], $reset_tdr['hal_tdr']);
+							?>
+							<a href="?<?php echo htmlspecialchars(http_build_query($reset_tdr)); ?>" class="btn btn-default btn-sm" style="border:1px solid #e0e6ed;">Reset</a>
+							<?php endif; ?>
+						</div>
+					</div>
+					<div class="overflow-x-auto">
+					<table id="tabel-tidak-rencana" class="w-full text-sm text-left bg-white rounded-lg overflow-hidden">
+						<thead class="bg-gray-50 border-b border-gray-200"><tr><th class="py-2 px-3">Tanggal</th><th class="py-2 px-3">Nama</th><th class="py-2 px-3">OS / Bagian</th><th class="py-2 px-3">Tap Masuk</th><th class="py-2 px-3">Tap Pulang</th><th class="py-2 px-3">Jml Tap</th><th class="py-2 px-3">Keterangan</th></tr></thead>
+						<tbody class="divide-y divide-gray-100">
+						<?php foreach ($paged_tdr as $tr): ?>
+							<tr class="hover:bg-gray-50">
+								<td class="py-2 px-3"><?= date('d-m-Y', strtotime($tr['tgl'])) ?></td>
+								<td class="py-2 px-3 font-semibold"><?= htmlspecialchars($tr['nama']) ?> <span class="text-gray-400 text-xs">(<?= htmlspecialchars($tr['pin']) ?>)</span></td>
+								<td class="py-2 px-3 text-xs"><?= htmlspecialchars($tr['osdept']) ?></td>
+								<td class="py-2 px-3 text-xs font-semibold"><?= htmlspecialchars($tr['masuk'] ?: '-') ?></td>
+								<td class="py-2 px-3 text-xs font-semibold"><?= htmlspecialchars(($tr['pulang'] !== '' && $tr['pulang'] !== $tr['masuk']) ? $tr['pulang'] : '-') ?></td>
+								<td class="py-2 px-3 text-xs text-center"><?= (int)$tr['n'] ?></td>
+								<td class="py-2 px-3 text-xs text-amber-700 font-semibold"><?= htmlspecialchars($tr['ket']) ?></td>
+							</tr>
+						<?php endforeach; ?>
+						<?php if (empty($paged_tdr)): ?>
+							<tr><td colspan="7" class="py-3 px-3 text-center text-gray-500">Tidak ada data yang cocok dengan pencarian.</td></tr>
+						<?php endif; ?>
+						</tbody>
+					</table>
+					</div>
+					<?php if ($total_tdr > 0) :
+						$base_tdr = $_GET;
+						$base_tdr['page'] = 'generate';
+						$base_tdr['aksi'] = 'tarik';
+						unset($base_tdr['hal_tdr']);
+						$base_tdr_qs = http_build_query($base_tdr);
+						$base_tdr_url = '?' . $base_tdr_qs . ($base_tdr_qs !== '' ? '&' : '') . 'hal_tdr=';
+						$mulai_tdr = $offset_tdr + 1;
+						$sampai_tdr = min($offset_tdr + $per_hal_tdr_eff, $total_tdr);
+						$win_start_tdr = max(1, min($hal_tdr - 2, $total_hal_tdr - 4));
+						$win_end_tdr = min($total_hal_tdr, $win_start_tdr + 4);
+						if ($win_end_tdr - $win_start_tdr < 4) $win_start_tdr = max(1, $win_end_tdr - 4);
+					?>
+					<div class="d-flex justify-content-between align-items-center flex-wrap mt-3" style="gap:10px;">
+						<div class="text-muted" style="font-size:12px;">
+							Menampilkan <?php echo $mulai_tdr; ?> s/d <?php echo $sampai_tdr; ?> dari <?php echo $total_tdr; ?> data
+							(Hal. <?php echo $hal_tdr; ?> / <?php echo $total_hal_tdr; ?>)
+						</div>
+						<nav aria-label="Pagination Tidak Dalam Rencana">
+							<ul class="pagination pagination-sm mb-0" style="gap:4px;">
+								<?php if ($hal_tdr > 1) : ?>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_tdr_url . '1'); ?>" title="Halaman pertama">&laquo;</a>
+								</li>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_tdr_url . ($hal_tdr - 1)); ?>">Prev</a>
+								</li>
+								<?php else : ?>
+								<li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+								<li class="page-item disabled"><span class="page-link">Prev</span></li>
+								<?php endif; ?>
+								<?php for ($pn = $win_start_tdr; $pn <= $win_end_tdr; $pn++) : ?>
+								<li class="page-item <?php echo ($pn == $hal_tdr) ? 'active' : ''; ?>">
+									<?php if ($pn == $hal_tdr) : ?>
+									<span class="page-link" style="background:#2563eb;border-color:#2563eb;color:#fff;"><?php echo $pn; ?></span>
+									<?php else : ?>
+									<a class="page-link" href="<?php echo htmlspecialchars($base_tdr_url . $pn); ?>"><?php echo $pn; ?></a>
+									<?php endif; ?>
+								</li>
+								<?php endfor; ?>
+								<?php if ($hal_tdr < $total_hal_tdr) : ?>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_tdr_url . ($hal_tdr + 1)); ?>">Next</a>
+								</li>
+								<li class="page-item">
+									<a class="page-link" href="<?php echo htmlspecialchars($base_tdr_url . $total_hal_tdr); ?>" title="Halaman terakhir">&raquo;</a>
+								</li>
+								<?php else : ?>
+								<li class="page-item disabled"><span class="page-link">Next</span></li>
+								<li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+								<?php endif; ?>
+							</ul>
+						</nav>
+					</div>
+					<?php endif; ?>
+					<?php endif; ?>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -1839,6 +2037,28 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 			$('#cari-ns-btn').on('click', submitCariNs);
 			$('#cari-ns-input').on('keydown', function(e) {
 				if (e.key === 'Enter') { e.preventDefault(); submitCariNs(); }
+			});
+
+			// Bar atas tabel TIDAK DALAM RENCANA: ganti jumlah data per halaman (reset ke hal_tdr 1)
+			$('#per-hal-tdr-select').on('change', function() {
+				var url = new URL(window.location.href);
+				url.searchParams.set('per_hal_tdr', $(this).val());
+				url.searchParams.set('hal_tdr', '1');
+				window.location.href = url.toString();
+			});
+
+			// Bar atas tabel TIDAK DALAM RENCANA: Cari server-side (reset ke hal_tdr 1)
+			function submitCariTdr() {
+				var url = new URL(window.location.href);
+				var kw = $('#cari-tdr-input').val().trim();
+				if (kw !== '') url.searchParams.set('cari_tdr', kw);
+				else url.searchParams.delete('cari_tdr');
+				url.searchParams.set('hal_tdr', '1');
+				window.location.href = url.toString();
+			}
+			$('#cari-tdr-btn').on('click', submitCariTdr);
+			$('#cari-tdr-input').on('keydown', function(e) {
+				if (e.key === 'Enter') { e.preventDefault(); submitCariTdr(); }
 			});
 
 			// Select All checkbox logic (plain, tanpa DataTables)

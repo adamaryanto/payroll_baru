@@ -245,7 +245,7 @@ if (isset($_POST['bulk_delete_selected'])) {
                 elseif($dr['status']=='error') $bulk_delete_results['mesin_gagal']++;
             }
         }
-        if($koneksi->query("DELETE FROM ms_karyawan WHERE id_karyawan=$id")) { $bulk_delete_results['success']++; $bulk_delete_results['details'][] = ['nama'=>$nama_del,'pin'=>$no_absen,'mesin'=>$mesin_info]; } else $bulk_delete_results['fail']++;
+        if($koneksi->query("DELETE FROM ms_karyawan WHERE id_karyawan=$id")) { hapus_karyawan_dari_grup($koneksi, $id); $bulk_delete_results['success']++; $bulk_delete_results['details'][] = ['nama'=>$nama_del,'pin'=>$no_absen,'mesin'=>$mesin_info]; } else $bulk_delete_results['fail']++;
     }
 }
 if (isset($_POST['bulk_check_selected'])) {

@@ -32,7 +32,7 @@ if (isset($_POST['proses_hapus'])) {
                     elseif($dr['status']=='error'){ $mesin_gagal++; $mesin_gagal_list[] = "$nama_del ($no_absen) @ ".($dr['device']??$did); }
                 }
             }
-            if ($koneksi->query("DELETE FROM ms_karyawan WHERE id_karyawan=$id")) $count++; else $fail++;
+            if ($koneksi->query("DELETE FROM ms_karyawan WHERE id_karyawan=$id")) { hapus_karyawan_dari_grup($koneksi, $id); $count++; } else $fail++;
         }
         $msgJs = json_encode("$count karyawan dihapus dari web." . ($fail>0 ? " $fail gagal." : "") . " Mesin: $mesin_ok berhasil" . ($mesin_gagal>0 ? ", $mesin_gagal gagal." : "."));
         $gagalJs = !empty($mesin_gagal_list) ? json_encode("<br><br><small>Gagal di mesin:<br>".implode("<br>", array_map('htmlspecialchars', array_slice($mesin_gagal_list,0,10)))."</small>") : "''";

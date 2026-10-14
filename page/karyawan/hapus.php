@@ -66,6 +66,7 @@ if (isset($_POST['do_delete']) || isset($_POST['db_only'])) {
     }
 
     $sql = $koneksi->query("delete from ms_karyawan where id_karyawan = '$id' ");
+    if ($sql) hapus_karyawan_dari_grup($koneksi, $id); // ikut keluarkan dari master grup (cegah NULL)
     if ($sql) {
         $syncJs = json_encode($sync_msg);
         ?>

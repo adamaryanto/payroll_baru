@@ -26,7 +26,7 @@ echo "[OK] COM extension aktif\n";
 $host = '127.0.0.1';
 $user = 'root';
 $pass = '';
-$dbname = 'db_hr_new';
+$dbname = 'db_hr_new_kosong';
 
 $connMySQL = @mysqli_connect($host, $user, $pass, $dbname);
 if (!$connMySQL) {

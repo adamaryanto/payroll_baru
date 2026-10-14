@@ -20,6 +20,24 @@ if ($step === 'commit') {
     if (!$imp) {
         $alert = ["icon" => "error", "title" => "Kedaluwarsa", "text" => "Data preview kedaluwarsa. Upload ulang filenya."];
     } else {
+        $sel = [];
+        // Payload JSON dari JS (1 variabel, kebal max_input_vars): uraikan ke $_POST agar logika bawah tetap sama.
+        // Tanpa JS (fallback) alur lama via rx_sel[] + sh_/up_/dp_/ps_ tetap jalan.
+        if (!empty($_POST['rx_payload'])) {
+            $dec = json_decode((string)$_POST['rx_payload'], true);
+            if (is_array($dec)) {
+                $_POST['rx_sel'] = [];
+                foreach ($dec as $pr) {
+                    if (!is_array($pr)) continue;
+                    $pi = (int)($pr['i'] ?? -1);
+                    if ($pi < 0) continue;
+                    $_POST['rx_sel'][] = $pi;
+                    foreach (['sh', 'up', 'dp', 'ps'] as $kk) {
+                        if (array_key_exists($kk, $pr)) $_POST[$kk . '_' . $pi] = $pr[$kk];
+                    }
+                }
+            }
+        }
         $sel = array_map('intval', (array)($_POST['rx_sel'] ?? []));
         $rows = [];
         foreach (($imp['rows'] ?? []) as $i => $r) {
@@ -28,6 +46,7 @@ if ($step === 'commit') {
             $r['sh_raw'] = isset($_POST["sh_$i"]) ? trim((string)$_POST["sh_$i"]) : '';
             $r['upah'] = isset($_POST["up_$i"]) ? max(0, (int)str_replace('.', '', $_POST["up_$i"])) : (int)($r['upah'] ?? 0);
             $r['dept_id'] = isset($_POST["dp_$i"]) ? (int)$_POST["dp_$i"] : (int)($r['dept_id'] ?? 0);
+            $r['dp_raw'] = isset($_POST["dp_$i"]) ? trim((string)$_POST["dp_$i"]) : '';
             $r['sub_id'] = isset($_POST["ps_$i"]) ? (int)$_POST["ps_$i"] : (int)($r['sub_id'] ?? 0);
             $r['ps_raw'] = isset($_POST["ps_$i"]) ? trim((string)$_POST["ps_$i"]) : '';
             $rows[] = $r;
@@ -57,12 +76,11 @@ if ($step === 'commit') {
                     $tx_fail = '';
                     $now = date('Y-m-d H:i:s');
                     $ket = $koneksi->real_escape_string('Import Excel ' . ($imp['title'] ?? $tgl));
-                    $jamkerja = 0;
-                    foreach ($rows as $r) $jamkerja = max($jamkerja, (float)($r['jam_kerja'] ?? 0));
-                    $jamkerja = $jamkerja > 0 ? (int)round($jamkerja) : 12;
-                    if (!$koneksi->query("INSERT INTO tb_rkk (tgl_rkk, keterangan, jam_kerja, detail_rkk, status_rkk, tgl_status) VALUES ('$tgl', '$ket', '$jamkerja', '$now', '0', '$now')")) $tx_fail = 'Gagal menyimpan header RKK.';
+                    $jamkerja = 0; // durasi shift terlama (jam); dihitung per baris di loop bawah.
+                    // Catatan: kolom JAM KERJA di Excel = fraksi JAM MASUK shift (0.25 = jam 6), bukan durasi — jangan di-max langsung.
+                    if (!$koneksi->query("INSERT INTO tb_rkk (tgl_rkk, keterangan, jam_kerja, detail_rkk, status_rkk, tgl_status) VALUES ('$tgl', '$ket', '0', '$now', '0', '$now')")) $tx_fail = 'Gagal menyimpan header RKK.';
                     $id_rkk = $koneksi->insert_id;
-                    $c_kar = 0; $c_new = 0; $c_grup = 0; $c_shift = 0;
+                    $c_kar = 0; $c_new = 0; $c_grup = 0; $c_shift = 0; $c_agt = 0;
                     $qd = $koneksi->query("SELECT MIN(id_departmen) AS m FROM ms_departmen");
                     $def_dept = ($qd && ($rd = $qd->fetch_assoc()) && $rd['m']) ? (int)$rd['m'] : 0;
                     $qs = $koneksi->query("SELECT MIN(id_sub_department) AS m FROM ms_sub_department");
@@ -78,12 +96,27 @@ if ($step === 'commit') {
                         }
                         $vg = ($id_grup === null) ? "NULL" : "'$id_grup'";
                         $dep = (int)($r['dept_id'] ?? 0) > 0 ? (int)$r['dept_id'] : $def_dept;
+                        $dep = rx_commit_dept($koneksi, $r, $dep); // opsi teks "(baru)" -> generate otomatis
                         $sub = rx_commit_sub($koneksi, $r, $dep);
                         $dep = rx_valid_dept($koneksi, $dep);
                         $sub = rx_valid_sub($koneksi, $sub, $dep);
                         $vdep = ($dep > 0) ? "'$dep'" : "NULL";
                         $vsub = ($sub > 0) ? "'$sub'" : "NULL";
                         $jd = rx_commit_shift($koneksi, $r, $c_shift);
+                        // Lacak durasi shift terlama (keluar - masuk, sadar lewat tengah malam)
+                        if ($jd > 0) {
+                            $jq = $koneksi->query("SELECT jam_masuk, jam_keluar FROM tb_jadwal WHERE id_jadwal='$jd' LIMIT 1");
+                            if ($jq && ($jr = $jq->fetch_assoc())) {
+                                $sm = trim((string)($jr['jam_masuk'] ?? ''));
+                                $sk = trim((string)($jr['jam_keluar'] ?? ''));
+                                $tin = strtotime($sm); $tout = strtotime($sk);
+                                if ($tin !== false && $tout !== false && !(($sm === '' || $sm === '00:00:00') && ($sk === '' || $sk === '00:00:00'))) {
+                                    $dur = ($tout - $tin) / 3600;
+                                    if ($dur <= 0) $dur += 24;
+                                    if ($dur > 0 && $dur <= 24 && $dur > $jamkerja) $jamkerja = $dur;
+                                }
+                            }
+                        }
                         $kid = (int)($r['karyawan_id'] ?? 0);
                         if ($kid <= 0 && !empty($r['nama'])) {
                             $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $jd, $r['upah'] ?? 0, $tgl, $dep, $sub);
@@ -94,6 +127,13 @@ if ($step === 'commit') {
                             }
                         }
                         if ($kid <= 0) continue;
+                        // Auto-masuk master grup: section Excel = grupnya (boleh rangkap, tidak mengeluarkan dari grup lama)
+                        if ($id_grup !== null) {
+                            $gid_ins = (int)$id_grup;
+                            if ($koneksi->query("INSERT IGNORE INTO ms_grup_borongan_anggota (id_grup, id_karyawan, tarif, is_borongan) VALUES ('$gid_ins', '$kid', NULL, 0)")) {
+                                if ((int)$koneksi->affected_rows > 0) $c_agt++;
+                            }
+                        }
                         // Lengkapi OS/Golongan master yang masih kosong dari Excel
                         rx_fill_master_osgol($koneksi, $kid, $r['osdhk'] ?? '', $r['golongan'] ?? '');
                         $up = (float)($r['upah'] ?? 0);
@@ -101,6 +141,8 @@ if ($step === 'commit') {
                         $c_kar++;
                     }
                     // Realisasi SENGAJA tidak dibuat dari import Excel (dibuat terpisah via Tambah Realisasi + Tarik Data).
+                    $jamkerja = $jamkerja > 0 ? (int)round($jamkerja) : 12;
+                    if ($tx_fail === '' && !$koneksi->query("UPDATE tb_rkk SET jam_kerja='$jamkerja' WHERE id_rkk='$id_rkk'")) $tx_fail = 'Gagal menyimpan jam kerja RKK.';
                     if ($tx_fail !== '') {
                         $koneksi->rollback();
                         $alert = ["icon" => "error", "title" => "Import Gagal", "text" => $tx_fail . " Semua dibatalkan, tidak ada data setengah jadi. Coba lagi."];
@@ -110,7 +152,7 @@ if ($step === 'commit') {
                         $bon_msg = rx_save_boneless($koneksi, $tgl, $id_rkk, $imp['boneless'] ?? null, $imp['title'] ?? '');
                     unset($_SESSION['rx_import']);
                     $alert = ["icon" => "success", "title" => "Import Selesai",
-                        "text" => "RKK#$id_rkk ($tgl): $c_kar karyawan" . ($c_new > 0 ? " ($c_new karyawan baru)" : "") . ($c_grup > 0 ? ", $c_grup grup baru" : "") . ($c_shift > 0 ? ", $c_shift shift baru" : "") . $bon_msg . "."];
+                        "text" => "RKK#$id_rkk ($tgl): $c_kar karyawan" . ($c_new > 0 ? " ($c_new karyawan baru)" : "") . ($c_grup > 0 ? ", $c_grup grup baru" : "") . ($c_shift > 0 ? ", $c_shift shift baru" : "") . ($c_agt > 0 ? ", $c_agt anggota masuk master grup" : "") . $bon_msg . "."];
                         $redirect = "?page=rkk";
                     }
                 }
@@ -197,7 +239,8 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
             }
             $match = rx_match_karyawan($koneksi, $nama);
             // Department ikut master; Posisi ikut teks Excel (cocok -> kepilih, baru -> opsi "(baru)" + auto-create).
-            $dep_id = $pv_dept; $sub_id = $pv_sub; $posisi_baru = '';
+            // Bila department belum ketemu tapi posisinya baru -> department ikut teks posisi (opsi "(baru)" + auto-create).
+            $dep_id = $pv_dept; $sub_id = $pv_sub; $posisi_baru = ''; $dept_baru = '';
             $pos_txt0 = trim($base['posisi'] ?? '');
             $sid0 = ($pos_txt0 !== '') ? rx_lookup_id($koneksi, 'ms_sub_department', 'nama_sub_department', $pos_txt0) : 0;
             if ($match) {
@@ -218,6 +261,7 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                     $posisi_baru = $pos_txt0; // belum ada di master -> dibuat otomatis saat simpan
                 } else { $sub_id = 0; } // Excel kosong -> kosong, jangan ngarang
             }
+            if ($dep_id <= 0 && $posisi_baru !== '') $dept_baru = $posisi_baru; // dept ngikutin posisi baru di Excel
             $has_real = $m['real'] && (rx_valid_time($m['real']['h_raw']) || rx_valid_time($m['real']['jam_pulang']));
             $jam_masuk = $m['real'] ? rx_frac_to_time($m['real']['h_raw']) : '';
             $jam_pulang = $m['real'] ? $m['real']['jam_pulang'] : '';
@@ -249,6 +293,7 @@ if (!$alert && $step === 'preview' && !empty($_FILES['fexcel']['tmp_name'])) {
                 'golongan' => $base['golongan'] ?? '',
                 'posisi' => $base['posisi'] ?? '',
                 'posisi_baru' => $posisi_baru,
+                'dept_baru' => $dept_baru,
                 'osdhk_baru' => $os_baru,
                 'golongan_baru' => $gol_baru,
                 'dept_id' => $dep_id,
@@ -308,8 +353,9 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                 — otomatis tersimpan ke halaman Boneless (tidak masuk kelola).
             </div>
             <?php endif; ?>
-            <form method="POST">
+            <form method="POST" id="rx_commit_form">
                 <input type="hidden" name="rx_step" value="commit">
+                <input type="hidden" name="rx_payload" id="rx_payload" value="">
                 <div class="mb-4 max-w-xs">
                     <label class="block text-sm font-bold text-gray-700 mb-2">Tanggal RKK</label>
                     <input type="date" name="rx_date" value="<?= htmlspecialchars($preview['date'] ?: date('Y-m-d')); ?>" required class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm">
@@ -376,9 +422,11 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                 <td class="py-2 px-3">
                                     <select name="dp_<?= $idx; ?>" class="rx_dept px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white">
                                         <?php foreach ($dept_opts as $do): ?>
-                                            <option value="<?= $do['id_departmen']; ?>" <?= ((int)$do['id_departmen'] === (int)($r['dept_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($do['nama_departmen']); ?></option>
+                                            <option value="<?= $do['id_departmen']; ?>" <?= (empty($r['dept_baru']) && (int)$do['id_departmen'] === (int)($r['dept_id'] ?? 0)) ? 'selected' : ''; ?>><?= htmlspecialchars($do['nama_departmen']); ?></option>
                                         <?php endforeach; ?>
+                                        <?php if (!empty($r['dept_baru'])): ?><option value="<?= htmlspecialchars($r['dept_baru']); ?>" selected><?= htmlspecialchars($r['dept_baru']); ?> (baru)</option><?php endif; ?>
                                     </select>
+                                    <?php if (!empty($r['dept_baru'])): ?><div class="text-[11px] font-bold text-purple-700 mt-1">“<?= htmlspecialchars($r['dept_baru']); ?>” baru → otomatis dibuat</div><?php endif; ?>
                                 </td>
                                 <td class="py-2 px-3"><input type="number" name="up_<?= $idx; ?>" value="<?= (int)$r['upah']; ?>" min="0" class="w-28 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-right"></td>
                             </tr>
@@ -422,6 +470,17 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                 });
                 document.querySelectorAll('#rx_all, .rx_sel, table tbody tr').forEach(function() {});
                 document.querySelectorAll('table tbody tr').forEach(function(tr) { rxFilterRow(tr); });
+                // Packing anti max_input_vars: kirim baris tercentang sebagai 1 JSON, input per-baris di-disable agar tidak ikut ter-post
+                document.getElementById('rx_commit_form').addEventListener('submit', function() {
+                    var rows = [];
+                    document.querySelectorAll('.rx_sel:checked').forEach(function(c) {
+                        var idx = c.value;
+                        function v(pref) { var el = document.querySelector('[name="' + pref + idx + '"]'); return el ? el.value : ''; }
+                        rows.push({ i: parseInt(idx, 10), sh: v('sh_'), up: v('up_'), dp: v('dp_'), ps: v('ps_') });
+                    });
+                    document.getElementById('rx_payload').value = JSON.stringify(rows);
+                    document.querySelectorAll('.rx_sel, select[name^="sh_"], input[name^="up_"], select[name^="dp_"], select[name^="ps_"]').forEach(function(el) { el.disabled = true; });
+                });
             </script>
             <?php else: ?>
             <form method="POST" enctype="multipart/form-data" class="max-w-xl">
@@ -437,7 +496,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
             <div class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 leading-relaxed">
                 <strong>Cara kerja:</strong> tanggal diambil dari judul baris 1 (bisa dikoreksi di preview). Section di Excel = grup — kalau belum ada di master, otomatis dibuatkan.
                 Shift ditebak dari kolom JAM KERJA (bisa diubah per baris), Upah dari kolom UPAH (kalau ada). Shift yang belum ada di master otomatis dibuatkan (12 jam). Department &amp; Posisi ikut master/tebakan Excel dan bisa diubah per baris — pilihan Posisi otomatis ikut Department. Posisi yang belum ada di master otomatis dibuatkan saat simpan; yang kosong di Excel disimpan kosong (tidak diisi default). Rekap boneless di bawah + sheet BONLESS otomatis masuk halaman Boneless (tidak masuk kelola).
-                Nama yang tidak cocok otomatis dibuatkan karyawan baru (No. Absen = MAX+1). Baris kotor tetap diproses tapi tidak dicentang — cek manual.
+                Nama yang tidak cocok otomatis dibuatkan karyawan baru (No. Absen = MAX+1). Anggota tiap section otomatis dimasukkan ke master grup (boleh rangkap di banyak grup). Baris kotor tetap diproses tapi tidak dicentang — cek manual.
             </div>
             <?php endif; ?>
         </div>
