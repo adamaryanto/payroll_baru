@@ -11,6 +11,161 @@ if (file_exists(__DIR__ . '/zk_protocol_helper.php')) {
 }
 
 /**
+ * Cache "kapan terakhir pull sukses" per tanggal — biar tombol Tarik tidak
+ * mengulang SOAP ke mesin kalau datanya masih segar (default 10 menit).
+ */
+function pull_cache_ensure($koneksi) {
+    try {
+        $koneksi->query("CREATE TABLE IF NOT EXISTS tb_pull_cache (
+            tgl DATE NOT NULL PRIMARY KEY,
+            pulled_at DATETIME NOT NULL,
+            records INT NOT NULL DEFAULT 0
+        ) ENGINE=InnoDB");
+    } catch (Throwable $e) {}
+}
+function pull_cache_mark($koneksi, $start_date, $end_date, $records) {
+    try {
+        pull_cache_ensure($koneksi);
+        $t = strtotime((string)$start_date); $e = strtotime((string)$end_date);
+        if (!$t || !$e || $e < $t) return;
+        $n = 0;
+        for ($d = $t; $d <= $e && $n < 370; $d += 86400, $n++) {
+            $dt = date('Y-m-d', $d);
+            $koneksi->query("INSERT INTO tb_pull_cache (tgl, pulled_at, records) VALUES ('$dt', NOW(), " . (int)$records . ") ON DUPLICATE KEY UPDATE pulled_at = NOW(), records = " . (int)$records);
+        }
+    } catch (Throwable $e2) {}
+}
+// Segar bila SELURUH tanggal sudah pernah ditarik dalam $minutes menit terakhir.
+function pull_cache_fresh($koneksi, $start_date, $end_date, $minutes = 10) {
+    try {
+        pull_cache_ensure($koneksi);
+        $t = strtotime((string)$start_date); $e = strtotime((string)$end_date);
+        if (!$t || !$e || $e < $t) return ['fresh' => false, 'age_min' => null];
+        $need = [];
+        for ($d = $t; $d <= $e; $d += 86400) {
+            $need[] = date('Y-m-d', $d);
+            if (count($need) > 370) return ['fresh' => false, 'age_min' => null];
+        }
+        $in = "'" . implode("','", $need) . "'";
+        $q = $koneksi->query("SELECT tgl, TIMESTAMPDIFF(MINUTE, pulled_at, NOW()) AS age FROM tb_pull_cache WHERE tgl IN ($in)");
+        $got = [];
+        while ($q && ($r = $q->fetch_assoc())) $got[$r['tgl']] = (int)$r['age'];
+        $max_age = 0;
+        foreach ($need as $dt) {
+            if (!isset($got[$dt]) || $got[$dt] > (int)$minutes) return ['fresh' => false, 'age_min' => null];
+            $max_age = max($max_age, $got[$dt]);
+        }
+        return ['fresh' => true, 'age_min' => $max_age];
+    } catch (Throwable $ex) { return ['fresh' => false, 'age_min' => null]; }
+}
+
+/**
+ * Proses tap tak-terdaftar jadi baris grup TIDAK DALAM RENCANA (upah 0, anti-dobel).
+ * Dipakai tombol Tarik di kelola.php & endpoint tarik_ajax.php. Return ['added' => int].
+ */
+function realisasi_proses_tdr($koneksi, $idrealisasi, $tgl_override = null) {
+    $added = 0;
+    $idrealisasi = (int)$idrealisasi;
+    if ($idrealisasi <= 0) return ['added' => 0];
+    try {
+        $qr = $koneksi->query("SELECT tgl_realisasi, id_rkk FROM tb_realisasi WHERE id_realisasi = '$idrealisasi'");
+        $dr = $qr ? $qr->fetch_assoc() : null;
+        if (!$dr || empty($dr['tgl_realisasi'])) return ['added' => 0];
+        $t0 = $dr['tgl_realisasi'];
+        // Override tanggal manual (datepicker): proses tap tanggal pilihan
+        if (!empty($tgl_override) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$tgl_override)) $t0 = (string)$tgl_override;
+        $t1 = date('Y-m-d', strtotime('+1 day', strtotime($t0)));
+        $t0e = $koneksi->real_escape_string($t0);
+        $t1e = $koneksi->real_escape_string($t1);
+
+        $gid_tdr = 0;
+        $qg0 = $koneksi->query("SELECT id_grup FROM ms_grup_borongan WHERE UPPER(TRIM(nama_grup)) = 'TIDAK DALAM RENCANA' LIMIT 1");
+        if ($qg0 && ($gg0 = $qg0->fetch_assoc())) $gid_tdr = (int)$gg0['id_grup'];
+        if ($gid_tdr <= 0 && $koneksi->query("INSERT INTO ms_grup_borongan (nama_grup, keterangan, tgl_updt) VALUES ('TIDAK DALAM RENCANA', 'Otomatis: penampung tap tanpa master', NOW())")) $gid_tdr = (int)$koneksi->insert_id;
+        if ($gid_tdr <= 0) return ['added' => 0];
+
+        // Preload log 2 hari SEKALI (ganti N query per PIN)
+        $bulk_logs = []; $bulk_ok = false;
+        $qbulk = $koneksi->query("SELECT userid, tgl, status, detail_waktu FROM tb_record WHERE tgl IN ('$t0e','$t1e') ORDER BY tgl ASC, detail_waktu ASC");
+        if ($qbulk) {
+            $bulk_ok = true;
+            while ($qb2 = $qbulk->fetch_assoc()) $bulk_logs[$qb2['userid']][] = $qb2;
+        }
+
+        $pins = [];
+        $qp = $koneksi->query("SELECT DISTINCT TRIM(userid) AS pin FROM tb_record WHERE tgl = '$t0' AND TRIM(userid) <> '' AND NOT EXISTS (SELECT 1 FROM ms_karyawan k WHERE k.no_absen IS NOT NULL AND TRIM(k.no_absen) <> '' AND TRIM(k.no_absen) = TRIM(tb_record.userid))");
+        while ($qp && ($rp = $qp->fetch_assoc())) $pins[] = $rp['pin'];
+        // Nama di mesin hanya ditarik bila ada PIN tak dikenal (hemat: SOAP per mesin)
+        $devmap = [];
+        if (!empty($pins) && function_exists('get_device_user_names')) $devmap = get_device_user_names($koneksi);
+
+        $exist_names = [];
+        $qe = $koneksi->query("SELECT nama_karyawan_manual FROM tb_realisasi_detail WHERE id_realisasi = '$idrealisasi' AND id_karyawan = 0 AND id_grup = '$gid_tdr'");
+        while ($qe && ($re = $qe->fetch_assoc())) $exist_names[trim((string)$re['nama_karyawan_manual'])] = true;
+
+        $now_tu = date('Y-m-d H:i:s');
+        $idrkk_ref = (int)($dr['id_rkk'] ?? 0);
+        $tdr_vals = [];
+        foreach ($pins as $pin) {
+            $pin_esc = $koneksi->real_escape_string($pin);
+            $disp = trim((string)($devmap[$pin] ?? ''));
+            if ($disp === '') $disp = 'PIN ' . $pin;
+            if (isset($exist_names[$disp])) continue;
+            $ra_masuk = '00:00:00'; $ra_keluar = '00:00:00'; $ra_ik = '00:00:00'; $ra_im = '00:00:00';
+            // Ambil dari peta preload (kunci TRIM, sama kayak WHERE TRIM lama).
+            // Fallback ke query per PIN bila preload gagal.
+            $logs = [];
+            if ($bulk_ok) {
+                foreach ($bulk_logs as $bk => $brows) {
+                    if (trim((string)$bk) === $pin) { foreach ($brows as $br2) $logs[] = $br2; }
+                }
+                usort($logs, function($a, $b) { return strcmp($a['detail_waktu'], $b['detail_waktu']); });
+            } else {
+                $ql = $koneksi->query("SELECT status, detail_waktu FROM tb_record WHERE TRIM(userid) = '$pin_esc' AND tgl IN ('$t0', '$t1') ORDER BY detail_waktu ASC");
+                while ($ql && ($rl = $ql->fetch_assoc())) $logs[] = $rl;
+            }
+            if (!empty($logs)) {
+                $masuk_time = '';
+                foreach ($logs as $l) {
+                    if (substr($l['detail_waktu'], 0, 10) == $t0 && (int)$l['status'] === 0) { $masuk_time = substr($l['detail_waktu'], 11, 8); break; }
+                }
+                if ($masuk_time === '') $masuk_time = substr($logs[0]['detail_waktu'], 11, 8);
+                $in_ts = strtotime($t0 . ' ' . $masuk_time);
+                foreach ($logs as $l) {
+                    $ct = substr($l['detail_waktu'], 11, 8);
+                    $cts = strtotime(substr($l['detail_waktu'], 0, 10) . ' ' . $ct);
+                    $dh = ($cts - $in_ts) / 3600;
+                    if ($dh > 0 && $dh <= 16) {
+                        if ((int)$l['status'] === 1) $ra_keluar = $ct;
+                        elseif ((int)$l['status'] === 2 && $ra_ik === '00:00:00') $ra_ik = $ct;
+                        elseif ((int)$l['status'] === 3 && $ra_im === '00:00:00') $ra_im = $ct;
+                    }
+                }
+                if ($ra_keluar === '00:00:00') {
+                    for ($ix = count($logs) - 1; $ix >= 0; $ix--) {
+                        $ct = substr($logs[$ix]['detail_waktu'], 11, 8);
+                        if (substr($logs[$ix]['detail_waktu'], 0, 10) == $t0 && $ct == $masuk_time) continue;
+                        $cts = strtotime($logs[$ix]['detail_waktu']);
+                        $dh = ($cts - $in_ts) / 3600;
+                        if ($dh > 0 && $dh <= 16) { $ra_keluar = $ct; break; }
+                    }
+                }
+                $ra_masuk = $masuk_time;
+            }
+            $nm_esc = $koneksi->real_escape_string($disp);
+            $tdr_vals[] = "('$idrealisasi', 0, '$idrkk_ref', 0, '$nm_esc', NULL, NULL, 0, 0, 0, 0, 0, '', '', '', '', 'Hadir', '$now_tu', '$ra_masuk', '$ra_keluar', '$ra_im', '$ra_ik', 0, 2, '-', 0, '$t0', 0, 0, 0, '$gid_tdr', NULL)";
+            $exist_names[$disp] = true;
+        }
+        // Satu INSERT batch (ganti N INSERT per PIN) — SEKALI setelah loop
+        if (!empty($tdr_vals)) {
+            $ok = $koneksi->query("INSERT INTO tb_realisasi_detail (id_realisasi, id_rkk_detail, id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, r_upah, r_potongan_telat, r_potongan_istirahat_awal, r_potongan_istirahat_telat, r_potongan_lainnya, r_jam_masuk, r_jam_keluar, r_istirahat_masuk, r_istirahat_keluar, r_status, r_update, ra_masuk, ra_keluar, ra_istirahat_masuk, ra_istirahat_keluar, id_jadwal, status_realisasi_detail, hasil_kerja, lembur, tgl_realisasi_detail, r_potongan_pulang, r_potongan_tidak_lengkap, lembur_jam, id_grup, id_pengganti) VALUES " . implode(", ", $tdr_vals));
+            if ($ok) $added = count($tdr_vals);
+        }
+    } catch (Throwable $e) {}
+    return ['added' => $added];
+}
+
+/**
  * Pastikan kolom protocol ada di tb_mesin (soap = X606S, zkudp = biner UDP mis. X902).
  */
 function ensure_protocol_column($koneksi){
@@ -990,7 +1145,15 @@ function pull_attendance_from_all_devices($koneksi, $start_date, $end_date) {
         'duplicates_ignored' => 0,
         'per_device' => []
     ];
-    
+
+    // Preload tap terakhir per (pin|tgl) — SEKALI, malas (lazy): hanya bila ada
+    // device online yang benar-benar narik. Menggantikan N query should_save_attendance().
+    // Aturan 10 menit SAMA PERSIS (banding vs terakhir, lintas device & lintas batch).
+    $lastmap = [];
+    $lastmap_ready = false;
+    $sd = $koneksi->real_escape_string($start_date);
+    $ed = $koneksi->real_escape_string($end_date);
+
     foreach($devices as $device) {
         $device_results = [
             'device' => $device['nama_mesin'],
@@ -1031,28 +1194,48 @@ function pull_attendance_from_all_devices($koneksi, $start_date, $end_date) {
             
             $device_results['records_pulled'] = count($attendance);
             $results['records_pulled'] += count($attendance);
-            
-            // Process each attendance record
+
+            // Susulkan preload saat device online pertama membutuhkannya
+            if (!$lastmap_ready) {
+                $lastmap_ready = true;
+                $qex = $koneksi->query("SELECT userid, tgl, MAX(detail_waktu) AS last_dt FROM tb_record WHERE tgl BETWEEN '$sd' AND '$ed' GROUP BY userid, tgl");
+                while ($qex && ($er = $qex->fetch_assoc())) {
+                    $lastmap[$er['userid'] . '|' . $er['tgl']] = strtotime($er['last_dt']);
+                }
+            }
+
+            // Dedup batch di PHP (aturan sama kayak should_save_attendance:
+            // tap pertama lolos; berikutnya lolos bila >10 mnt dari tap terakhir
+            // pin|tgl yang sama — termasuk yg baru disimpan di batch ini).
+            $batch_values = [];
             foreach($attendance as $record) {
                 $pin = $koneksi->real_escape_string($record['pin']);
                 $date = $koneksi->real_escape_string($record['date']);
                 $datetime = $koneksi->real_escape_string($record['datetime']);
-                
-                // Check if should save (deduplication logic)
-                if(should_save_attendance($koneksi, $pin, $date, $datetime, $device['id_mesin'])) {
-                    // Insert with source device info
-                    $sql = $koneksi->query("INSERT INTO tb_record 
-                                          (data, userid, tgl, verifikasi, status, detail_waktu, source_device_id) 
-                                          VALUES 
-                                          ('', '$pin', '$date', 1, 0, '$datetime', '{$device['id_mesin']}')");
-                    
-                    if($sql) {
-                        $device_results['records_saved']++;
-                        $results['records_saved']++;
-                    }
+
+                $mk = $record['pin'] . '|' . $record['date'];
+                $new_ts = strtotime($record['datetime']);
+                $save = !isset($lastmap[$mk]) || (($new_ts - $lastmap[$mk]) / 60 > 10);
+                if ($save) {
+                    $batch_values[] = "('', '$pin', '$date', 1, 0, '$datetime', '{$device['id_mesin']}')";
+                    $lastmap[$mk] = $new_ts;
+                    $device_results['records_saved']++;
+                    $results['records_saved']++;
                 } else {
                     $device_results['duplicates_ignored']++;
                     $results['duplicates_ignored']++;
+                }
+            }
+            if (!empty($batch_values)) {
+                foreach (array_chunk($batch_values, 500) as $chunk) {
+                    $ok = $koneksi->query("INSERT INTO tb_record
+                                      (data, userid, tgl, verifikasi, status, detail_waktu, source_device_id)
+                                      VALUES " . implode(", ", $chunk));
+                    if (!$ok) { // chunk gagal: koreksi hitungan agar tidak over-claim
+                        $miss = count($chunk);
+                        $device_results['records_saved'] -= $miss;
+                        $results['records_saved'] -= $miss;
+                    }
                 }
             }
             
@@ -1062,7 +1245,10 @@ function pull_attendance_from_all_devices($koneksi, $start_date, $end_date) {
         
         $results['per_device'][$device['id_mesin']] = $device_results;
     }
-    
+
+    // Catat tanggal yg berhasil ditarik (ada mesin online) untuk skip-if-fresh
+    if ($results['online_devices'] > 0) pull_cache_mark($koneksi, $start_date, $end_date, $results['records_saved']);
+
     return $results;
 }
 

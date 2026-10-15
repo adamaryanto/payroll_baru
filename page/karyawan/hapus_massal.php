@@ -81,9 +81,7 @@ $tampil = $koneksi->query("SELECT k.*, d.nama_departmen FROM ms_karyawan k LEFT 
                                 <td class="py-2 px-2 text-sm text-gray-600"><?= htmlspecialchars($d['nama_departmen'] ?? '-') ?></td>
                                 <td class="py-2 px-2 text-center"><span class="px-3 py-1 text-xs font-semibold rounded-full <?= $d['status_karyawan']=='Aktif'?'bg-green-100 text-green-700':'bg-red-100 text-red-700' ?>"><?= $d['status_karyawan'] ?></span></td>
                             </tr>
-                            <?php endwhile; else: ?>
-                            <tr><td colspan="6" class="py-10 text-center text-gray-400"><i class="fas fa-folder-open fa-3x mb-2"></i><p>Data tidak tersedia</p></td></tr>
-                            <?php endif; ?>
+                            <?php endwhile; endif; ?>
                         </tbody>
                     </table>
                 </div>
@@ -109,7 +107,13 @@ function updateCount(){
     el.className=c>0?'text-sm font-semibold text-rose-600 px-3 py-1 bg-rose-100 rounded-full':'text-sm font-semibold text-gray-600 px-3 py-1 bg-gray-100 rounded-full';
 }
 $(document).ready(function(){
-    $('#dataTables-hapus').DataTable({pageLength:25,autoWidth:false,responsive:false,lengthMenu:[[10,25,50,-1],[10,25,50,"Semua"]],language:{search:"Cari Data:",searchPlaceholder:"Ketik pencarian...",lengthMenu:"Tampilkan _MENU_ data",info:"Menampilkan _START_ s/d _END_ dari _TOTAL_ data",paginate:{previous:"Prev",next:"Next"}},columnDefs:[{targets:0,orderable:false}]});
+        var $tbl = $('#dataTables-hapus');
+        var $rows = $tbl.find('tbody tr');
+        var complete = $rows.length > 0;
+        $rows.each(function() {
+            if ($(this).find('td').length < 6) { complete = false; return false; }
+        });
+        if (complete) $tbl.DataTable({pageLength:25,autoWidth:false,responsive:false,lengthMenu:[[10,25,50,-1],[10,25,50,"Semua"]],language:{search:"Cari Data:",searchPlaceholder:"Ketik pencarian...",lengthMenu:"Tampilkan _MENU_ data",info:"Menampilkan _START_ s/d _END_ dari _TOTAL_ data",emptyTable:"Data tidak tersedia",paginate:{previous:"Prev",next:"Next"}},columnDefs:[{targets:0,orderable:false},{targets:'_all',defaultContent:''}]});
     document.addEventListener('change',function(e){if(e.target.classList.contains('check_item')) updateCount();});
     updateCount();
 });

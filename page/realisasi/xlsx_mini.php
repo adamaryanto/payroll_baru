@@ -35,6 +35,7 @@ class MiniXlsx {
     // $v string|number|null, $s style idx. Angka otomatis jadi tipe n.
     public function cell($sh, $r, $c, $v, $s = 0) {
         if ($v === null) $v = '';
+        if (is_float($v) && !is_finite($v)) $v = '';
         $t = (is_int($v) || is_float($v)) ? 'n' : 's';
         $this->sheets[$sh]['rows'][(int)$r][(int)$c] = ['v' => $v, 't' => $t, 's' => (int)$s];
         if ((int)$c > $this->sheets[$sh]['maxcol']) $this->sheets[$sh]['maxcol'] = (int)$c;
@@ -63,6 +64,8 @@ class MiniXlsx {
         if (function_exists('mb_check_encoding') && !mb_check_encoding($v, 'UTF-8')) {
             $v = mb_convert_encoding($v, 'UTF-8', 'Windows-1252');
         }
+        // XML 1.0 melarang C1 controls (U+007F-U+009F): bikin Excel minta repair.
+        $v = preg_replace('/[\x7F-\x9F]/u', '', $v);
         return htmlspecialchars($v, ENT_XML1 | ENT_COMPAT, 'UTF-8');
     }
 
@@ -131,7 +134,7 @@ class MiniXlsx {
             . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             . '<dimension ref="A1:' . self::col($maxcol) . $maxrow . '"/>'
             . '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
-            . '<sheetFormat defaultRowHeight="15"/>';
+            . '<sheetFormatPr defaultRowHeight="15"/>';
         if (!empty($sh['widths'])) {
             $x .= '<cols>';
             ksort($sh['widths']);
@@ -179,22 +182,16 @@ class MiniXlsx {
         foreach ($w as $c => $need) $this->sheets[$sh]['widths'][$c] = max($min, min($max, round($need, 1)));
     }
 
-    public function send($filename) {
-        if (!class_exists('ZipArchive')) {
-            echo 'Export Excel butuh extension php_zip. Buka php.ini, hapus titik-koma di depan extension=zip, lalu restart Apache/XAMPP.';
-            return;
-        }
+    public function save($path) {
+        if (!class_exists('ZipArchive')) return false;
+        if (!$this->build($path)) return false;
+        return true;
+    }
+
+    private function build($tmp) {
         $this->style(); // pastikan xf default idx 0 ada
-        $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
         $zip = new ZipArchive();
-        if ($zip->open($tmp, ZipArchive::OVERWRITE) !== true) { echo 'Gagal membuat Excel.'; return; }
-        $zip->addFromString('[Content_Types].xml',
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            . '<Default Extension="rels" ContentType="application/vnd.openxml-package.relationships+xml"/>'
-            . '<Default Extension="xml" ContentType="application/xml"/>'
-            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>');
+        if ($zip->open($tmp, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) { echo 'Gagal membuat Excel.'; return false; }
         $rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
@@ -212,19 +209,23 @@ class MiniXlsx {
             $wbr .= '<Relationship Id="rId' . $n . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' . $n . '.xml"/>';
             $zip->addFromString('xl/worksheets/sheet' . $n . '.xml', $this->sheetXml($sh));
         }
-        // Daftarkan content-type tiap sheet + docProps
-        $ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        // Daftarkan content-type tiap sheet + docProps.
+        // PENTING: urutan/format mengikuti file buatan Excel (terbukti lolos validasi ketat Excel 16):
+        // Override sheet tepat setelah workbook (sebelum styles), Default bin di depan,
+        // dan newline setelah deklarasi XML. Urutan lain bikin Excel minta repair.
+        $ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n"
             . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            . '<Default Extension="rels" ContentType="application/vnd.openxml-package.relationships+xml"/>'
+            . '<Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings"/>'
+            . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
             . '<Default Extension="xml" ContentType="application/xml"/>'
-            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-            . '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
-            . '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
+            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
         foreach ($this->sheets as $i => $sh) {
             $ct .= '<Override PartName="/xl/worksheets/sheet' . ($i + 1) . '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
         }
-        $ct .= '</Types>';
+        $ct .= '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            . '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+            . '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
+            . '</Types>';
         $zip->addFromString('[Content_Types].xml', $ct);
         $wb .= '</sheets></workbook>';
         $wbr .= '<Relationship Id="rId' . (count($this->sheets) + 1) . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
@@ -245,10 +246,24 @@ class MiniXlsx {
             . '<Application>payroll</Application>'
             . '</Properties>');
         $zip->close();
+        return true;
+    }
+
+    public function send($filename) {
+        if (!class_exists('ZipArchive')) {
+            echo 'Export Excel butuh extension php_zip. Buka php.ini, hapus titik-koma di depan extension=zip, lalu restart Apache/XAMPP.';
+            return;
+        }
+        // Bersihkan sisa output (warning/spasi/BOM): 1 byte saja merusak zip -> Excel minta repair.
+        while (ob_get_level() > 0) { @ob_end_clean(); }
+        $tmp = tempnam(sys_get_temp_dir(), 'xlsx');
+        if (!$this->build($tmp)) return;
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         header('Content-Length: ' . filesize($tmp));
+        header('Cache-Control: max-age=0');
         readfile($tmp);
         unlink($tmp);
+        exit;
     }
 }

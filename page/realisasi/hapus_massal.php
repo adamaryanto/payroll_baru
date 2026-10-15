@@ -61,6 +61,7 @@ $tampil = $koneksi->query("SELECT A.*,
      WHERE RD.id_realisasi = A.id_realisasi AND RKD.status_rkk != 'Digantikan'
     ) as jml
     FROM tb_realisasi A ORDER BY A.tgl_realisasi ASC, A.id_realisasi ASC");
+$has_rows = ($tampil && $tampil->num_rows > 0);
 ?>
 
 <style>
@@ -162,7 +163,7 @@ $tampil = $koneksi->query("SELECT A.*,
                         <tbody class="divide-y divide-gray-100">
                             <?php
                             $no = 1;
-                            if ($tampil && $tampil->num_rows > 0) :
+                            if ($has_rows) :
                                 while ($data = $tampil->fetch_assoc()) :
                             ?>
                                 <tr class="hover:bg-rose-50 transition-colors cursor-pointer" onclick="toggleCheckbox(<?= $data['id_realisasi'] ?>)">
@@ -178,16 +179,18 @@ $tampil = $koneksi->query("SELECT A.*,
                                     </td>
                                     <td class="py-3 px-2 text-[14px] text-gray-600"><?= $data['keterangan'] ?></td>
                                 </tr>
-                            <?php endwhile; else : ?>
-                                <tr>
-                                    <td colspan="5" class="py-10 text-center text-gray-400">
-                                        <i class="fas fa-folder-open fa-3x mb-3"></i>
-                                        <p class="text-lg font-medium">Data tidak tersedia</p>
-                                    </td>
-                                </tr>
-                            <?php endif; ?>
+                            <?php endwhile; endif; ?>
                         </tbody>
                     </table>
+                    <?php if (!$has_rows) : ?>
+                    <div class="py-12 px-4 text-center">
+                        <div class="mx-auto w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
+                            <i class="fas fa-folder-open text-3xl text-gray-400"></i>
+                        </div>
+                        <p class="text-lg font-bold text-gray-700">Data tidak tersedia</p>
+                        <p class="text-sm text-gray-500 mt-1">Belum ada realisasi upah yang dapat dihapus.</p>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -197,7 +200,16 @@ $tampil = $koneksi->query("SELECT A.*,
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
     $(document).ready(function() {
-        $('#dataTables-hapus').DataTable({
+        var $tbl = $('#dataTables-hapus');
+        // Hanya inisialisasi DataTables bila ada baris data lengkap (5 sel per baris).
+        // Baris kosong/colspan memicu warning "Requested unknown parameter".
+        var $rows = $tbl.find('tbody tr');
+        var complete = $rows.length > 0;
+        $rows.each(function() {
+            if ($(this).find('td').length < 5) { complete = false; return false; }
+        });
+        if (!complete) return;
+        $tbl.DataTable({
             pageLength: 25,
             autoWidth: false,
             responsive: false,
@@ -210,6 +222,7 @@ $tampil = $koneksi->query("SELECT A.*,
                 searchPlaceholder: "Ketik pencarian...",
                 lengthMenu: "Tampilkan _MENU_ data",
                 info: "Menampilkan _START_ s/d _END_ dari _TOTAL_ data",
+                emptyTable: "Data tidak tersedia",
                 paginate: {
                     previous: "Prev",
                     next: "Next"
@@ -218,6 +231,9 @@ $tampil = $koneksi->query("SELECT A.*,
             columnDefs: [{
                 targets: 'no-sort',
                 orderable: false
+            }, {
+                targets: '_all',
+                defaultContent: ''
             }]
         });
     });

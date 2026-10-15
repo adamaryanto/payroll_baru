@@ -160,7 +160,7 @@ $level_status = (!$is_authorized) ? "hidden" : "";
 
                                         <!-- Excel: Owner/Admin Master always, Others only if approved -->
                                         <?php if (strtolower($_SESSION['role']) == "owner" || strtolower($_SESSION['role']) == "admin master" || $data['status_realisasi'] >= 2) : ?>
-                                            <a href="page/realisasi/excelrealisasi.php?id=<?= $data['id_realisasi']; ?>"
+                                            <a href="page/realisasi/excelrealisasi_baru.php?id=<?= $data['id_realisasi']; ?>"
                                                 class="px-2 py-1 text-[13px] font-bold text-purple-600 bg-purple-50 hover:bg-purple-600 hover:text-white rounded border border-purple-200 transition-colors flex justify-center items-center" title="Excel Report">
                                                 <i class="fas fa-file-excel md:mr-1"></i> <span class="ml-1 md:inline">Excel</span>
                                             </a>

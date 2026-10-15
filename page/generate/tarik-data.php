@@ -14,9 +14,13 @@ $devices = get_all_devices($koneksi);
 $TanggalAwal = $_GET['tanggal_awal'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 $TanggalAkhir = $_GET['tanggal_akhir'] ?? ($_GET['tanggal'] ?? date('Y-m-d'));
 
+// Mode tampilan/kerja: semua (default, perilaku lama) | rencana (tarik + tabel rencana saja) | tdr (panel tidak-dalam-rencana saja, tanpa pull)
+$mode_tarik = strtolower(trim((string)($_GET['mode'] ?? 'semua')));
+if (!in_array($mode_tarik, ['semua', 'rencana', 'tdr'], true)) $mode_tarik = 'semua';
+
 // Handle multi-device pull
 $pull_results = null;
-if (isset($_GET['pull_all']) || isset($_POST['pull_all'])) {
+if ((isset($_GET['pull_all']) || isset($_POST['pull_all'])) && $mode_tarik !== 'tdr') {
     // Pull from all devices
     $pull_results = pull_attendance_from_all_devices($koneksi, $TanggalAwal, $TanggalAkhir);
     
@@ -61,6 +65,16 @@ if (!empty($IP)) {
 		$isConnected = true;
 		fclose($socket);
 	}
+}
+
+// Peta PIN -> nama di mesin (untuk PIN yang belum ada di master).
+// Dihitung di sini (1x) agar dipakai tabel utama maupun panel TDR.
+// Hanya bila ada PIN tak dikenal di rentang ini (hemat waktu bila mesin offline).
+// Semula di dalam tabel utama; dipindah agar mode TDR (tabel utama di-skip) tetap dapat datanya.
+$dev_names_map = [];
+if ($IP != "" || $mode_tarik === 'tdr') {
+	$qneed = $koneksi->query("SELECT 1 FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' AND TRIM(userid) <> '' AND NOT EXISTS (SELECT 1 FROM ms_karyawan k WHERE k.no_absen IS NOT NULL AND TRIM(k.no_absen) <> '' AND TRIM(k.no_absen) = TRIM(tb_record.userid)) LIMIT 1");
+	if ($qneed && $qneed->num_rows > 0 && function_exists('get_device_user_names')) $dev_names_map = get_device_user_names($koneksi);
 }
 
 // Proses hapus terpilih jika form disubmit
@@ -523,6 +537,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 			<form action="" method="GET">
 				<input type="hidden" name="page" value="generate" />
 				<input type="hidden" name="aksi" value="tarik" />
+				<input type="hidden" name="mode" value="<?php echo htmlspecialchars($mode_tarik); ?>" />
 				<div class="p-4 md:p-5 bg-gray-50 border-b border-gray-100">
 					<div class="row items-end">
 						<div class="col-md-3 col-sm-12 mb-3 mb-md-0">
@@ -649,11 +664,15 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 				</div>
 				<?php endif; ?>
 				
-				<div class="flex items-center justify-between">
+				<div class="flex items-center justify-between flex-wrap" style="gap:10px;">
 					<div>
 						<p class="text-sm text-gray-500">Total mesin terkoneksi: <span class="font-bold text-blue-600"><?php echo count($devices); ?></span></p>
 						<p class="text-sm text-gray-500">Rentang tanggal: <span class="font-bold text-blue-600"><?php echo $TanggalAwal; ?> s/d <?php echo $TanggalAkhir; ?></span></p>
+						<?php if ($mode_tarik !== 'semua') : ?>
+						<p class="text-sm font-bold <?php echo $mode_tarik === 'rencana' ? 'text-emerald-600' : 'text-amber-600'; ?>">Mode: <?php echo $mode_tarik === 'rencana' ? 'Tarik Sesuai Rencana' : 'Tidak Dalam Rencana'; ?> — <a href="?page=generate&aksi=tarik&tanggal_awal=<?php echo $TanggalAwal; ?>&tanggal_akhir=<?php echo $TanggalAkhir; ?>" class="underline">kembali ke Semua</a></p>
+						<?php endif; ?>
 					</div>
+					<div class="flex flex-wrap" style="gap:8px;">
 					<form method="GET" class="inline">
 						<input type="hidden" name="page" value="generate">
 						<input type="hidden" name="aksi" value="tarik">
@@ -665,6 +684,30 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 							Tarik dari Semua Mesin
 						</button>
 					</form>
+					<form method="GET" class="inline">
+						<input type="hidden" name="page" value="generate">
+						<input type="hidden" name="aksi" value="tarik">
+						<input type="hidden" name="tanggal_awal" value="<?php echo $TanggalAwal; ?>">
+						<input type="hidden" name="tanggal_akhir" value="<?php echo $TanggalAkhir; ?>">
+						<input type="hidden" name="pull_all" value="1">
+						<input type="hidden" name="mode" value="rencana">
+						<button type="submit" title="Tarik mesin + tampilkan hanya tabel sesuai rencana (tanpa panel Tidak Absen / Tidak Dalam Rencana / Ganti)" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
+							<i class="fas fa-bolt"></i>
+							Tarik Sesuai Rencana
+						</button>
+					</form>
+					<form method="GET" class="inline">
+						<input type="hidden" name="page" value="generate">
+						<input type="hidden" name="aksi" value="tarik">
+						<input type="hidden" name="tanggal_awal" value="<?php echo $TanggalAwal; ?>">
+						<input type="hidden" name="tanggal_akhir" value="<?php echo $TanggalAkhir; ?>">
+						<input type="hidden" name="mode" value="tdr">
+						<button type="submit" title="Tanpa tarik mesin — tampilkan hanya tap yang tidak masuk rencana" class="bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
+							<i class="fas fa-exclamation-triangle"></i>
+							Tidak Dalam Rencana
+						</button>
+					</form>
+					</div>
 				</div>
 				
 				<div class="mt-4 p-3 bg-blue-100 border border-blue-200 rounded text-sm text-blue-800">
@@ -677,9 +720,11 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 			</div>
 
 			<div class="p-0">
+				<?php if ($mode_tarik !== 'tdr') : ?>
 				<form id="form-tarik-data" method="POST" action="">
+				<?php endif; ?>
 				<div class="table-responsive px-3 py-4">
-					<?php if ($IP != "") : ?>
+					<?php if ($IP != "" && $mode_tarik !== 'tdr') : ?>
 						<div class="download-btn-container d-flex justify-content-end mb-3 flex-wrap">
 							<button type="button" id="btn-hapus-terpilih" class="btn btn-danger font-semibold text-white d-inline-flex align-items-center mr-2 shadow-sm download-btn">
 								<i class="fas fa-trash-alt mr-2"></i> Hapus Terpilih
@@ -1097,11 +1142,8 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 									$qg = $koneksi->query("SELECT TRIM(k.no_absen) AS pin, GROUP_CONCAT(DISTINCT gb.nama_grup ORDER BY gb.nama_grup SEPARATOR ', ') AS grps FROM ms_grup_borongan_anggota ga JOIN ms_karyawan k ON k.id_karyawan = ga.id_karyawan JOIN ms_grup_borongan gb ON gb.id_grup = ga.id_grup WHERE TRIM(k.no_absen) <> '' GROUP BY TRIM(k.no_absen)");
 									while ($qg && ($rg = $qg->fetch_assoc())) $grup_map_pin[$rg['pin']] = $rg['grps'];
 								}
-								// Peta PIN -> nama di mesin (untuk PIN yang belum ada di master).
-								// Hanya ditarik bila memang ada PIN tak dikenal di rentang ini (hemat waktu bila mesin offline).
-								$dev_names_map = [];
-								$qneed = $koneksi->query("SELECT 1 FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' AND TRIM(userid) <> '' AND NOT EXISTS (SELECT 1 FROM ms_karyawan k WHERE k.no_absen IS NOT NULL AND TRIM(k.no_absen) <> '' AND TRIM(k.no_absen) = TRIM(tb_record.userid)) LIMIT 1");
-								if ($qneed && $qneed->num_rows > 0 && function_exists('get_device_user_names')) $dev_names_map = get_device_user_names($koneksi);
+								// $dev_names_map dihitung di atas (sebelum tabel utama) agar panel TDR bisa pakai juga.
+								if (!isset($dev_names_map)) $dev_names_map = [];
 								foreach ($paged_grouped as $key => $row) :
 									$PIN = $row['pin'];
 									$date = $row['date'];
@@ -1288,21 +1330,20 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 									$key_lembur = $PIN . '_' . $date;
 									if (isset($custom_lembur[$key_lembur])) {
 										$final_lembur_jam = $custom_lembur[$key_lembur];
-									} else {
-										// Auto-calculated lembur hours for all shifts (flexible and regular)
-										$final_lembur_jam = 0;
-										if ($has_masuk && $has_keluar) {
-											$work_duration = (strtotime($pulang) - strtotime($masuk));
-											if ($work_duration < 0) {
-												$work_duration += 86400;
-											}
-											
-											$work_hours = $work_duration / 3600;
-											if ($work_hours > $expected_hours) {
-												$final_lembur_jam = round($work_hours - $expected_hours, 1);
-											}
+								} else {
+									// Lembur = pulang melewati jam pulang shift (datang pagi tidak dihitung).
+									// Flexi ikut rumus sama karena s_keluar = masuk + jam ekspektasi.
+									$final_lembur_jam = 0;
+									if ($has_masuk && $has_keluar && !empty($s_keluar) && $s_keluar !== '-' && $s_keluar !== 'Bebas') {
+										$diff_plg = strtotime($pulang) - strtotime($s_keluar);
+										if ($diff_plg > 43200) $diff_plg -= 86400;
+										elseif ($diff_plg < -43200) $diff_plg += 86400;
+										$ot_hours = $diff_plg / 3600;
+										if ($ot_hours > 0) {
+											$final_lembur_jam = round($ot_hours, 1);
 										}
 									}
+								}
 									
 									$lembur_money = $final_lembur_jam * $globalLemburPerJam;
 									
@@ -1515,9 +1556,19 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 				<div class="px-3"><!-- lanjutan isi (penutup div ini pakai </div> bawaan di bawah) -->
 				<?php endif; ?>
 				<?php
-				// ===== PANEL TIDAK ABSEN (rencana RKK vs tap mesin) =====
-				$noshow = [];
+				// ===== PANEL (dibagi per mode agar cepat) =====
+				// semua   : semua panel (perilaku lama)
+				// rencana : panel di-skip semua (hanya tabel utama)
+				// tdr     : hanya panel Tidak Dalam Rencana (tanpa pull, tanpa tabel utama)
+				$noshow = []; $ganti_map = []; $opsi_kar = []; $tdr_rows = []; $rosterShift = []; $noshow_src = 'semua karyawan aktif';
 				if (!empty($TanggalAwal) && !empty($TanggalAkhir)) {
+				    // Shift roster per tgl|pin — acuan panel Tidak Absen & TDR (mode rencana tidak butuh)
+				    if ($mode_tarik !== 'rencana') {
+				        $rosterShift = [];
+				        $qr0 = $koneksi->query("SELECT h.tgl_rkk AS tgl, TRIM(k.no_absen) AS pin, j.jam_masuk AS sm, j.jam_keluar AS sk FROM tb_rkk_detail rd JOIN tb_rkk h ON h.id_rkk=rd.id_rkk JOIN ms_karyawan k ON k.id_karyawan=rd.id_karyawan LEFT JOIN tb_jadwal j ON j.id_jadwal=rd.id_jadwal WHERE h.tgl_rkk BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
+				        if ($qr0) while ($rw0 = $qr0->fetch_assoc()) $rosterShift[$rw0['tgl'] . '|' . trim((string)$rw0['pin'])] = [$rw0['sm'], $rw0['sk']];
+				    } // end roster (mode !== 'rencana')
+				    if ($mode_tarik === 'semua') {
 				    $taps = [];
 				    $qt = $koneksi->query("SELECT userid, tgl, MIN(detail_waktu) AS first_tap FROM tb_record WHERE tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir' GROUP BY userid, tgl");
 				    if ($qt) while ($rt = $qt->fetch_assoc()) $taps[$rt['tgl'] . '|' . trim((string)$rt['userid'])] = $rt['first_tap'] ?? '';
@@ -1542,14 +1593,11 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 				        $mkSampai = trim((string)($rmV2['mangkir_sampai_tgl'] ?? ''));
 				    }
 				    // Sumber: SEMUA karyawan aktif pada tanggal-tanggal yang ada tap-nya (maks 7 hari).
-				    // Shift acuan per orang-tanggal: roster (RKK) bila ada, else shift master.
+				    // Shift acuan per orang-tanggal: roster (RKK, sudah dihitung di atas) bila ada, else shift master.
 				    $noshow_src = 'semua karyawan aktif';
 				    $tgl_aktif = [];
 				    foreach ($taps as $tk => $tv) { $dd = explode('|', $tk, 2); $tgl_aktif[$dd[0]] = true; }
 				    ksort($tgl_aktif);
-				    $rosterShift = [];
-				    $qr0 = $koneksi->query("SELECT h.tgl_rkk AS tgl, TRIM(k.no_absen) AS pin, j.jam_masuk AS sm, j.jam_keluar AS sk FROM tb_rkk_detail rd JOIN tb_rkk h ON h.id_rkk=rd.id_rkk JOIN ms_karyawan k ON k.id_karyawan=rd.id_karyawan LEFT JOIN tb_jadwal j ON j.id_jadwal=rd.id_jadwal WHERE h.tgl_rkk BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
-				    if ($qr0) while ($rw0 = $qr0->fetch_assoc()) $rosterShift[$rw0['tgl'] . '|' . trim((string)$rw0['pin'])] = [$rw0['sm'], $rw0['sk']];
 				    if (count($tgl_aktif) > 0 && count($tgl_aktif) <= 7) {
 				        $qa = $koneksi->query("SELECT k.id_karyawan, k.no_absen, k.nama_karyawan, k.upah, o.OS_DHK AS oslbl, d.nama_departmen AS dept, jm.jam_masuk AS m_masuk, jm.jam_keluar AS m_keluar FROM ms_karyawan k LEFT JOIN ms_os_dhk o ON o.id_os_dhk=k.id_os_dhk LEFT JOIN ms_departmen d ON d.id_departmen=k.id_departmen LEFT JOIN tb_jadwal jm ON jm.id_jadwal=k.id_jadwal WHERE k.status_karyawan='Aktif' AND k.no_absen!='' AND k.no_absen IS NOT NULL ORDER BY k.nama_karyawan");
 				        if ($qa) while ($ra = $qa->fetch_assoc()) {
@@ -1588,6 +1636,8 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 				    $qg = $koneksi->query("SELECT g.*, k2.nama_karyawan AS nama_ganti FROM tb_ganti g LEFT JOIN ms_karyawan k2 ON k2.id_karyawan=g.id_karyawan_ganti WHERE g.tgl BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
 				    if ($qg) while ($rg = $qg->fetch_assoc()) $ganti_map[$rg['tgl'] . '|' . $rg['id_karyawan_absen']] = $rg;
 				}
+				    } // end panel khusus mode === 'semua'
+				    if ($mode_tarik !== 'rencana') {
 			$opsi_kar = [];
 			$qk = $koneksi->query("SELECT k.id_karyawan, k.no_absen, k.nama_karyawan, o.OS_DHK AS oslbl, d.nama_departmen AS dept FROM ms_karyawan k LEFT JOIN ms_os_dhk o ON o.id_os_dhk=k.id_os_dhk LEFT JOIN ms_departmen d ON d.id_departmen=k.id_departmen WHERE k.status_karyawan='Aktif' ORDER BY k.nama_karyawan");
 			if ($qk) while ($rk = $qk->fetch_assoc()) $opsi_kar[] = $rk;
@@ -1617,7 +1667,9 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 			    }
 			    usort($tdr_rows, function($a, $b) { $c = strcmp($a['tgl'], $b['tgl']); return $c !== 0 ? $c : strcmp($a['nama'], $b['nama']); });
 			}
+				    } // end panel khusus mode !== 'rencana'
 				?>
+				<?php if ($mode_tarik === 'semua') : ?>
 				<?php if (!empty($ganti_msg)): ?>
 					<div class="p-3 mb-3 rounded-lg border text-sm <?= strpos($ganti_msg, 'Gagal') === false ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800' ?>"><?= htmlspecialchars($ganti_msg) ?></div>
 				<?php endif; ?>
@@ -1830,7 +1882,11 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 					<?php endif; ?>
 				</div>
 				</div>
+				<?php endif; // end panel NS + ganti (mode === 'semua') ?>
+				<?php if ($mode_tarik !== 'tdr') : ?>
 				</form>
+				<?php endif; ?>
+				<?php if ($mode_tarik !== 'rencana') : ?>
 				<div class="mt-4 p-4 rounded-xl border border-gray-200 bg-white">
 					<div class="d-flex justify-content-between align-items-center flex-wrap mb-1" style="gap:10px;">
 						<h4 class="font-bold text-sm m-0">Tidak Dalam Rencana (<?= count($tdr_rows) ?> orang)</h4>
@@ -1976,6 +2032,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 					<?php endif; ?>
 					<?php endif; ?>
 				</div>
+				<?php endif; // end panel TDR (mode !== 'rencana') ?>
 			</div>
 		</div>
 	</div>
