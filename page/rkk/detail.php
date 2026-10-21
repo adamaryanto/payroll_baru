@@ -204,16 +204,7 @@ if (isset($_GET['id'])) {
                              ?>
                         </select>
                     </div>
-                    <div class="form-group col-md-2">
-                        <label>SUB BAGIAN</label>
-                        <select class="form-control select2-manage" name="tsubdepartment" data-tags="true" <?= $disabled ?>>
-                             <option value="<?= $dataidsubdepartment ?>"><?= $datasubbagian ?></option>
-                             <?php
-                             $sqlsub = $koneksi->query("SELECT * FROM ms_sub_department ORDER BY nama_sub_department ASC");
-                             while ($s = $sqlsub->fetch_array()) { echo "<option value='$s[id_sub_department]'>$s[nama_sub_department]</option>"; }
-                             ?>
-                        </select>
-                    </div>
+                    <input type="hidden" name="tsubdepartment" value="<?= (int)$dataidsubdepartment ?>">
                 </div>
 
                 <div class="section-divider text-danger">Detail Upah & Shift</div>

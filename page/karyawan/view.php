@@ -112,21 +112,14 @@ if (isset($_GET['id'])) {
                     </div>
 
                     <div class="form-group">
-                        <label class="block text-sm font-semibold text-gray-500 mb-2">Departemen</label>
+                        <label class="block text-sm font-semibold text-gray-500 mb-2">Bagian</label>
                         <div class="px-4 py-3 bg-gray-50 rounded-lg border border-gray-200 text-gray-800 font-medium">
                             <?php echo $namadep; ?>
                         </div>
                     </div>
 
                     <div class="form-group">
-                        <label class="block text-sm font-semibold text-gray-500 mb-2">Sub Departemen</label>
-                        <div class="px-4 py-3 bg-gray-50 rounded-lg border border-gray-200 text-gray-800 font-medium">
-                            <?php echo $namasub; ?>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="block text-sm font-semibold text-gray-500 mb-2">Jabatan</label>
+                        <label class="block text-sm font-semibold text-gray-500 mb-2">Posisi</label>
                         <div class="px-4 py-3 bg-gray-50 rounded-lg border border-gray-200 text-gray-800 font-medium">
                             <?php echo $namajab; ?>
                         </div>

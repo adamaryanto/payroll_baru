@@ -37,7 +37,7 @@ if (isset($_GET['id'])) {
     IF(A.id_karyawan = 0, '-', B.no_absen) as no_absen_tampil, 
     -- Jika id_karyawan 0, ambil dari kolom manual, jika tidak ambil dari master
     IF(A.id_karyawan = 0, A.nama_karyawan_manual, B.nama_karyawan) as nama_tampil,
-    BB.nama_sub_department, 
+    JB.jabatan as nama_sub_department, 
     D.nama_departmen, 
     C.tgl_rkk, 
     O.OS_DHK as label_os,
@@ -73,7 +73,7 @@ FROM tb_rkk_detail A
 LEFT JOIN ms_karyawan B ON A.id_karyawan = B.id_karyawan
 LEFT JOIN tb_rkk C ON A.id_rkk = C.id_rkk
 LEFT JOIN ms_departmen D ON A.id_departmen = D.id_departmen
-LEFT JOIN ms_sub_department BB ON A.id_sub_department = BB.id_sub_department 
+LEFT JOIN ms_jabatan JB ON B.id_jabatan = JB.id_jabatan 
 LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal 
 LEFT JOIN ms_os_dhk O ON B.id_os_dhk = O.id_os_dhk
 LEFT JOIN ms_golongan G ON B.id_golongan = G.id_golongan

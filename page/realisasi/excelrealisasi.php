@@ -1,6 +1,10 @@
 <?php
 // Export .xlsx 2 sheet: REALISASI + KARYAWAN TIDAK MASUK.
 // Sheet 2 = karyawan di rencana (RKK) yang tidak ada tap mesin (tb_record) di tanggal ini.
+// Matikan output warning ke body: 1 byte ekstra saja bikin .xlsx corrupt (Excel minta repair).
+error_reporting(0);
+ini_set('display_errors', '0');
+while (ob_get_level() > 0) { @ob_end_clean(); }
 include "../../koneksi.php";
 include_once __DIR__ . '/../grup_borongan/_setup.php'; // pastikan ms_grup_borongan + tb_realisasi_detail.id_grup ada
 require_once __DIR__ . '/xlsx_mini.php';
@@ -383,3 +387,4 @@ $x->cell($s2, $r2, 5, $total_tm . ' Orang', $stTOT); $r2++;
 $x->autofit($s1, 30);
 $x->autofit($s2, 30);
 $x->send("Laporan_Realisasi_Upah_$tanggal.xlsx");
+exit;

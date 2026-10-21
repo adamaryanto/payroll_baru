@@ -15,15 +15,18 @@ if ($data_real['status_realisasi'] >= 2) {
     exit;
 }
 $idrkk_ref = $data_real['id_rkk'];
+include_once __DIR__ . '/../grup_borongan/_setup.php';
 
 // 2. Logika Simpan
 if (isset($_POST['simpan_karyawan'])) {
     $id_real_fix = intval($_POST['id_real_hidden']);
     $nama_manual = $koneksi->real_escape_string($_POST['nama_karyawan_manual']);
+    $id_karyawan_pick = intval($_POST['id_karyawan'] ?? 0);
+    $id_grup_pick = (isset($_POST['id_grup']) && $_POST['id_grup'] !== '') ? intval($_POST['id_grup']) : 0;
     
     $upah        = !empty($_POST['upah']) ? floatval(str_replace(['Rp', '.', ' '], '', $_POST['upah'])) : 0;
     $id_dept     = $_POST['id_departmen'];
-    $id_sub      = $_POST['id_sub_department'];
+    $id_sub      = !empty($_POST['id_sub_department']) ? (int)$_POST['id_sub_department'] : 0;
     $id_os       = intval($_POST['id_os_dhk'] ?? 0);
     $id_gol      = intval($_POST['id_golongan'] ?? 0);
     $id_jadwal   = $_POST['id_jadwal'];
@@ -46,6 +49,12 @@ if (isset($_POST['simpan_karyawan'])) {
     if (!empty($nama_manual) && !empty($id_jadwal) && $id_real_fix > 0) {
         $tgl_ref = $data_real['tgl_realisasi'] ?? date('Y-m-d');
 
+        // Pastikan kolom relasi ada (DB lama)
+        $ckG = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_grup'");
+        if ($ckG && $ckG->num_rows == 0) {
+            $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_grup INT NULL DEFAULT NULL, ADD KEY idx_grup (id_grup)");
+        }
+
         // Ambil data jadwal untuk detail shift
         $q_j_detail = $koneksi->query("SELECT * FROM tb_jadwal WHERE id_jadwal = '$id_jadwal'");
         $d_j_detail = $q_j_detail->fetch_assoc();
@@ -54,7 +63,18 @@ if (isset($_POST['simpan_karyawan'])) {
         $ist_masuk  = $d_j_detail['istirahat_masuk'] ?? '00:00:00';
         $ist_keluar = $d_j_detail['istirahat_keluar'] ?? '00:00:00';
 
-        // Tambahkan OS_DHK dan golongan ke query
+        // Karyawan yang ditambahkan manual selalu masuk grup "KARYAWAN TAMBAHAN"
+        // (dibuat otomatis bila belum ada), bukan grup rencana.
+        $q_kg = $koneksi->query("SELECT id_grup FROM ms_grup_borongan WHERE UPPER(TRIM(nama_grup)) = 'KARYAWAN TAMBAHAN' LIMIT 1");
+        if ($q_kg && $q_kg->num_rows > 0) {
+            $id_grup_pick = (int)$q_kg->fetch_assoc()['id_grup'];
+        } else {
+            $koneksi->query("INSERT INTO ms_grup_borongan (nama_grup, keterangan, tgl_updt, is_borongan) VALUES ('KARYAWAN TAMBAHAN', 'Grup otomatis untuk karyawan yang ditambahkan manual di realisasi', NOW(), 0)");
+            $id_grup_pick = (int)$koneksi->insert_id;
+        }
+
+        // Tambahkan OS_DHK dan golongan ke query (id_karyawan + id_grup ikut tersimpan)
+        $id_grup_sql = $id_grup_pick > 0 ? "'$id_grup_pick'" : "NULL";
         $query = "INSERT INTO tb_realisasi_detail 
             (id_realisasi, id_rkk, id_rkk_detail, id_karyawan, nama_karyawan_manual, 
              id_departmen, id_sub_department, r_upah, id_jadwal, status_realisasi_detail,
@@ -63,13 +83,13 @@ if (isset($_POST['simpan_karyawan'])) {
              r_istirahat_keluar, r_status, r_update, ra_masuk, ra_keluar, 
              ra_istirahat_masuk, ra_istirahat_keluar, hasil_kerja, lembur, 
              tgl_realisasi_detail, r_potongan_pulang, r_potongan_tidak_lengkap,
-             id_os_dhk, id_golongan) 
+             id_os_dhk, id_golongan, id_grup) 
             VALUES 
-            ($id_real_fix, '$idrkk_ref', 0, 0, '$nama_manual', 
+            ($id_real_fix, '$idrkk_ref', 0, '$id_karyawan_pick', '$nama_manual', 
              '$id_dept', '$id_sub', '$upah', '$id_jadwal', 1,
              0, 0, 0, 0, '$s_masuk', '$s_keluar', '$ist_masuk', '$ist_keluar', 'Hadir', 'manual', 
              '$ra_masuk', '$ra_keluar', '00:00:00', '00:00:00', '-', 0, 
-             '$tgl_ref', 0, 0, '$id_os', '$id_gol')";
+             '$tgl_ref', 0, 0, '$id_os', '$id_gol', $id_grup_sql)";
 
         if ($koneksi->query($query)) {
             echo "
@@ -98,6 +118,33 @@ $list_sub    = $koneksi->query("SELECT * FROM ms_sub_department ORDER BY nama_su
 $list_jadwal = $koneksi->query("SELECT * FROM tb_jadwal ORDER BY id_jadwal ASC");
 $list_os     = $koneksi->query("SELECT * FROM ms_os_dhk ORDER BY OS_DHK ASC");
 $list_gol    = $koneksi->query("SELECT * FROM ms_golongan ORDER BY golongan ASC");
+// Master grup (boleh tidak ada di DB lama)
+$has_grup = false;
+$ckT = $koneksi->query("SHOW TABLES LIKE 'ms_grup_borongan'");
+if ($ckT && $ckT->num_rows > 0) $has_grup = true;
+$list_grup = $has_grup ? $koneksi->query("SELECT * FROM ms_grup_borongan ORDER BY nama_grup ASC") : false;
+$has_anggota = false;
+$ckA = $koneksi->query("SHOW TABLES LIKE 'ms_grup_borongan_anggota'");
+if ($ckA && $ckA->num_rows > 0) $has_anggota = true;
+// Karyawan aktif + grupnya (nama grup digabung, grup utama = id terkecil)
+if ($has_grup && $has_anggota) {
+$list_kar = $koneksi->query("SELECT k.*, d.nama_departmen, sd.nama_sub_department, j.keterangan AS shift_ket,
+    (SELECT GROUP_CONCAT(gb.nama_grup SEPARATOR ', ') FROM ms_grup_borongan_anggota ga JOIN ms_grup_borongan gb ON gb.id_grup = ga.id_grup WHERE ga.id_karyawan = k.id_karyawan) AS grps,
+    (SELECT ga.id_grup FROM ms_grup_borongan_anggota ga WHERE ga.id_karyawan = k.id_karyawan ORDER BY ga.id_grup ASC LIMIT 1) AS id_grup_utama
+    FROM ms_karyawan k
+    LEFT JOIN ms_departmen d ON d.id_departmen = k.id_departmen
+    LEFT JOIN ms_sub_department sd ON sd.id_sub_department = k.id_sub_department
+    LEFT JOIN tb_jadwal j ON j.id_jadwal = k.id_jadwal
+    WHERE k.status_karyawan = 'Aktif' AND k.nama_karyawan NOT LIKE 'User PIN%' ORDER BY k.nama_karyawan ASC");
+} else {
+$list_kar = $koneksi->query("SELECT k.*, d.nama_departmen, sd.nama_sub_department, j.keterangan AS shift_ket,
+    NULL AS grps, NULL AS id_grup_utama
+    FROM ms_karyawan k
+    LEFT JOIN ms_departmen d ON d.id_departmen = k.id_departmen
+    LEFT JOIN ms_sub_department sd ON sd.id_sub_department = k.id_sub_department
+    LEFT JOIN tb_jadwal j ON j.id_jadwal = k.id_jadwal
+    WHERE k.status_karyawan = 'Aktif' AND k.nama_karyawan NOT LIKE 'User PIN%' ORDER BY k.nama_karyawan ASC");
+}
 // Default upah baku (Harian standar)
 $default_upah = 115000;
 ?>
@@ -125,19 +172,47 @@ $default_upah = 115000;
                     
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                         <div>
-                            <label class="block text-sm font-bold text-gray-700 mb-2">Nama Lengkap Karyawan <span class="text-rose-500">*</span></label>
-                            <input type="text" name="nama_karyawan_manual" id="nama_karyawan_manual" required autofocus class="block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none" placeholder="Nama Karyawan..." />
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Karyawan (ketik untuk cari) <span class="text-rose-500">*</span></label>
+                            <select name="id_karyawan" id="id_karyawan_select" required class="select2-karyawan block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none">
+                                <option value="">- Pilih Karyawan -</option>
+                                <?php while ($k = $list_kar->fetch_assoc()) :
+                                    $lbl = $k['nama_karyawan'] . (!empty($k['grps']) ? '  [' . $k['grps'] . ']' : '');
+                                ?>
+                                    <option value="<?= $k['id_karyawan']; ?>"
+                                        data-nama="<?= htmlspecialchars($k['nama_karyawan']); ?>"
+                                        data-upah="<?= (float)($k['upah'] ?? 0); ?>"
+                                        data-jadwal="<?= (int)($k['id_jadwal'] ?? 0); ?>"
+                                        data-dept="<?= (int)($k['id_departmen'] ?? 0); ?>"
+                                        data-sub="<?= (int)($k['id_sub_department'] ?? 0); ?>"
+                                        data-os="<?= (int)($k['id_os_dhk'] ?? 0); ?>"
+                                        data-gol="<?= (int)($k['id_golongan'] ?? 0); ?>"
+                                        data-grup="<?= (int)($k['id_grup_utama'] ?? 0); ?>"><?= htmlspecialchars($lbl); ?></option>
+                                <?php endwhile; ?>
+                            </select>
                         </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Nama Lengkap Karyawan <span class="text-rose-500">*</span></label>
+                            <input type="text" name="nama_karyawan_manual" id="nama_karyawan_manual" required autofocus class="block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none" placeholder="Pilih dari dropdown / ketik manual..." />
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                         <div>
                             <label class="block text-sm font-bold text-gray-700 mb-2">Upah Harian (Manual) <span class="text-rose-500">*</span></label>
                             <input type="text" name="upah" id="upah_manual" required class="block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none font-bold text-blue-600" value="<?= number_format($default_upah, 0, ',', '.') ?>" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Grup</label>
+                            <input type="text" value="KARYAWAN TAMBAHAN" disabled class="block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none bg-gray-100 text-gray-600 font-bold" />
+                            <input type="hidden" name="id_grup" id="id_grup_sel" value="0" />
+                            <p class="text-xs text-gray-500 mt-1">Karyawan yang ditambahkan manual otomatis masuk grup KARYAWAN TAMBAHAN.</p>
                         </div>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                         <div>
                             <label class="block text-sm font-bold text-gray-700 mb-2">Shift Kerja</label>
-                            <select name="id_jadwal" required class="block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none">
+                            <select name="id_jadwal" id="id_jadwal_sel" required class="select2-karyawan block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none">
                                 <option value="">- Pilih Shift -</option>
                                 <?php while ($j = $list_jadwal->fetch_assoc()) : ?>
                                     <option value="<?= $j['id_jadwal']; ?>"><?= $j['keterangan'] ?></option>
@@ -145,20 +220,11 @@ $default_upah = 115000;
                             </select>
                         </div>
                         <div>
-                            <label class="block text-sm font-bold text-gray-700 mb-2">Departemen</label>
-                            <select name="id_departmen" required class="block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none">
-                                <option value="">- Pilih Dept -</option>
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Bagian</label>
+                            <select name="id_departmen" id="id_dept_sel" required class="select2-karyawan block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none">
+                                <option value="">- Pilih Bagian -</option>
                                 <?php while ($d = $list_dept->fetch_assoc()) : ?>
                                     <option value="<?= $d['id_departmen']; ?>"><?= $d['nama_departmen']; ?></option>
-                                <?php endwhile; ?>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-bold text-gray-700 mb-2">Sub Bagian</label>
-                            <select name="id_sub_department" required class="block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none">
-                                <option value="">- Pilih Sub -</option>
-                                <?php while ($s = $list_sub->fetch_assoc()) : ?>
-                                    <option value="<?= $s['id_sub_department']; ?>"><?= $s['nama_sub_department']; ?></option>
                                 <?php endwhile; ?>
                             </select>
                         </div>
@@ -453,6 +519,32 @@ $default_upah = 115000;
                     $('#upah_manual').val(formatRupiah(wage));
                 }
             }
+        });
+
+        function karSetSel(sel, v) {
+            v = parseInt(v, 10) || 0;
+            var $s = $(sel);
+            if (v > 0 && $s.find('option[value="' + v + '"]').length) $s.val(v).trigger('change');
+            else if (v <= 0) $s.val('').trigger('change');
+        }
+
+        // Pilih karyawan master -> shift, dept, sub, upah, OS, golongan, grup terisi otomatis (tetap bisa diubah)
+        $('#id_karyawan_select').on('change', function() {
+            var opt = $(this).find('option:selected');
+            var id = $(this).val();
+            if (!id || id === '0') {
+                if (id === '0') $('#nama_karyawan_manual').val('').focus();
+                return;
+            }
+            $('#nama_karyawan_manual').val(opt.data('nama') || '');
+            var up = parseFloat(opt.data('upah')) || 0;
+            if (up > 0) $('#upah_manual').val(formatRupiah(up));
+            karSetSel('#id_jadwal_sel', opt.data('jadwal'));
+            karSetSel('#id_dept_sel', opt.data('dept'));
+            karSetSel('#id_sub_sel', opt.data('sub'));
+            karSetSel('select[name="id_os_dhk"]', opt.data('os'));
+            karSetSel('select[name="id_golongan"]', opt.data('gol'));
+            karSetSel('#id_grup_sel', opt.data('grup'));
         });
 
         $('#upah_manual').on('input', function() {

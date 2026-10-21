@@ -2,6 +2,7 @@
 $ref = $_GET['ref'] ?? 'boneless';
 $view_param = isset($_GET['view']) ? '&view=1' : '';
 $id = $_GET['id'] ?? '';
+include_once __DIR__ . '/mobil_lib.php';
 
 // Pastikan tabel & kolom satuan ada (sama seperti tambah.php)
 $koneksi->query("CREATE TABLE IF NOT EXISTS tb_boneless_satuan (
@@ -34,10 +35,22 @@ if ($id) {
     $header = null;
 }
 
-// 2. Ambil Biaya Mobil (Master)
+// 2. Ambil Biaya Mobil (Master, info saja) + armada + link tersimpan
 $sql_master = $koneksi->query("SELECT biaya_mobil FROM tb_biayamobil LIMIT 1");
 $row_master = $sql_master->fetch_assoc();
 $harga_per_mobil = $row_master['biaya_mobil'] ?? 0;
+$fleet_form = function_exists('boneless_mobil_fleet') ? boneless_mobil_fleet($koneksi) : [];
+$linked_map = [];
+if (function_exists('boneless_mobil_links')) foreach (boneless_mobil_links($koneksi, $id) as $lm) $linked_map[(int)$lm['id_mobil']] = true;
+// Data lama tanpa link: centang N pertama agar jumlah tidak berubah saat simpan
+if (empty($linked_map) && (int)($header['jumlah_mobil'] ?? 0) > 0) {
+    $nn = 0;
+    foreach ($fleet_form as $fm) {
+        if ($nn >= (int)$header['jumlah_mobil']) break;
+        $linked_map[(int)$fm['id_mobil']] = true;
+        $nn++;
+    }
+}
 
 // 3. Ambil Data Detail
 $sql_detail = $koneksi->query("SELECT * FROM tb_boneless_detail WHERE id_boneless = '$id'");
@@ -60,8 +73,18 @@ $simpan = @$_POST['simpan'];
 if ($simpan) {
     $id_rkk = @$_POST['id_rkk'];
     $tgl = @$_POST['tgl'];
-    $jumlah_mobil = @$_POST['jumlah_mobil'];
     $keterangan = @$_POST['keterangan'];
+
+    // Truck yg dicentang (snapshot nama+harga master saat simpan)
+    $fleet_map = [];
+    if (function_exists('boneless_mobil_fleet')) foreach (boneless_mobil_fleet($koneksi) as $fm) $fleet_map[(int)$fm['id_mobil']] = $fm;
+    $trucks = [];
+    foreach ((array)($_POST['mob_pick'] ?? []) as $mid_raw) {
+        $mid = (int)$mid_raw;
+        if ($mid <= 0 || !isset($fleet_map[$mid])) continue;
+        $trucks[] = $fleet_map[$mid];
+    }
+    $jumlah_mobil = count($trucks);
 
     // Update Header
     $koneksi->query("UPDATE tb_boneless SET 
@@ -70,6 +93,14 @@ if ($simpan) {
         jumlah_mobil = '$jumlah_mobil', 
         keterangan = '$keterangan' 
         WHERE id_boneless = '$id'");
+
+    // Sync link truck: hapus lama, masukkan yg dicentang
+    $koneksi->query("DELETE FROM tb_boneless_mobil WHERE id_boneless = '$id'");
+    foreach ($trucks as $tr) {
+        $nm = $koneksi->real_escape_string($tr['nama']);
+        $hg = (float)($tr['harga'] ?? 0);
+        $koneksi->query("INSERT INTO tb_boneless_mobil (id_boneless, id_mobil, nama, harga) VALUES ('$id', '" . (int)$tr['id_mobil'] . "', '$nm', '$hg')");
+    }
 
     // Sync Details: Hapus yang lama, masukkan yang baru
     $koneksi->query("DELETE FROM tb_boneless_detail WHERE id_boneless = '$id'");
@@ -167,16 +198,38 @@ if ($simpan) {
                                 <input type="hidden" name="tgl" value="<?= $header['tgl'] ?? '' ?>">
                             </div>
                             <div class="col-md-4 form-group">
-                                <label class="text-xs font-bold text-gray-700 uppercase mb-1">Jumlah Mobil (Potong)</label>
-                                <input type="number" name="jumlah_mobil" class="form-control h-[42px]" value="<?= $header['jumlah_mobil'] ?? 0 ?>" required>
+                                <label class="text-xs font-bold text-gray-700 uppercase mb-1">Jumlah Mobil (otomatis)</label>
+                                <div class="h-[42px] flex items-center px-3 bg-amber-50 border border-amber-200 rounded-lg font-black text-amber-700">
+                                    <i class="fas fa-truck mr-2"></i> <span id="mobCountBadge"><?= count($linked_map) ?> Unit</span>
+                                </div>
+                                <input type="hidden" name="jumlah_mobil" id="jumlah_mobil_hidden" value="<?= count($linked_map) ?>">
                             </div>
                             <div class="col-md-4 form-group">
-                                <label class="text-xs font-bold text-gray-700 uppercase mb-1">Biaya / Mobil (Lock)</label>
-                                <div class="h-[42px] flex items-center px-3 bg-blue-50 border border-blue-200 rounded-lg font-bold text-blue-600" id="staticMasterDisplay">
-                                    Rp <?= number_format($harga_per_mobil, 0, ',', '.') ?>
-                                </div>
+                                <label class="text-xs font-bold text-gray-700 uppercase mb-1">Total Mobil (otomatis)</label>
+                                <div class="h-[42px] flex items-center px-3 bg-amber-50 border border-amber-200 rounded-lg font-black text-amber-700" id="mobTotalView">Rp 0</div>
                             </div>
                         </div>
+
+                        <div class="mt-4">
+                            <label class="text-xs font-bold text-amber-700 uppercase mb-3 block"><i class="fas fa-truck mr-1"></i> Mobil yg Jalan (centang dari master)</label>
+                            <?php if (empty($fleet_form)): ?>
+                                <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">Belum ada armada. Isi dulu di <a href="?page=boneless&aksi=master" class="font-bold underline">MASTER → Mobil</a>.</div>
+                            <?php else: ?>
+                            <div id="mobCheckList" class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                <?php foreach ($fleet_form as $fm):
+                                    $mid = (int)$fm['id_mobil'];
+                                    $checked = isset($linked_map[$mid]) ? 'checked' : '';
+                                ?>
+                                <label class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg cursor-pointer hover:border-amber-400 text-sm font-semibold text-gray-700">
+                                    <input type="checkbox" name="mob_pick[]" value="<?= $mid ?>" data-harga="<?= (float)($fm['harga'] ?? 0) ?>" class="mob-pick w-4 h-4 text-amber-600 rounded" <?= $checked ?>>
+                                    <span><?= htmlspecialchars($fm['nama']) ?> <span class="text-gray-400 font-normal">Rp <?= number_format($fm['harga'] ?? 0, 0, ',', '.') ?></span></span>
+                                </label>
+                                <?php endforeach; ?>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <hr class="my-5 border-gray-200">
 
                         <div class="mt-4">
                             <label class="text-xs font-bold text-green-700 uppercase mb-3 block">Tim Tanpa Mesin Boneless</label>
@@ -340,9 +393,22 @@ if ($simpan) {
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        const jmlMobilInput = document.querySelector('input[name="jumlah_mobil"]');
         const summaryGrandTotal = document.getElementById('summaryGrandTotal');
-        const masterCost = <?= (float)$harga_per_mobil ?>;
+
+        function mobTotals() {
+            let totalMobil = 0, nMobil = 0;
+            document.querySelectorAll('.mob-pick:checked').forEach(cb => {
+                nMobil++;
+                totalMobil += parseFloat(cb.getAttribute('data-harga')) || 0;
+            });
+            const badge = document.getElementById('mobCountBadge');
+            if (badge) badge.innerText = nMobil + ' Unit';
+            const hid = document.getElementById('jumlah_mobil_hidden');
+            if (hid) hid.value = nMobil;
+            const mtv = document.getElementById('mobTotalView');
+            if (mtv) mtv.innerText = 'Rp ' + Math.round(totalMobil).toLocaleString('id-ID');
+            return totalMobil;
+        }
 
         function calculate() {
             let totalPlus = 0;
@@ -364,9 +430,8 @@ if ($simpan) {
                 }
             });
 
-            const jmlMobil = parseFloat(jmlMobilInput.value) || 0;
             const bonelessNet = totalPlus - totalMinus;
-            const grandTotal = bonelessNet + (jmlMobil * masterCost);
+            const grandTotal = bonelessNet + mobTotals();
             const summaryNet = document.getElementById('summaryBonelessNet');
             if (summaryNet) summaryNet.innerText = 'Rp ' + Math.round(bonelessNet).toLocaleString('id-ID');
             summaryGrandTotal.innerText = 'Rp ' + Math.round(grandTotal).toLocaleString('id-ID');
@@ -374,9 +439,13 @@ if ($simpan) {
 
         // Input Listener
         document.addEventListener('input', e => {
-            if (e.target.classList.contains('qty-input') || e.target.classList.contains('harga-input') || e.target === jmlMobilInput) {
+            if (e.target.classList.contains('qty-input') || e.target.classList.contains('harga-input')) {
                 calculate();
             }
+        });
+
+        document.addEventListener('change', e => {
+            if (e.target.classList.contains('mob-pick')) calculate();
         });
 
         // Remove Row
@@ -427,7 +496,7 @@ if ($simpan) {
 
         // Input Listener (plus satuan)
         document.addEventListener('input', e => {
-            if (e.target.classList.contains('qty-input') || e.target.classList.contains('harga-input') || e.target === jmlMobilInput) {
+            if (e.target.classList.contains('qty-input') || e.target.classList.contains('harga-input')) {
                 calculate();
             }
             if (e.target.classList.contains('sat-qty') || e.target.classList.contains('sat-price') || e.target.classList.contains('sat-unit') || e.target.getAttribute('name') === 'sat_nama[]') {

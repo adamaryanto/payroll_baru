@@ -57,14 +57,14 @@ $subquery_digantikan_oleh = "(SELECT K4.nama_karyawan
             // 2. Tampilkan Header Departemen (Wrapping/Merge)
             echo "<tr>
                     <td colspan='17' style='background-color:#1e3a8a; color:white; font-weight:bold; padding:10px;'>
-                        DEPARTEMEN: " . strtoupper($dept['nama_departmen']) . "
+                        BAGIAN: " . strtoupper($dept['nama_departmen']) . "
                     </td>
                   </tr>";
 
             // 3. Header Kolom
             echo "<tr style='background-color:#f8f9fa;'>
-                    <th>No</th><th>NIK</th><th>Nama Karyawan</th><th>Departemen</th>
-                    <th>Sub Bagian</th><th>OS/DHK</th><th>Gol</th><th>Masuk</th>
+                    <th>No</th><th>NIK</th><th>Nama Karyawan</th><th>Bagian</th>
+                    <th>Posisi</th><th>OS/DHK</th><th>Gol</th><th>Masuk</th>
                     <th>Pulang</th><th>Ist. Keluar</th><th>Ist. Masuk</th>
                     <th>Upah</th><th>Pot. Telat</th><th>Pot. Istirahat</th>
                     <th>Pot. Lain</th><th>Upah Setelah Potongan</th><th>Hasil Kerja</th>
@@ -86,7 +86,7 @@ $subquery_digantikan_oleh = "(SELECT K4.nama_karyawan
     O.OS_DHK as label_os,
     G.golongan as label_gol,
     D.nama_departmen, 
-    S.nama_sub_department, 
+    S.jabatan as nama_sub_department, 
     A.r_upah as upah,
     RD.status_rkk,
     J.jam_masuk, J.jam_keluar, J.istirahat_masuk, J.istirahat_keluar, J.keterangan as shift_ket,
@@ -95,7 +95,7 @@ $subquery_digantikan_oleh = "(SELECT K4.nama_karyawan
     FROM tb_realisasi_detail A 
     JOIN ms_karyawan B ON A.id_karyawan = B.id_karyawan
     JOIN ms_departmen D ON B.id_departmen = D.id_departmen
-    LEFT JOIN ms_sub_department S ON B.id_sub_department = S.id_sub_department
+    LEFT JOIN ms_jabatan S ON B.id_jabatan = S.id_jabatan
     LEFT JOIN ms_os_dhk O ON B.id_os_dhk = O.id_os_dhk
     LEFT JOIN ms_golongan G ON B.id_golongan = G.id_golongan
     LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal
@@ -110,7 +110,7 @@ $subquery_digantikan_oleh = "(SELECT K4.nama_karyawan
             while ($data = $tampil->fetch_assoc()) {
                 // Logika Pelanggaran Dinamis (Gunakan r_jam_masuk & r_jam_keluar Realisasi sebagai patokan)
                 $shift_ket = $data['shift_ket'] ?? '';
-                $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+                $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false || strpos(strtoupper($shift_ket), 'FLEKSI') !== false);
 
                 $isLate = (!$is_flexible && !empty($data['ra_masuk']) && $data['ra_masuk'] != '00:00:00' && !empty($data['r_jam_masuk']) && $data['r_jam_masuk'] != '00:00:00' && strtotime($data['ra_masuk']) > strtotime($data['r_jam_masuk']));
                 $isLateBreak = (!$is_flexible && !empty($data['ra_istirahat_masuk']) && $data['ra_istirahat_masuk'] != '00:00:00' && !empty($data['r_istirahat_masuk']) && $data['r_istirahat_masuk'] != '00:00:00' && strtotime($data['ra_istirahat_masuk']) > strtotime($data['r_istirahat_masuk']));

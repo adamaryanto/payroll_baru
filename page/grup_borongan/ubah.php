@@ -19,7 +19,7 @@ while ($row = $sql_agt->fetch_assoc()) { $anggota[] = $row; $agt_ids[] = (int)$r
 
 // Pilihan karyawan: yang aktif + yang sudah jadi anggota (biar tidak hilang)
 $in = $agt_ids ? " OR id_karyawan IN (" . implode(',', array_map('intval', $agt_ids)) . ")" : "";
-$q_kar = $koneksi->query("SELECT id_karyawan, no_absen, nama_karyawan FROM ms_karyawan WHERE status_karyawan='Aktif' $in ORDER BY nama_karyawan ASC");
+$q_kar = $koneksi->query("SELECT id_karyawan, no_absen, nama_karyawan FROM ms_karyawan WHERE status_karyawan='Aktif' AND nama_karyawan NOT LIKE 'User PIN%' $in ORDER BY nama_karyawan ASC");
 $list_kar = [];
 if ($q_kar) while ($r = $q_kar->fetch_assoc()) $list_kar[] = $r;
 

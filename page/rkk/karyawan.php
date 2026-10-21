@@ -28,7 +28,7 @@ if (isset($_POST['simpan_karyawan'])) {
 
     $id_rkk_fix = intval($_POST['id_rkk_hidden']);
     $id_dept    = $_POST['id_departmen'];
-    $id_sub     = $_POST['id_sub_department'];
+    $id_sub     = !empty($_POST['id_sub_department']) ? $_POST['id_sub_department'] : 0;
     $id_jadwal  = $_POST['id_jadwal'];
     $id_grup    = isset($_POST['id_grup']) && $_POST['id_grup'] !== '' ? intval($_POST['id_grup']) : NULL;
     $upah       = str_replace('.', '', $_POST['upah_manual']);
@@ -174,7 +174,7 @@ while ($qg && ($gg = $qg->fetch_assoc())) {
 }
 // Peta semua karyawan aktif untuk tombol "tambah manual" di mode grup
 $kar_all = [];
-$qk = $koneksi->query("SELECT K.id_karyawan, K.no_absen, K.nama_karyawan, K.id_departmen, K.id_sub_department, K.id_jadwal, K.upah, D.nama_departmen, S.nama_sub_department FROM ms_karyawan K LEFT JOIN ms_departmen D ON K.id_departmen = D.id_departmen LEFT JOIN ms_sub_department S ON K.id_sub_department = S.id_sub_department WHERE K.status_karyawan = 'Aktif' ORDER BY K.nama_karyawan ASC");
+$qk = $koneksi->query("SELECT K.id_karyawan, K.no_absen, K.nama_karyawan, K.id_departmen, K.id_sub_department, K.id_jadwal, K.upah, D.nama_departmen, S.nama_sub_department FROM ms_karyawan K LEFT JOIN ms_departmen D ON K.id_departmen = D.id_departmen LEFT JOIN ms_sub_department S ON K.id_sub_department = S.id_sub_department WHERE K.status_karyawan = 'Aktif' AND K.nama_karyawan NOT LIKE 'User PIN%' ORDER BY K.nama_karyawan ASC");
 while ($qk && ($kk = $qk->fetch_assoc())) $kar_all[(int)$kk['id_karyawan']] = $kk;
 ?>
 
@@ -273,22 +273,12 @@ while ($qk && ($kk = $qk->fetch_assoc())) $kar_all[(int)$kk['id_karyawan']] = $k
                         </select>
                     </div>
                     <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">Departemen <span class="text-rose-500">*</span></label>
+                        <label class="block text-sm font-bold text-gray-700 mb-2">Bagian <span class="text-rose-500">*</span></label>
                         <select name="id_departmen" id="id_departmen" required data-tags="true" class="select2-manage block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none text-sm sm:text-base">
-                            <option value="">- Pilih Dept -</option>
+                            <option value="">- Pilih Bagian -</option>
                             <?php $list_dept->data_seek(0);
                             while ($d = $list_dept->fetch_assoc()) { ?>
                                 <option value="<?= $d['id_departmen']; ?>"><?= $d['nama_departmen']; ?></option>
-                            <?php } ?>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">Sub Bagian <span class="text-rose-500">*</span></label>
-                        <select name="id_sub_department" id="id_sub_department" required data-tags="true" class="select2-manage block w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none text-sm sm:text-base">
-                            <option value="">- Pilih Sub -</option>
-                            <?php $list_sub->data_seek(0);
-                            while ($s = $list_sub->fetch_assoc()) { ?>
-                                <option value="<?= $s['id_sub_department']; ?>"><?= $s['nama_sub_department']; ?></option>
                             <?php } ?>
                         </select>
                     </div>

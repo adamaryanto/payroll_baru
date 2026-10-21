@@ -49,7 +49,7 @@ if (!empty($TanggalAwal) && !empty($TanggalAkhir)) {
     $qr0 = $koneksi->query("SELECT h.tgl_rkk AS tgl, TRIM(k.no_absen) AS pin, j.jam_masuk AS sm, j.jam_keluar AS sk FROM tb_rkk_detail rd JOIN tb_rkk h ON h.id_rkk=rd.id_rkk JOIN ms_karyawan k ON k.id_karyawan=rd.id_karyawan LEFT JOIN tb_jadwal j ON j.id_jadwal=rd.id_jadwal WHERE h.tgl_rkk BETWEEN '$TanggalAwal' AND '$TanggalAkhir'");
     if ($qr0) while ($rw0 = $qr0->fetch_assoc()) $rosterShift[$rw0['tgl'] . '|' . trim((string)$rw0['pin'])] = [$rw0['sm'], $rw0['sk']];
     if (count($tgl_aktif) > 0 && count($tgl_aktif) <= 7) {
-        $qa = $koneksi->query("SELECT k.id_karyawan, k.no_absen, k.nama_karyawan, o.OS_DHK AS oslbl, d.nama_departmen AS dept, sd.nama_sub_department AS subdept, jm.jam_masuk AS m_masuk, jm.jam_keluar AS m_keluar FROM ms_karyawan k LEFT JOIN ms_os_dhk o ON o.id_os_dhk=k.id_os_dhk LEFT JOIN ms_departmen d ON d.id_departmen=k.id_departmen LEFT JOIN ms_sub_department sd ON sd.id_sub_department=k.id_sub_department LEFT JOIN tb_jadwal jm ON jm.id_jadwal=k.id_jadwal WHERE k.status_karyawan='Aktif' AND k.no_absen!='' AND k.no_absen IS NOT NULL ORDER BY k.nama_karyawan");
+        $qa = $koneksi->query("SELECT k.id_karyawan, k.no_absen, k.nama_karyawan, o.OS_DHK AS oslbl, d.nama_departmen AS dept, sd.jabatan AS subdept, jm.jam_masuk AS m_masuk, jm.jam_keluar AS m_keluar FROM ms_karyawan k LEFT JOIN ms_os_dhk o ON o.id_os_dhk=k.id_os_dhk LEFT JOIN ms_departmen d ON d.id_departmen=k.id_departmen LEFT JOIN ms_jabatan sd ON sd.id_jabatan=k.id_jabatan LEFT JOIN tb_jadwal jm ON jm.id_jadwal=k.id_jadwal WHERE k.status_karyawan='Aktif' AND k.no_absen!='' AND k.no_absen IS NOT NULL ORDER BY k.nama_karyawan");
         if ($qa) while ($ra = $qa->fetch_assoc()) {
             $pinT = trim((string)$ra['no_absen']);
             foreach (array_keys($tgl_aktif) as $dt) {
@@ -132,8 +132,8 @@ ksort($grouped_by_dept);
                 <th style='background:#e5e7eb;'>TANGGAL</th>
                 <th style='background:#e5e7eb;'>NO ABSEN</th>
                 <th style='background:#e5e7eb;'>NAMA KARYAWAN</th>
-                <th style='background:#e5e7eb;'>DEPARTEMEN</th>
-                <th style='background:#e5e7eb;'>SUB BAGIAN</th>
+                <th style='background:#e5e7eb;'>Bagian</th>
+                <th style='background:#e5e7eb;'>POSISI</th>
                 <th style='background:#e5e7eb;'>OS/DHK</th>
                 <th style='background:#e5e7eb;'>SEHARUSNYA</th>
                 <th style='background:#e5e7eb;'>KETERANGAN</th>

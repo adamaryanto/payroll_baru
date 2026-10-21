@@ -64,7 +64,7 @@ if (isset($_GET['id'])) {
                                 <th class="py-2 px-2 text-[13px] font-bold text-gray-700 uppercase text-center">Pilih</th>
                                 <th class="py-2 px-2 text-[13px] font-bold text-gray-700 uppercase">No. Absen</th>
                                 <th class="py-2 px-2 text-[13px] font-bold text-gray-700 uppercase">Nama Karyawan</th>
-                                <th class="py-2 px-2 text-[13px] font-bold text-gray-700 uppercase">Departemen</th>
+                                <th class="py-2 px-2 text-[13px] font-bold text-gray-700 uppercase">Bagian</th>
                                 <th class="py-2 px-2 text-[13px] font-bold text-gray-700 uppercase">Bagian</th>
                                 <th class="py-2 px-2 text-[13px] font-bold text-gray-700 uppercase">Status Saat Ini</th>
                             </tr>
@@ -77,6 +77,7 @@ if (isset($_GET['id'])) {
                                 LEFT JOIN ms_departmen ON ms_karyawan.id_departmen = ms_departmen.id_departmen 
                                 LEFT JOIN ms_sub_department ON ms_karyawan.id_sub_department = ms_sub_department.id_sub_department
                                 WHERE ms_karyawan.status_karyawan = 'Aktif' 
+                                AND ms_karyawan.nama_karyawan NOT LIKE 'User PIN%'
                                 ORDER BY ms_karyawan.nama_karyawan ASC");
 
                             while ($datakaryawan = $tampil->fetch_assoc()) {

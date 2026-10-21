@@ -210,7 +210,18 @@ if (!function_exists('rx_money')) {
 function rx_money($v) {
     $v = trim((string)$v);
     if ($v === '' || $v === '`') return 0;
-    $v = preg_replace('/[^0-9.\-]/', '', $v);
+    $v = preg_replace('/[^0-9.,\-]/', '', $v); // buang Rp/spasi, simpan angka + titik + koma
+    if (strpos($v, ',') !== false && strpos($v, '.') !== false) {
+        // Indonesia: 125.000,00 -> 125000.00
+        $v = str_replace('.', '', $v);
+        $v = str_replace(',', '.', $v);
+    } elseif (preg_match('/^\-?\d{1,3}(\.\d{3})+$/', $v)) {
+        // Ribuan Indonesia tanpa desimal: 125.000 / Rp 1.500.000 -> angka penuh
+        $v = str_replace('.', '', $v);
+    } elseif (strpos($v, ',') !== false) {
+        // Cuma koma: anggap pemisah ribuan US (perilaku lama) -> buang
+        $v = str_replace(',', '', $v);
+    }
     if ($v === '' || $v === '-' || $v === '.') return 0;
     return (float)$v;
 }

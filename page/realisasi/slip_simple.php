@@ -80,7 +80,7 @@ function rupiah($a){ return "Rp " . number_format($a, 0, ',', '.'); }
             unset($row);
             // FIX single tap: tentukan masuk/pulang berdasarkan jam shift
             $qShift=$koneksi->query("SELECT j.jam_masuk, j.jam_keluar, j.keterangan FROM ms_karyawan k LEFT JOIN tb_jadwal j ON k.id_jadwal=j.id_jadwal WHERE k.id_karyawan='$id' LIMIT 1");
-            $dShift=$qShift?$qShift->fetch_assoc():null; $sMasuk=$dShift['jam_masuk']??'00:00:00'; $sPulang=$dShift['jam_keluar']??'00:00:00'; $isFlexS=(strpos(strtoupper($dShift['keterangan']??''),'FLEXI')!==false);
+            $dShift=$qShift?$qShift->fetch_assoc():null; $sMasuk=$dShift['jam_masuk']??'00:00:00'; $sPulang=$dShift['jam_keluar']??'00:00:00'; $isFlexS=(strpos(strtoupper($dShift['keterangan']??''),'FLEXI')!==false||strpos(strtoupper($dShift['keterangan']??''),'FLEKSI')!==false);
             foreach($grouped as $tgl=>&$row){
                 if(count($row['raw'])==1 && !empty($row['masuk']) && empty($row['pulang']) && !$isFlexS && $sMasuk!='00:00:00' && $sPulang!='00:00:00'){
                     $t=$row['masuk'];

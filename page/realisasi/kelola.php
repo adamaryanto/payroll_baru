@@ -45,6 +45,21 @@ if (isset($_GET['id'])) {
     $datastatusrealisasi = (int)$datadetail['status_realisasi'];
     $idrkk               = $datadetail['id_rkk'];
 
+    // OTOMATIS: semua karyawan yang tap tapi TIDAK ADA di rencana tanggal ini
+    // dimasukkan ke grup "TIDAK DALAM RENCANA" (satu tabel, tanpa panel terpisah).
+    include_once __DIR__ . '/../../device_sync_helper.php';
+    if (function_exists('ensure_karyawan_pin_table')) ensure_karyawan_pin_table($koneksi);
+    if (function_exists('refresh_karyawan_pin_map')) {
+        $qpm = @$koneksi->query("SELECT COUNT(*) AS c, MIN(tgl_updt) AS mn FROM ms_karyawan_pin");
+        $rpm = $qpm ? $qpm->fetch_assoc() : null;
+        $n_pin = (int)($rpm['c'] ?? 0);
+        $old_pin = !empty($rpm['mn']) ? strtotime($rpm['mn']) : 0;
+        if ($n_pin === 0 || ($old_pin && $old_pin < time() - 43200)) refresh_karyawan_pin_map($koneksi);
+    }
+    if (function_exists('realisasi_proses_tdr')) {
+        realisasi_proses_tdr($koneksi, (int)$idrealisasi, null, false);
+    }
+
     // Preload peta ganti/pengganti SEKALI (pengganti 2 subquery korelasi di query utama
     // yang sebelumnya dieksekusi per baris). tb_rkk_update kecil, jadi preload penuh.
     $map_menggantikan = []; // key: id_karyawan|id_rkk
@@ -68,10 +83,10 @@ if (isset($_GET['id'])) {
         IF(A.id_karyawan = 0, A.nama_karyawan_manual, B.nama_karyawan) as nama_tampil,
         -- Prioritaskan departmen dari detail (penting untuk manual employee)
         COALESCE(D.nama_departmen, D_Manual.nama_departmen) as nama_departmen,
-        COALESCE(BB.nama_sub_department, BB_Manual.nama_sub_department) as nama_sub_department,
+        COALESCE(JB.jabatan, JB_PG.jabatan) as nama_sub_department,
         C.tgl_realisasi, 
-        O.OS_DHK as label_os,
-        G.golongan as label_gol,
+        COALESCE(O.OS_DHK, O_M.OS_DHK) as label_os,
+        COALESCE(G.golongan, G_M.golongan) as label_gol,
         RD.status_rkk,
         GB.nama_grup as label_grup,
         GA.is_borongan as is_borongan_orang,
@@ -91,11 +106,16 @@ if (isset($_GET['id'])) {
         -- Join ke master departmen dari karyawan master
         LEFT JOIN ms_departmen D ON B.id_departmen = D.id_departmen
         LEFT JOIN ms_sub_department BB ON B.id_sub_department = BB.id_sub_department
+        LEFT JOIN ms_jabatan JB ON B.id_jabatan = JB.id_jabatan
+        LEFT JOIN ms_jabatan JB_PG ON PG.id_jabatan = JB_PG.id_jabatan
         -- Join ke master departmen dari kolom manual di detail (untuk manual employee)
         LEFT JOIN ms_departmen D_Manual ON A.id_departmen = D_Manual.id_departmen
         LEFT JOIN ms_sub_department BB_Manual ON A.id_sub_department = BB_Manual.id_sub_department
         LEFT JOIN ms_os_dhk O ON B.id_os_dhk = O.id_os_dhk
         LEFT JOIN ms_golongan G ON B.id_golongan = G.id_golongan
+        -- Fallback OS/Golongan untuk baris TIDAK DALAM RENCANA (id_karyawan=0)
+        LEFT JOIN ms_os_dhk O_M ON O_M.id_os_dhk = A.id_os_dhk
+        LEFT JOIN ms_golongan G_M ON G_M.id_golongan = A.id_golongan
         LEFT JOIN tb_rkk_detail RD ON A.id_rkk_detail = RD.id_rkk_detail
         LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal
         LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
@@ -127,6 +147,8 @@ if (isset($_GET['id'])) {
     $globalDendaIstirahatMasuk = $dataDenda['denda_istirahat_masuk'] ?? 0;
     $globalDendaPulang = $dataDenda['denda_pulang'] ?? 0;
     $globalDendaTidakLengkap = $dataDenda['denda_tidak_lengkap'] ?? 0;
+    // Toleransi keterlambatan (menit) — SAMA kayak halaman tarik data
+    $tol = function_exists('load_toleransi') ? load_toleransi($koneksi) : ['masuk' => 10, 'pulang' => 5, 'ist_keluar' => 5, 'ist_masuk' => 10];
 } else {
     $datatglrealisasi    = "";
     $dataketerangan      = "";
@@ -316,6 +338,8 @@ function bulkSavePenalties($koneksi, $id_realisasi)
     $gd_istirahat_telat = $denda['denda_istirahat_masuk'] ?? 0;
     $gd_pulang = $denda['denda_pulang'] ?? 0;
     $gd_tidak_lengkap = $denda['denda_tidak_lengkap'] ?? 0;
+    // Toleransi (menit) — SAMA kayak halaman tarik data
+    $tol_b = function_exists('load_toleransi') ? load_toleransi($koneksi) : ['masuk' => 10, 'pulang' => 5, 'ist_keluar' => 5, 'ist_masuk' => 10];
 
     // 2. Get all details for this realization
     $query_details = $koneksi->query("SELECT RD.*, J.keterangan as shift_ket, J.jam_masuk as s_masuk, J.jam_keluar as s_keluar, J.istirahat_masuk as s_ist_masuk, J.istirahat_keluar as s_ist_keluar
@@ -348,27 +372,29 @@ function bulkSavePenalties($koneksi, $id_realisasi)
         $p_tidak_lengkap = 0;
 
         $is_total_missing = (!$has_masuk && !$has_keluar);
+        // Flexi murni: bebas semua denda waktu
+        $is_flex_b = is_flexible_shift($row['shift_ket'] ?? '');
 
-        if (!$is_total_missing) {
-            // Late Entrance
-            if ($has_masuk && $s_masuk != '00:00:00' && strtotime($row['ra_masuk']) > strtotime($s_masuk)) {
+        if (!$is_total_missing && !$is_flex_b) {
+            // Late Entrance (lewat toleransi)
+            if ($has_masuk && $s_masuk != '00:00:00' && late_minutes($row['ra_masuk'], $s_masuk) > $tol_b['masuk']) {
                 $p_telat = $gd_masuk;
             }
-            // Early Departure
-            if ($has_keluar && $s_keluar != '00:00:00' && strtotime($row['ra_keluar']) < strtotime($s_keluar)) {
+            // Early Departure (lewat toleransi)
+            if ($has_keluar && $s_keluar != '00:00:00' && early_minutes($row['ra_keluar'], $s_keluar) > $tol_b['pulang']) {
                 $p_pulang = $gd_pulang;
             }
-            // Early Break
-            if ($has_ist_keluar && $s_ist_keluar != '00:00:00' && strtotime($row['ra_istirahat_keluar']) < strtotime($s_ist_keluar)) {
+            // Early Break (lewat toleransi)
+            if ($has_ist_keluar && $s_ist_keluar != '00:00:00' && early_minutes($row['ra_istirahat_keluar'], $s_ist_keluar) > $tol_b['ist_keluar']) {
                 $p_ist_awal = $gd_istirahat_awal;
             }
-            // Late Break Return
-            if ($has_ist_masuk && $s_ist_masuk != '00:00:00' && strtotime($row['ra_istirahat_masuk']) > strtotime($s_ist_masuk)) {
+            // Late Break Return (lewat toleransi)
+            if ($has_ist_masuk && $s_ist_masuk != '00:00:00' && late_minutes($row['ra_istirahat_masuk'], $s_ist_masuk) > $tol_b['ist_masuk']) {
                 $p_ist_telat = $gd_istirahat_telat;
             }
 
             $shift_ket = $row['shift_ket'] ?? '';
-            $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+            $is_flexible = is_flexible_shift($shift_ket);
             $isRestExpected = (!$is_flexible && $s_ist_keluar != '00:00:00' && $s_ist_keluar != 'Bebas');
             $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
 
@@ -458,11 +484,8 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                             </select>
                             <input type="date" id="tgl-manual-input" value="<?php echo $datatglrealisasi; ?>" data-default="<?php echo $datatglrealisasi; ?>" disabled class="px-2 py-2 border border-gray-300 rounded-lg text-sm bg-gray-100 text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                             <span class="text-gray-300 font-bold">|</span>
-                            <button type="button" id="btn-cleanup" data-tgl="<?php echo $datatglrealisasi; ?>" data-id="<?php echo (int)$idrealisasi; ?>" class="btn btn-warning bg-amber-500 hover:bg-amber-600 border-none px-4 py-2 text-white" title="Tarik dari mesin + proses HANYA tap luar rencana (tak-terdaftar). Baris rencana tidak disentuh.">
-                                <i class="fas fa-exclamation-triangle mr-1.5"></i> Tarik Luar Rencana
-                            </button>
-                            <button type="button" id="btn-cleanup-rencana" data-tgl="<?php echo $datatglrealisasi; ?>" data-id="<?php echo (int)$idrealisasi; ?>" class="btn bg-emerald-600 hover:bg-emerald-700 border-none px-4 py-2 text-white" title="Tarik dari mesin + sinkron HANYA baris rencana. Tap tak-terdaftar dilewati. Lebih cepat untuk harian.">
-                                <i class="fas fa-bolt mr-1.5"></i> Tarik Sesuai Rencana
+                            <button type="button" id="btn-cleanup" data-tgl="<?php echo $datatglrealisasi; ?>" data-id="<?php echo (int)$idrealisasi; ?>" class="btn btn-warning bg-amber-500 hover:bg-amber-600 border-none px-6 py-2 text-white" title="Tarik dari mesin + sinkron rencana + proses tap luar rencana.">
+                                <i class="fas fa-sync-alt mr-1.5"></i> Tarik Data
                             </button>
                         </div>
                         </div>
@@ -503,6 +526,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                             $dn = !empty($gr['nm']) ? strtoupper($gr['nm']) : 'TANPA GRUP';
                             $grup_list[$dn] = ($grup_list[$dn] ?? 0) + (int)$gr['jml'];
                         }
+                        unset($grup_list['TIDAK DALAM RENCANA']);
                         ksort($grup_list);
                         ?>
                         <div class="mb-3 flex flex-col md:flex-row gap-2">
@@ -539,6 +563,17 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                 $bor_map = [];
                                 $qb_all = $koneksi->query("SELECT b.* FROM tb_realisasi_borongan b JOIN tb_realisasi_detail d ON b.id_realisasi_detail = d.id_realisasi_detail WHERE d.id_realisasi = '$idrealisasi' ORDER BY b.id_borongan ASC");
                                 while ($qb_all && ($rb_map = $qb_all->fetch_assoc())) $bor_map[$rb_map['id_realisasi_detail']][] = $rb_map;
+                                // Peta grup master (fallback bila baris detail belum punya id_grup)
+                                $grup_nama_k = [];
+                                $qgn_k = $koneksi->query("SELECT id_grup, nama_grup FROM ms_grup_borongan");
+                                while ($qgn_k && ($rgn_k = $qgn_k->fetch_assoc())) $grup_nama_k[(int)$rgn_k['id_grup']] = $rgn_k['nama_grup'];
+                                $grup_member_k = []; $grup_byname_k = [];
+                                $qgm_k = $koneksi->query("SELECT ga.id_karyawan, MIN(ga.id_grup) AS g, K.nama_karyawan AS nm FROM ms_grup_borongan_anggota ga LEFT JOIN ms_karyawan K ON K.id_karyawan = ga.id_karyawan GROUP BY ga.id_karyawan");
+                                while ($qgm_k && ($rgm_k = $qgm_k->fetch_assoc())) {
+                                    $grup_member_k[(int)$rgm_k['id_karyawan']] = (int)$rgm_k['g'];
+                                    $nm_u = strtoupper(trim((string)($rgm_k['nm'] ?? '')));
+                                    if ($nm_u !== '' && !isset($grup_byname_k[$nm_u])) $grup_byname_k[$nm_u] = (int)$rgm_k['g'];
+                                }
                                 // Baris pertama per orang (MIN id) yang dihitung; baris rangkap (beda grup, nama sama) tampil tapi tidak dijumlah
                                 $keep_ids = []; $cnt_person = [];
                                 $qk = $koneksi->query("SELECT MIN(RD.id_realisasi_detail) AS k, COUNT(*) AS c, IF(RD.id_karyawan = 0, CONCAT('M:', IFNULL(RD.nama_karyawan_manual, '')), CONCAT('K:', RD.id_karyawan)) AS pk FROM tb_realisasi_detail RD LEFT JOIN tb_rkk_detail RKD ON RD.id_rkk_detail = RKD.id_rkk_detail WHERE RD.id_realisasi = '$idrealisasi' AND (RKD.id_rkk_detail IS NULL OR RKD.status_rkk != 'Digantikan') GROUP BY pk");
@@ -548,16 +583,77 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                 $ncol = (strtolower($_SESSION['role']) != 'admin hr') ? 17 : 16;
                                 $aksi_th = (strtolower($_SESSION['role']) != 'admin hr') ? '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Aksi</th>' : '';
 
-                                while ($data = $tampil->fetch_assoc()) {
-                                    if (trim((string)($data['nama_tampil'] ?? '')) === '') continue;
+                                // Kumpulkan baris + hitung grupnya dulu (fallback master), lalu
+                                // kelompokkan per grup (urutan kemunculan pertama) agar 1 grup = 1 section.
+                                // Tanpa ini, baris fallback (id_grup kosong) kepisah di bawah jadi section dobel.
+                                $dept_of_row = function($row) use ($grup_member_k, $grup_byname_k, $grup_nama_k) {
+                                    if (!empty($row['label_grup'])) return strtoupper(trim($row['label_grup']));
+                                    $gid_fb = 0;
+                                    $kid_fb = (int)($row['id_karyawan'] ?? 0);
+                                    if ($kid_fb > 0 && isset($grup_member_k[$kid_fb])) $gid_fb = $grup_member_k[$kid_fb];
+                                    if ($gid_fb <= 0) {
+                                        $nm_fb = strtoupper(trim((string)($row['nama_tampil'] ?? '')));
+                                        if ($nm_fb !== '' && isset($grup_byname_k[$nm_fb])) $gid_fb = $grup_byname_k[$nm_fb];
+                                    }
+                                    if ($gid_fb > 0 && isset($grup_nama_k[$gid_fb])) return strtoupper(trim($grup_nama_k[$gid_fb]));
+                                    return 'TANPA GRUP';
+                                };
+                                $ordered_rows = [];
+                                $bucket_order = [];
+                                $buckets = [];
+                                while ($tmp_row = $tampil->fetch_assoc()) {
+                                    if (trim((string)($tmp_row['nama_tampil'] ?? '')) === '') continue;
+                                    $tmp_row['_dept'] = $dept_of_row($tmp_row);
+                                    $ordered_rows[] = $tmp_row;
+                                }
+                                foreach ($ordered_rows as $tmp_row) {
+                                    $bd_tmp = $tmp_row['_dept'];
+                                    if (!isset($buckets[$bd_tmp])) { $buckets[$bd_tmp] = []; $bucket_order[] = $bd_tmp; }
+                                    $buckets[$bd_tmp][] = $tmp_row;
+                                }
+                                // TIDAK DALAM RENCANA selalu paling bawah, bukan section grup biasa.
+                                $tdr_key = null;
+                                foreach ($bucket_order as $bd_tmp) {
+                                    if (strtoupper(trim((string)$bd_tmp)) === 'TIDAK DALAM RENCANA') { $tdr_key = $bd_tmp; break; }
+                                }
+                                if ($tdr_key !== null) {
+                                    $bucket_order = array_values(array_filter($bucket_order, function ($v) use ($tdr_key) { return $v !== $tdr_key; }));
+                                    $bucket_order[] = $tdr_key;
+                                }
+                                // KARYAWAN TAMBAHAN (input manual) selalu section paling bawah setelah grup rencana.
+                                $kt_key = null;
+                                foreach ($bucket_order as $bd_tmp) {
+                                    if (strtoupper(trim((string)$bd_tmp)) === 'KARYAWAN TAMBAHAN') { $kt_key = $bd_tmp; break; }
+                                }
+                                if ($kt_key !== null) {
+                                    $bucket_order = array_values(array_filter($bucket_order, function ($v) use ($kt_key) { return $v !== $kt_key; }));
+                                    $bucket_order[] = $kt_key;
+                                }
+                                $ordered_rows = [];
+                                foreach ($bucket_order as $bd_tmp) foreach ($buckets[$bd_tmp] as $tmp_row) $ordered_rows[] = $tmp_row;
+                                unset($buckets, $bucket_order);
+                                // TDR dipisah: tidak ikut tabel grup utama, ditampilkan
+                                // sebagai tabel ringkas sendiri di paling bawah.
+                                $tdr_rows = [];
+                                $ordered_rows = array_values(array_filter($ordered_rows, function ($row) use (&$tdr_rows) {
+                                    if (strtoupper(trim((string)($row['_dept'] ?? ''))) === 'TIDAK DALAM RENCANA') { $tdr_rows[] = $row; return false; }
+                                    return true;
+                                }));
+
+                                foreach ($ordered_rows as $data) {
+                                    $dept_now = $data['_dept'];
                                     // Ambil dari peta preload (pengganti subquery korelasi)
                                     if (!isset($data['menggantikan'])) $data['menggantikan'] = $map_menggantikan[$data['id_karyawan'] . '|' . $data['id_rkk']] ?? null;
                                     if (!isset($data['digantikan_oleh'])) $data['digantikan_oleh'] = $map_digantikan[$data['id_rkk_detail']] ?? null;
-                                    $dept_now = !empty($data['label_grup']) ? strtoupper($data['label_grup']) : 'TANPA GRUP';
                                     if ($dept_now !== $last_dept) {
                                         $last_dept = $dept_now;
                                         $no = 1;
                                         $dept_esc = htmlspecialchars($dept_now, ENT_QUOTES);
+                                        $is_tdr = (strtoupper(trim((string)$dept_now)) === 'TIDAK DALAM RENCANA');
+                                        if ($is_tdr) {
+                                            // Bukan header grup: baris biasa paling bawah.
+                                            echo '<tr class="tdr-separator" data-dept="' . $dept_esc . '"><td colspan="' . $ncol . '" data-label="Bagian" style="background:#F3F4F6; font-weight:bold; text-align:center; text-transform:uppercase; padding:8px 4px; border-top:2px solid #9CA3AF;">' . htmlspecialchars($dept_now) . '</td></tr>';
+                                        } else {
                                         echo '<tr class="dept-separator" data-dept="' . $dept_esc . '"><td colspan="' . $ncol . '" data-label="Bagian" style="background:#B2A1C6; font-weight:bold; text-align:center; text-transform:uppercase; padding:8px 4px;">' . htmlspecialchars($dept_now) . '</td></tr>';
                                         echo '<tr class="grp-header d-none d-md-table-row" data-dept="' . $dept_esc . '">'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle" style="background:#D9D9D9;">No</th>'
@@ -577,6 +673,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Lembur</th>'
                                             . '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right" style="background:#EFEFEF;">Upah Dibayar</th>'
                                             . $aksi_th . '</tr>';
+                                        }
                                     }
                                     $upah = $data['upahkaryawan'];
 
@@ -593,17 +690,19 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                     $has_ist_masuk = !empty($data['ra_istirahat_masuk']) && $data['ra_istirahat_masuk'] != '00:00:00';
                                     $has_ist_keluar = !empty($data['ra_istirahat_keluar']) && $data['ra_istirahat_keluar'] != '00:00:00';
 
-                                    $isLate = ($has_masuk && !empty($data['r_jam_masuk']) && is_time_late($data['ra_masuk'], $data['r_jam_masuk']));
-                                    $isEarlyOut = ($has_keluar && !empty($data['r_jam_keluar']) && is_time_early($data['ra_keluar'], $data['r_jam_keluar']));
-                                    $isLateBreak = ($has_ist_masuk && !empty($data['r_istirahat_masuk']) && is_time_late($data['ra_istirahat_masuk'], $data['r_istirahat_masuk']));
-                                    $isEarlyBreak = ($has_ist_keluar && !empty($data['r_istirahat_keluar']) && is_time_early($data['ra_istirahat_keluar'], $data['r_istirahat_keluar']));
+                                    $isLate = ($has_masuk && !empty($data['r_jam_masuk']) && late_minutes($data['ra_masuk'], $data['r_jam_masuk']) > $tol['masuk']);
+                                    $isEarlyOut = ($has_keluar && !empty($data['r_jam_keluar']) && early_minutes($data['ra_keluar'], $data['r_jam_keluar']) > $tol['pulang']);
+                                    $isLateBreak = ($has_ist_masuk && !empty($data['r_istirahat_masuk']) && late_minutes($data['ra_istirahat_masuk'], $data['r_istirahat_masuk']) > $tol['ist_masuk']);
+                                    $isEarlyBreak = ($has_ist_keluar && !empty($data['r_istirahat_keluar']) && early_minutes($data['ra_istirahat_keluar'], $data['r_istirahat_keluar']) > $tol['ist_keluar']);
 
                                      $isTotalMissing = (!$has_masuk && !$has_keluar);
                                      $hasIncompleteMain = ($has_masuk xor $has_keluar);
                                      $shift_ket = $data['shift_ket'] ?? '';
-                                     $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+                                     $is_flexible = is_flexible_shift($shift_ket);
                                      $isRestExpected = (!$is_flexible && !empty($data['r_istirahat_keluar']) && $data['r_istirahat_keluar'] != '00:00:00');
                                      $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
+                                     // Flexi murni: tanpa merah telat/pulang-cepat/istirahat
+                                     if ($is_flexible) { $isLate = $isEarlyOut = $isLateBreak = $isEarlyBreak = false; }
 
                                      // Logic Status Kehadiran (Refined)
                                      // Attendance Status Logic (ENUM-based)
@@ -638,11 +737,12 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                     } else {
                                         // Status 1 (Manual) or 2 (Synced)
                                         // Calculate dynamically based on real-time shift data
-                                        $potPulangValue = ($isEarlyOut && !$isTotalMissing) ? $globalDendaPulang : 0;
-                                        $potTidakLengkapValue = (!$isTotalMissing && ($hasIncompleteMain || $hasIncompleteBreak)) ? $globalDendaTidakLengkap : 0;
-                                        $potTelatValue = ($isLate) ? $globalDendaMasuk : 0;
-                                        $potIstirahatKeluarValue = ($isEarlyBreak) ? $globalDendaIstirahatKeluar : 0;
-                                        $potIstirahatMasukValue = ($isLateBreak) ? $globalDendaIstirahatMasuk : 0;
+                                        // Flexi murni: bebas semua denda waktu
+                                        $potPulangValue = (!$is_flexible && $isEarlyOut && !$isTotalMissing) ? $globalDendaPulang : 0;
+                                        $potTidakLengkapValue = (!$is_flexible && !$isTotalMissing && ($hasIncompleteMain || $hasIncompleteBreak)) ? $globalDendaTidakLengkap : 0;
+                                        $potTelatValue = (!$is_flexible && $isLate) ? $globalDendaMasuk : 0;
+                                        $potIstirahatKeluarValue = (!$is_flexible && $isEarlyBreak) ? $globalDendaIstirahatKeluar : 0;
+                                        $potIstirahatMasukValue = (!$is_flexible && $isLateBreak) ? $globalDendaIstirahatMasuk : 0;
                                         $potLainnyaValue = $data['r_potongan_lainnya'];
                                     }
 
@@ -712,17 +812,17 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                             <div class="text-[11px] text-gray-500"><?php echo $data['nama_departmen']; ?></div>
                                         </td>
                                         <td data-label="Jam Kerja" align="center"><?php echo substr($data['r_jam_masuk'] ?: '', 0, 5); ?></td>
-                                        <td data-label="Jam Masuk" align="center" class="<?php
+                                        <td data-label="Jam Masuk" align="center" title="<?php echo $data['ra_masuk'] ?? ''; ?>" class="<?php
                                                                             $isEmptyLog = (empty($data['ra_masuk']) || $data['ra_masuk'] == '00:00:00');
                                                                             // Kosong = merah (default), telat vs jadwal = merah
                                                                             echo $isEmptyLog || $isLate ? 'bg-red-custom' : '';
                                                                             ?>"><?php echo (empty($data['ra_masuk']) || $data['ra_masuk'] == '00:00:00') ? '' : substr($data['ra_masuk'], 0, 5); ?></td>
-                                        <td data-label="Istirahat Masuk" align="center" class="<?php
+                                        <td data-label="Istirahat Masuk" align="center" title="<?php echo $data['ra_istirahat_masuk'] ?? ''; ?>" class="<?php
                                                                                         $isEmptyLogIstM = (empty($data['ra_istirahat_masuk']) || $data['ra_istirahat_masuk'] == '00:00:00');
-                                                                                        // Kosong = merah (default), telat masuk istirahat = merah
-                                                                                        echo $isEmptyLogIstM || $isLateBreak ? 'bg-red-custom' : '';
+                                                                                        // Kosong = merah HANYA bila istirahat memang dijadwalkan; telat = merah
+                                                                                        echo ($isRestExpected && $isEmptyLogIstM) || $isLateBreak ? 'bg-red-custom' : '';
                                                                                         ?>"><?php echo (empty($data['ra_istirahat_masuk']) || $data['ra_istirahat_masuk'] == '00:00:00') ? '' : substr($data['ra_istirahat_masuk'], 0, 5); ?></td>
-                                        <td data-label="Jam Pulang" align="center" class="<?php
+                                        <td data-label="Jam Pulang" align="center" title="<?php echo $data['ra_keluar'] ?? ''; ?>" class="<?php
                                                                                 $isEmptyLogOut = (empty($data['ra_keluar']) || $data['ra_keluar'] == '00:00:00');
                                                                                 // Kosong = merah (default), pulang cepat = kuning
                                                                                 echo $isEmptyLogOut ? 'bg-red-custom' : ($isEarlyOut ? 'bg-yellow-custom' : '');
@@ -794,135 +894,61 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                     </div>
                 </div>
 
-                <?php
-                // Tap mesin yang PIN-nya tidak terdaftar di master karyawan: grup + logs sendiri.
-                // Tampil saja (info), tidak masuk hitungan/total realisasi.
-                $ttm_rows = [];
-                if (!empty($datatglrealisasi)) {
-                    $tglesc = $koneksi->real_escape_string($datatglrealisasi);
-                    $qtm = $koneksi->query("SELECT TRIM(userid) AS pin, COUNT(*) AS n_tap, MIN(detail_waktu) AS first_tap, MAX(detail_waktu) AS last_tap FROM tb_record WHERE tgl = '$tglesc' AND TRIM(userid) <> '' AND NOT EXISTS (SELECT 1 FROM ms_karyawan k WHERE k.no_absen IS NOT NULL AND TRIM(k.no_absen) <> '' AND TRIM(k.no_absen) = TRIM(tb_record.userid)) GROUP BY TRIM(userid) ORDER BY MIN(detail_waktu) ASC");
-                    while ($qtm && ($rtm = $qtm->fetch_assoc())) $ttm_rows[] = $rtm;
-                }
-                // Nama dari mesin untuk PIN tak terdaftar (hanya bila ada yang tak terdaftar, biar tidak memperlambat halaman)
-                $dev_names_kel = [];
-                if (!empty($ttm_rows)) {
-                    if (!function_exists('get_device_user_names')) include_once __DIR__ . '/../../device_sync_helper.php';
-                    if (function_exists('get_device_user_names')) $dev_names_kel = get_device_user_names($koneksi);
-                    // Sembunyikan PIN yang sudah ditarik jadi baris grup (biar tidak dobel info)
-                    $exn = [];
-                    $qx = $koneksi->query("SELECT RD.nama_karyawan_manual FROM tb_realisasi_detail RD JOIN ms_grup_borongan G ON G.id_grup = RD.id_grup WHERE RD.id_realisasi = '$idrealisasi' AND RD.id_karyawan = 0 AND UPPER(TRIM(G.nama_grup)) = 'TIDAK DALAM RENCANA'");
-                    while ($qx && ($rx = $qx->fetch_assoc())) $exn[trim((string)$rx['nama_karyawan_manual'])] = true;
-                    $ttm_rows = array_values(array_filter($ttm_rows, function($tm) use ($dev_names_kel, $exn) {
-                        $d = trim((string)($dev_names_kel[trim((string)$tm['pin'])] ?? ''));
-                        if ($d === '') $d = 'PIN ' . $tm['pin'];
-                        return !isset($exn[$d]);
-                    }));
-                }
-                ?>
-                <?php if (!empty($ttm_rows)) : ?>
-                <div class="px-3 md:px-4 pb-4">
-                    <div class="text-sm font-bold text-red-600 uppercase tracking-wider mb-2 border-l-4 border-red-500 pl-2">
-                        <i class="fas fa-exclamation-triangle mr-1.5"></i> Tidak Terdaftar (<?= count($ttm_rows) ?> PIN tap tanpa master)
-                    </div>
-                    <div class="table-responsive rounded-lg border border-red-200">
-                        <table class="table table-hover align-middle mb-0 w-full">
-                            <thead>
-                                <tr style="background:#FEF2F2;">
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">No</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">Nama (dari mesin)</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">PIN / No Absen</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">Grup</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase text-center">Jumlah Tap</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">Tap Pertama</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">Tap Terakhir</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php $ntm = 1; foreach ($ttm_rows as $tm): ?>
-                                <tr>
-                                    <td class="py-2 px-2"><?= $ntm++ ?></td>
-                                    <td class="py-2 px-2 font-bold"><?= htmlspecialchars($dev_names_kel[trim((string)$tm['pin'])] ?? '—') ?></td>
-                                    <td class="py-2 px-2"><?= htmlspecialchars($tm['pin']) ?></td>
-                                    <td class="py-2 px-2"><span class="px-2 py-0.5 rounded-full font-bold text-xs" style="background:#fee2e2;color:#b91c1c;">TIDAK TERDAFTAR</span></td>
-                                    <td class="py-2 px-2 text-center"><?= (int)$tm['n_tap'] ?></td>
-                                    <td class="py-2 px-2"><?= htmlspecialchars(substr($tm['first_tap'], 11, 5)) ?></td>
-                                    <td class="py-2 px-2"><?= htmlspecialchars(substr($tm['last_tap'], 11, 5)) ?></td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p class="text-xs text-gray-500 italic mt-2">PIN di atas tap di mesin tapi belum ada di master karyawan — daftarkan dulu di master agar masuk hitungan gaji. Tidak ikut total di atas.</p>
-                </div>
-                <?php endif; ?>
-
-                <?php
-                // Karyawan TERDAFTAR di master yang tap tapi tidak masuk rencana:
-                // grup otomatis TIDAK DALAM RENCANA — tampil saja, tanpa baris DB & tanpa master grup.
-                // Dioptimasi: peta tap 1 query + peta detail 1 query (ganti 4 subquery per karyawan).
-                $tdr_rows = [];
-                if (!empty($datatglrealisasi) && !empty($idrealisasi)) {
-                    $te2 = $koneksi->real_escape_string($datatglrealisasi);
-                    $tapmap2 = [];
-                    $qtm2 = $koneksi->query("SELECT TRIM(userid) AS pin, MIN(detail_waktu) AS ft, MAX(detail_waktu) AS lt FROM tb_record WHERE tgl = '$te2' AND TRIM(userid) <> '' GROUP BY TRIM(userid)");
-                    while ($qtm2 && ($rm2 = $qtm2->fetch_assoc())) $tapmap2[$rm2['pin']] = $rm2;
-                    $inplan2 = [];
-                    $qpl2 = $koneksi->query("SELECT id_karyawan FROM tb_realisasi_detail WHERE id_realisasi = '$idrealisasi' AND id_karyawan <> 0");
-                    while ($qpl2 && ($rpl2 = $qpl2->fetch_assoc())) $inplan2[(int)$rpl2['id_karyawan']] = true;
-                    $qtdr = $koneksi->query("SELECT k.id_karyawan, k.nama_karyawan, TRIM(k.no_absen) AS pin, O.OS_DHK AS oslbl, S.nama_sub_department AS posisi, k.upah
-                        FROM ms_karyawan k
-                        LEFT JOIN ms_os_dhk O ON O.id_os_dhk = k.id_os_dhk
-                        LEFT JOIN ms_sub_department S ON S.id_sub_department = k.id_sub_department
-                        WHERE k.status_karyawan = 'Aktif' AND k.no_absen IS NOT NULL AND TRIM(k.no_absen) <> ''
-                        ORDER BY k.nama_karyawan ASC");
-                    while ($qtdr && ($rtdr = $qtdr->fetch_assoc())) {
-                        if (isset($inplan2[(int)$rtdr['id_karyawan']])) continue;
-                        $pin2 = $rtdr['pin'];
-                        if (!isset($tapmap2[$pin2])) continue;
-                        $rtdr['first_tap'] = $tapmap2[$pin2]['ft'];
-                        $rtdr['last_tap'] = $tapmap2[$pin2]['lt'];
-                        $tdr_rows[] = $rtdr;
-                    }
-                }
-                ?>
-                <?php if (!empty($tdr_rows)) : ?>
-                <div class="px-3 md:px-4 pb-4">
-                    <div class="text-sm font-bold text-amber-600 uppercase tracking-wider mb-2 border-l-4 border-amber-500 pl-2">
-                        <i class="fas fa-users mr-1.5"></i> Tidak Dalam Rencana (<?= count($tdr_rows) ?> karyawan terdaftar yang tap tapi di luar rencana)
-                    </div>
+                <?php if (!empty($tdr_rows)): ?>
+                <div class="mt-4">
                     <div class="table-responsive rounded-lg border border-amber-200">
-                        <table class="table table-hover align-middle mb-0 w-full">
+                        <table class="table table-hover table-clean align-middle mb-0" id="tabel-tdr">
                             <thead>
+                                <tr>
+                                    <th colspan="7" class="text-left font-bold text-[13px] uppercase" style="background:#FEF3C7; color:#92400E; padding:10px 8px;">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span>TIDAK DALAM RENCANA (<?= count($tdr_rows) ?> KARYAWAN TERDAFTAR YANG TAP TAPI DI LUAR RENCANA)</span>
+                                            <a href="page/realisasi/excelrealisasi_baru.php?id=<?= (int)$idrealisasi ?>&jenis=tdr"
+                                                class="px-2 py-1 text-[12px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-600 hover:text-white rounded border border-emerald-300 transition-colors flex items-center whitespace-nowrap" title="Download Excel TIDAK DALAM RENCANA">
+                                                <i class="fas fa-file-excel mr-1"></i> Excel
+                                            </a>
+                                        </div>
+                                    </th>
+                                </tr>
                                 <tr style="background:#FFFBEB;">
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">No</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">Nama Sesuai KTP</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">OS/DHK</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase">Posisi</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase text-center">Tap Masuk</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase text-center">Tap Pulang</th>
-                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase text-right">Upah (info)</th>
+                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">No</th>
+                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Nama Sesuai KTP</th>
+                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">OS/DHK</th>
+                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Posisi</th>
+                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Tap Masuk</th>
+                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Tap Pulang</th>
+                                    <th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-right">Upah (Info)</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php $ntdr = 1; foreach ($tdr_rows as $td): ?>
-                                <tr>
-                                    <td class="py-2 px-2"><?= $ntdr++ ?></td>
-                                    <td class="py-2 px-2 font-bold"><?= htmlspecialchars(strtoupper($td['nama_karyawan'])) ?></td>
-                                    <td class="py-2 px-2"><?= htmlspecialchars($td['oslbl'] ?? '-') ?></td>
-                                    <td class="py-2 px-2"><?= htmlspecialchars($td['posisi'] ?? '-') ?></td>
-                                    <td class="py-2 px-2 text-center"><?= htmlspecialchars(substr($td['first_tap'] ?? '', 11, 5)) ?></td>
-                                    <td class="py-2 px-2 text-center"><?= htmlspecialchars((($td['last_tap'] ?? '') !== ($td['first_tap'] ?? '')) ? substr($td['last_tap'], 11, 5) : '') ?></td>
-                                    <td class="py-2 px-2 text-right"><?= number_format((float)($td['upah'] ?? 0), 0, ',', '.') ?></td>
+                                <?php
+                                    $tm_in = trim((string)($td['ra_masuk'] ?? ''));
+                                    $tm_out = trim((string)($td['ra_keluar'] ?? ''));
+                                    if ($tm_in === '00:00:00') $tm_in = '';
+                                    if ($tm_out === '00:00:00') $tm_out = '';
+                                    $tm_in = $tm_in !== '' ? substr($tm_in, 0, 5) : '';
+                                    $tm_out = $tm_out !== '' ? substr($tm_out, 0, 5) : '';
+                                    $info_upah = (int)($td['upah_rkk'] ?? 0);
+                                    if ($info_upah <= 0) $info_upah = (int)($td['upahkaryawan'] ?? 0);
+                                ?>
+                                <tr class="data-row">
+                                    <td data-label="No"><?= $ntdr++ ?></td>
+                                    <td data-label="Nama Sesuai KTP"><strong><?= htmlspecialchars((string)($td['nama_tampil'] ?? '')) ?></strong></td>
+                                    <td data-label="OS/DHK"><?= htmlspecialchars((string)($td['label_os'] ?? '')) ?></td>
+                                    <td data-label="Posisi"><?= htmlspecialchars((string)($td['nama_sub_department'] ?? '')) ?></td>
+                                    <td data-label="Tap Masuk"><?= htmlspecialchars($tm_in) ?></td>
+                                    <td data-label="Tap Pulang"><?= htmlspecialchars($tm_out) ?></td>
+                                    <td data-label="Upah (Info)" class="text-right"><?= number_format($info_upah, 0, ',', '.') ?></td>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
                     </div>
-                    <p class="text-xs text-gray-500 italic mt-2">Terdaftar di master dan tap di mesin, tapi tidak masuk rencana tanggal ini — tampil sebagai info, tidak ikut total di atas dan tidak tersimpan ke database.</p>
                 </div>
                 <?php endif; ?>
 
-                <div class="modal fade" id="modalBorongan" tabindex="-1" role="dialog">
+                                <div class="modal fade" id="modalBorongan" tabindex="-1" role="dialog">
                     <div class="modal-dialog modal-lg" role="document">
                         <div class="modal-content">
                             <div class="modal-header" style="background:#8b5cf6; color:#fff;">
@@ -1586,56 +1612,25 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                 Swal.fire({ icon: 'error', title: 'Gagal', text: (err && err.message) || 'Tarik data gagal.', confirmButtonColor: '#e11d48' });
             });
         }
-        // Cek kesegaran pull dulu: kalau masih segar, tawarkan pakai data lokal (skip SOAP)
+        // Tarik Data: tarik mesin + sinkron rencana + proses tap luar rencana sekaligus
         function submitCleanup(btn, mode, confirmTitle, confirmText, confirmBtn) {
             var tgl = tarikEffDate(btn);
             var id = btn.getAttribute('data-id') || '';
-            var go = function(skip) { tarikRun(id, mode, skip, tgl); };
-            var ask = function() {
-                Swal.fire({
-                    title: confirmTitle,
-                    text: confirmText,
-                    icon: 'question',
-                    showCancelButton: true,
-                    confirmButtonColor: confirmBtn,
-                    cancelButtonColor: '#64748b',
-                    confirmButtonText: confirmBtn === '#059669' ? 'Ya, Tarik Sesuai Rencana' : 'Ya, Tarik Luar Rencana',
-                    cancelButtonText: 'Batal',
-                    reverseButtons: true
-                }).then((result) => { if (result.isConfirmed) go(false); });
-            };
-            if (tgl === '' || id === '') { ask(); return; }
-            fetch('page/realisasi/check_pull.php?tgl=' + encodeURIComponent(tgl) + '&tgl2=' + encodeURIComponent(tarikNextDay(tgl)))
-                .then((r) => r.json())
-                .then((j) => {
-                    if (j && j.ok && j.fresh) {
-                        Swal.fire({
-                            title: 'Data Masih Segar',
-                            text: 'Tanggal ' + tgl + ' sudah ditarik ' + (j.age_min === 0 ? 'baru saja' : j.age_min + ' mnt lalu') + '. Pakai data lokal (cepat) atau tarik ulang dari mesin?',
-                            icon: 'info',
-                            showDenyButton: true,
-                            showCancelButton: true,
-                            confirmButtonText: 'Pakai Data Lokal',
-                            denyButtonText: 'Tarik Ulang',
-                            cancelButtonText: 'Batal',
-                            confirmButtonColor: '#2563eb',
-                            denyButtonColor: '#f59e0b'
-                        }).then((res) => {
-                            if (res.isConfirmed) go(true);
-                            else if (res.isDenied) go(false);
-                        });
-                    } else { ask(); }
-                })
-                .catch(() => ask());
+            Swal.fire({
+                title: confirmTitle,
+                text: confirmText,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: confirmBtn,
+                cancelButtonColor: '#64748b',
+                confirmButtonText: 'Ya, Tarik Data',
+                cancelButtonText: 'Batal',
+                reverseButtons: true
+            }).then((result) => { if (result.isConfirmed) tarikRun(id, mode, false, tgl); });
         }
         // SweetAlert Cleanup (Sync) Confirmation
         $('#btn-cleanup').on('click', function() {
-            submitCleanup(this, 'tdr', 'Konfirmasi', 'Tarik data mesin dan proses HANYA tap luar rencana? (Baris rencana tidak disentuh)', '#f59e0b');
-        });
-
-        // Tarik Rencana: tarik mesin + sinkron baris rencana saja (tanpa tap tak-terdaftar, lebih cepat)
-        $('#btn-cleanup-rencana').on('click', function() {
-            submitCleanup(this, 'rencana', 'Konfirmasi', 'Tarik data mesin dan sinkron HANYA baris rencana? (Tap tak-terdaftar dilewati)', '#059669');
+            submitCleanup(this, 'semua', 'Konfirmasi', 'Tarik data dari mesin dan sinkron semuanya?', '#f59e0b');
         });
 
         // (Simpan Semua dihapus dari UI; simpan keterangan + hitung denda tetap bisa via POST langsung bila perlu)

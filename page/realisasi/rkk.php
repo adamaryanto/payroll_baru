@@ -63,7 +63,7 @@ $tampil = $koneksi->query($query);
                         <tr class="hover:bg-gray-50 transition-colors">
                             <td data-label="No" class="py-3 px-3 md:text-center text-[15px] text-gray-700 font-medium align-middle"><?= $no++ ?></td>
                             <td data-label="Tanggal" class="py-3 px-3 text-[15px] font-medium text-gray-900 align-middle whitespace-nowrap"><?= htmlspecialchars($data['tgl_rkk']) ?></td>
-                            <td data-label="Tgl Input" class="py-3 px-3 text-[15px] text-gray-700 align-middle whitespace-nowrap"><?= htmlspecialchars($data['detail_rkk']) ?></td>
+                            <td data-label="Tgl Input" class="py-3 px-3 text-[15px] text-gray-700 align-middle whitespace-nowrap"><?= !empty($data['detail_rkk']) ? date('d-m-Y H:i', strtotime($data['detail_rkk'])) : '-' ?></td>
                             <td data-label="Jam Kerja" class="py-3 px-3 md:text-center text-[15px] font-bold text-indigo-600 align-middle"><?= htmlspecialchars($data['jam_kerja']) ?></td>
                             <td data-label="Jml Karyawan" class="py-3 px-3 md:text-center align-middle">
                                 <span class="px-2 py-1 rounded bg-blue-100 text-blue-800 text-[13px] font-bold"><?= $data['jml'] ?> Orang</span>

@@ -173,7 +173,7 @@ if (!function_exists('calculate_actual_hours')) {
                         <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle text-center w-[50px]">No</th>
                         <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">No Absen</th>
                         <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Nama Karyawan</th>
-                        <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Departemen</th>
+                        <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Bagian</th>
                         <th rowspan="2" class="py-3 px-3 text-xs font-bold text-gray-500 uppercase align-middle">Nama Shift</th>
                         <th colspan="3" class="py-2 px-3 text-xs font-bold text-green-800 uppercase align-middle text-center bg-green-50">Minggu Ini</th>
                         <th colspan="3" class="py-2 px-3 text-xs font-bold text-blue-800 uppercase align-middle text-center bg-blue-50">Bulan Ini</th>
@@ -199,7 +199,7 @@ if (!function_exists('calculate_actual_hours')) {
                                              FROM ms_karyawan k
                                              JOIN tb_jadwal j ON k.id_jadwal = j.id_jadwal
                                              LEFT JOIN ms_departmen d ON k.id_departmen = d.id_departmen
-                                             WHERE j.keterangan LIKE '%FLEXI%' $whereClause
+                                             WHERE (j.keterangan LIKE '%FLEXI%' OR j.keterangan LIKE '%FLEKSI%') $whereClause
                                              ORDER BY k.nama_karyawan ASC");
 
                     if ($q_emp->num_rows == 0) {

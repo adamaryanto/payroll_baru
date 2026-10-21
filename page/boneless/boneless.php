@@ -1,4 +1,5 @@
 <?php
+include_once __DIR__ . '/mobil_lib.php';
 $tgl_filter = $_GET['tgl'] ?? '';
 $where_tgl = $tgl_filter ? " WHERE A.tgl = '".$koneksi->real_escape_string($tgl_filter)."' " : "";
 
@@ -48,8 +49,8 @@ $view_param = isset($_GET['view']) ? '&view=1' : '';
                         <?php
                         $no = 1;
                         while ($data = $tampil->fetch_assoc()) :
-                            $harga_master = $data['biaya_mobil'] ?? 0;
-                            $total_biaya_mobil = $data['jumlah_mobil'] * $harga_master;
+                            // Total mobil = Σ harga truck yg dicentang (fallback jumlah × tarif master utk data lama)
+                            $total_biaya_mobil = function_exists('boneless_mobil_total') ? boneless_mobil_total($koneksi, $data['id_boneless'], $data['jumlah_mobil']) : ($data['jumlah_mobil'] * ($data['biaya_mobil'] ?? 0));
                             $grand_total_all = $data['total_item'] + $total_biaya_mobil;
                             $biaya_per_mobil = ($data['jumlah_mobil'] > 0) ? ($grand_total_all / $data['jumlah_mobil']) : 0;
                         ?>

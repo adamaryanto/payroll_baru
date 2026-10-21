@@ -56,6 +56,7 @@ $IP = $selected_device['ip_mesin'] ?? '';
 $Key = $selected_device['comm_key'] ?? "0";
 $port = $selected_device['port'] ?? '';
 $namamesin = $selected_device['nama_mesin'] ?? '';
+$did_pull = (int)($selected_device['id_mesin'] ?? 0);
 
 // Pre-connection status check to selected machine (for legacy display)
 $isConnected = false;
@@ -773,7 +774,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Tanggal</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">No Absen</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Nama Karyawan</th>
-									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Departemen</th>
+									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Bagian</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Sub Bagian</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">OS/DHK</th>
 									<th class="py-3 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle">Golongan</th>
@@ -892,7 +893,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 													if($diff_min >=0 && $diff_min <= 10) continue;
 												}
 												$data_esc = mysqli_real_escape_string($koneksi, $data_raw);
-												$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime')";
+												$insert_values[] = "('$data_esc','$PIN','$date_only','$Verified','$Status','$DateTime','$did_pull')";
 												$existing_logs[$key] = true;
 												$last_time_map[$mk] = $new_ts;
 											}
@@ -902,7 +903,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 									if (!empty($insert_values)) {
 										$chunks = array_chunk($insert_values, 100);
 										foreach ($chunks as $chunk) {
-											$sql = "INSERT INTO tb_record (data,userid,tgl,verifikasi,status,detail_waktu) VALUES " . implode(", ", $chunk);
+											$sql = "INSERT INTO tb_record (data,userid,tgl,verifikasi,status,detail_waktu,source_device_id) VALUES " . implode(", ", $chunk);
 											$koneksi->query($sql);
 										}
 									}
@@ -1195,7 +1196,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 									
 									$use_assigned = $use_roster;
 									if (!$use_roster && $assigned_shift) {
-										if (strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false) {
+										if (strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEXI') !== false || strpos(strtoupper($assigned_shift['keterangan'] ?? ''), 'FLEKSI') !== false) {
 											$use_assigned = true;
 										} else {
 											if (!empty($masuk) && $masuk != '00:00' && $masuk != '00:00:00') {
@@ -1229,7 +1230,7 @@ if (isset($_POST['ganti_batal']) && !empty($_POST['ganti_tgl']) && isset($_POST[
 									$expected_hours = 7;
 									
 									if ($shift) {
-										$is_flexible = (strpos(strtoupper($shift['keterangan'] ?? ''), 'FLEXI') !== false);
+										$is_flexible = (strpos(strtoupper($shift['keterangan'] ?? ''), 'FLEXI') !== false || strpos(strtoupper($shift['keterangan'] ?? ''), 'FLEKSI') !== false);
 										if ($is_flexible) {
 											if (preg_match('/(\d+)\s*JAM/i', $shift['keterangan'], $matches)) {
 												$expected_hours = (int)$matches[1];

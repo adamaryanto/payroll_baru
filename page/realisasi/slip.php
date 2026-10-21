@@ -156,7 +156,7 @@ if (!function_exists('rupiah')) {
                             if ($result && $result->num_rows > 0) {
                                 while ($row = $result->fetch_assoc()) {
                                     $shift_ket = $row['shift_ket'] ?? '';
-                                    $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+                                    $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false || strpos(strtoupper($shift_ket), 'FLEKSI') !== false);
 
                                     $isLate = (!$is_flexible && !empty($row['ra_masuk']) && $row['ra_masuk'] != '00:00:00' && !empty($row['jam_masuk']) && $row['jam_masuk'] != '00:00:00' && strtotime($row['ra_masuk']) > strtotime($row['jam_masuk']));
                                     $isLateBreak = (!$is_flexible && !empty($row['ra_istirahat_masuk']) && $row['ra_istirahat_masuk'] != '00:00:00' && !empty($row['istirahat_masuk']) && $row['istirahat_masuk'] != '00:00:00' && strtotime($row['ra_istirahat_masuk']) > strtotime($row['istirahat_masuk']));

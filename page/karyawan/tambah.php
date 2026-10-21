@@ -25,7 +25,7 @@ if (isset($_POST['simpan'])) {
     $nama = $koneksi->real_escape_string($_POST['tnama']);
     $noabsen = $koneksi->real_escape_string($_POST['tnoabsen']);
     $departmen = !empty($_POST['tdepartmen']) ? intval($_POST['tdepartmen']) : 1;
-    $subdept = !empty($_POST['tsubdept']) ? intval($_POST['tsubdept']) : 1;
+    $subdept = 0;
     $jabatan = !empty($_POST['tjabatan']) ? intval($_POST['tjabatan']) : 1;
     $os = !empty($_POST['tos']) ? intval($_POST['tos']) : 1;
     $golongan = !empty($_POST['tgolongan']) ? intval($_POST['tgolongan']) : 1;
@@ -173,7 +173,7 @@ if (isset($_POST['simpan'])) {
                 
                 <div class="mb-8">
                     <h4 class="text-sm font-bold text-indigo-600 uppercase tracking-wider mb-4 flex items-center">
-                        <i class="fas fa-user-circle mr-2 text-lg"></i> Informasi Pribadi & Jabatan
+                        <i class="fas fa-user-circle mr-2 text-lg"></i> Informasi Pribadi & Posisi
                     </h4>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-6 bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
                         
@@ -203,10 +203,10 @@ if (isset($_POST['simpan'])) {
                         </div>
 
                         <div class="form-group">
-                            <label class="block text-sm font-semibold text-gray-700 mb-2">Departemen</label>
-                            <select name="tdepartmen" class="w-full select2-manage px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" data-placeholder="- Pilih Departemen -" data-delete-route="bagian">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Bagian</label>
+                            <select name="tdepartmen" class="w-full select2-manage px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" data-placeholder="- Pilih Bagian -" data-delete-route="bagian">
                                 <option value=""></option>
-                                <option value="add_new" class="font-bold text-indigo-600">+ Tambah Departemen Baru...</option>
+                                <option value="add_new" class="font-bold text-indigo-600">+ Tambah Bagian Baru...</option>
                                 <?php
                                 $q_dept = $koneksi->query("SELECT * FROM ms_departmen");
                                 while($d = $q_dept->fetch_assoc()) {
@@ -217,24 +217,10 @@ if (isset($_POST['simpan'])) {
                         </div>
 
                         <div class="form-group">
-                            <label class="block text-sm font-semibold text-gray-700 mb-2">Sub Departemen</label>
-                            <select name="tsubdept" class="w-full select2-manage px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" data-placeholder="- Pilih Sub Bagian -" data-delete-route="subbagian">
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Posisi</label>
+                            <select name="tjabatan" class="w-full select2-manage px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" data-placeholder="- Pilih Posisi -" data-delete-route="jabatan">
                                 <option value=""></option>
-                                <option value="add_new" class="font-bold text-indigo-600">+ Tambah Sub Bagian Baru...</option>
-                                <?php
-                                $q_sub = $koneksi->query("SELECT * FROM ms_sub_department");
-                                while($d = $q_sub->fetch_assoc()) {
-                                    echo "<option value='".$d['id_sub_department']."'>".$d['nama_sub_department']."</option>";
-                                }
-                                ?>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label class="block text-sm font-semibold text-gray-700 mb-2">Jabatan</label>
-                            <select name="tjabatan" class="w-full select2-manage px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none" data-placeholder="- Pilih Jabatan -" data-delete-route="jabatan">
-                                <option value=""></option>
-                                <option value="add_new" class="font-bold text-indigo-600">+ Tambah Jabatan Baru...</option>
+                                <option value="add_new" class="font-bold text-indigo-600">+ Tambah Posisi Baru...</option>
                                 <?php
                                 $q_jab = $koneksi->query("SELECT * FROM ms_jabatan");
                                 while($d = $q_jab->fetch_assoc()) {
@@ -421,7 +407,7 @@ $(document).ready(function() {
     function toggleTargetFields() {
         var selectVal = $('select[name="tjadwal"]').val();
         var selectedText = $('select[name="tjadwal"] option[value="' + selectVal + '"]').text() || '';
-        if (selectedText.toUpperCase().indexOf('FLEXI') !== -1) {
+        if (selectedText.toUpperCase().indexOf('FLEXI') !== -1 || selectedText.toUpperCase().indexOf('FLEKSI') !== -1) {
             $('.target-fields').show();
         } else {
             $('.target-fields').hide();

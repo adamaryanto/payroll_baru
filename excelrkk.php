@@ -43,14 +43,6 @@ function ex_num($v) {
 function ex_cell($v, $style, $align = 'center') {
     return "<td align='$align' style='$style'>$v</td>";
 }
-// JAM KERJA ala file acuan: fraksi hari dari jam masuk shift (08:00 -> 0.333..., 06:00 -> 0.25)
-function ex_frac($t) {
-    $t = trim((string)$t);
-    if (!preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $t, $m)) return '';
-    $sec = ((int)$m[1]) * 3600 + ((int)$m[2]) * 60 + (isset($m[3]) ? (int)$m[3] : 0);
-    if ($sec <= 0 || $sec >= 86400) return '';
-    return ex_num($sec / 86400);
-}
 
 // Data Boneless (urut input, seperti contoh)
 $queryBoneless = $koneksi->query("
@@ -117,23 +109,17 @@ foreach ($data_per_bagian as $nama_grup => $karyawans):
     $erow++; // bar ungu (nama grup borongan)
 ?>
     <tr><td colspan="15" style="<?= $fB ?> <?= $thC ?> <?= $cSection ?><?= $bd ?>"><?= $nama_grup ?></td></tr>
-    <?php $erow++; // header kolom absensi (15 kolom persis acuan) ?>
+    <?php $erow++; // header kolom absensi (15 kolom persis acuan, satu baris) ?>
     <tr>
         <?php
         foreach (['No','NAMA SESUAI KTP','PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','ISTIRAHAT','JAM PULANG','HASIL KERJA','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'] as $h) echo "<th style='$hdr_gray'>$h</th>";
-        ?>
-    </tr>
-    <?php $erow++; // sub-header (ISTIRAHAT -> MASUK, persis acuan) ?>
-    <tr>
-        <?php
-        foreach (['','', 'PARAF PEKERJA','OS/DHK','GOLONGAN','POSISI','JAM KERJA','JAM MASUK','MASUK','JAM PULANG','HASIL KERJA','UPAH','POTONGAN','LEMBUR','UPAH DIBAYAR'] as $h) echo "<th style='$hdr_gray'>$h</th>";
         ?>
     </tr>
     <?php $no_rkk = 1; ?>
     <?php foreach ($karyawans as $k):
         $erow++;
         $upah = (float)($k['upah'] ?? 0);
-        $upah_disp = ($upah != 0) ? ex_num($upah) : '';
+        $upah_disp = ($upah != 0) ? ('Rp ' . number_format($upah, 0, ',', '.')) : '';
     ?>
     <tr style="<?= $fB ?>">
         <?= ex_cell($no_rkk++, "$cWhite$bd") ?>
@@ -142,15 +128,15 @@ foreach ($data_per_bagian as $nama_grup => $karyawans):
         <?= ex_cell($k['label_os'] ?? '', "$cWhite$bd") ?>
         <?= ex_cell($k['label_gol'] ?? '', "$cWhite$bd") ?>
         <td align="left" style="<?= $cWhite ?><?= $bd ?>"><?= $k['posisi'] ?? '' ?></td>
-        <?= ex_cell(ex_frac($k['j_masuk'] ?? ''), "$cWhite$bd") ?>
+        <?= ex_cell(substr(trim((string)($k['j_masuk'] ?? '')), 0, 5), "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
-        <?= ex_cell($upah_disp, "$cWhite$bd") ?>
+        <?= ex_cell($upah_disp, "$cWhite$bd", 'right') ?>
         <?= ex_cell('', "$cWhite$bd") ?>
         <?= ex_cell('', "$cWhite$bd") ?>
-        <?= ex_cell($upah_disp, "$cWhite$bd") ?>
+        <?= ex_cell($upah_disp, "$cWhite$bd", 'right') ?>
     </tr>
     <?php endforeach; ?>
 <?php endforeach; ?>

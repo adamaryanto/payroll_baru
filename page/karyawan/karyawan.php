@@ -104,7 +104,7 @@ if (isset($_POST['tarik_mesin'])) {
             preg_match('/<PIN>(.*?)<\/PIN>/',$row,$mPin);
             preg_match('/<Name>(.*?)<\/Name>/',$row,$mName);
             $p=trim($mPin[1]??''); $n=trim($mName[1]??'');
-            if($p!=='' && !isset($all_pins[$p])) $all_pins[$p]=$n!==''?$n:"User PIN{$p}";
+            if($p!=='' && $n!=='' && !isset($all_pins[$p])) $all_pins[$p]=$n;
         }
     }
     $tarik_results=['created'=>[],'skipped'=>[],'duplikat'=>[],'total_di_mesin'=>count($all_pins)];
@@ -679,7 +679,8 @@ if (isset($_POST['bulk_copy_selected'])) {
                         $tampil = $koneksi->query("SELECT k.*, o.OS_DHK as label_os, g.golongan as label_gol 
                                                  FROM ms_karyawan k
                                                  LEFT JOIN ms_os_dhk o ON k.id_os_dhk = o.id_os_dhk
-                                                 LEFT JOIN ms_golongan g ON k.id_golongan = g.id_golongan");
+                                                 LEFT JOIN ms_golongan g ON k.id_golongan = g.id_golongan
+                                                 WHERE k.nama_karyawan NOT LIKE 'User PIN%'");
                         while ($datakaryawan = $tampil->fetch_assoc()) {
                             $status_class = ($datakaryawan['status_karyawan'] == 'Aktif') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
                         ?>

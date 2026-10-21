@@ -178,7 +178,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
 
               <?php if (strtolower($role) != 'owner') { ?>
               <li class="nav-item">
-                <a href="#" class="nav-link">
+                <a href="javascript:void(0)" class="nav-link" onclick="var li=this.parentElement; var sub=li.querySelector('.nav-treeview'); if(sub){ var open=li.classList.toggle('menu-open'); sub.style.display=open?'block':'none'; var ic=this.querySelector('.right'); if(ic){ ic.classList.toggle('fa-angle-left',!open); ic.classList.toggle('fa-angle-down',open);} } return false;">
                   <i class="nav-icon fas fa-cogs"></i>
                   <p>MASTER <i class="right fas fa-angle-left"></i></p>
                 </a>
@@ -218,7 +218,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
               </li>
 
               <li class="nav-item">
-                <a href="#" class="nav-link">
+                <a href="javascript:void(0)" class="nav-link" onclick="var li=this.parentElement; var sub=li.querySelector('.nav-treeview'); if(sub){ var open=li.classList.toggle('menu-open'); sub.style.display=open?'block':'none'; var ic=this.querySelector('.right'); if(ic){ ic.classList.toggle('fa-angle-left',!open); ic.classList.toggle('fa-angle-down',open);} } return false;">
                   <i class="nav-icon fas fa-clipboard-list"></i>
                   <p>SIAC <i class="right fas fa-angle-left"></i></p>
                 </a>
@@ -238,9 +238,10 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
               <?php } ?>
               <?php } ?>
 
-              <li class="nav-item">
+              <!-- Menu Rekap Jam Flexi DINONAKTIFKAN (target flexi dihapus); file page/rekap_flexi/ tetap ada -->
+              <?php /*<li class="nav-item">
                 <a href="?page=rekap_flexi" class="nav-link"><i class="nav-icon fas fa-hourglass-half text-primary"></i><p>Rekap Jam Flexi</p></a>
-              </li>
+              </li>*/ ?>
 
             </ul>
           </nav>
@@ -391,6 +392,25 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
 
       <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
       <script src="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/js/adminlte.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.nav-sidebar .nav-item > .nav-link').forEach(function (link) {
+      var sub = link.parentElement.querySelector('.nav-treeview');
+      if (!sub) return;
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        var li = link.parentElement;
+        var open = li.classList.toggle('menu-open');
+        sub.style.display = open ? 'block' : 'none';
+        var icon = link.querySelector('.right');
+        if (icon) {
+          icon.classList.toggle('fa-angle-left', !open);
+          icon.classList.toggle('fa-angle-down', open);
+        }
+      });
+    });
+  });
+</script>
       <script src="assets/bower_components/jquery-ui/jquery-ui.min.js"></script>
       <script>
         $.widget.bridge('uibutton', $.ui.button);

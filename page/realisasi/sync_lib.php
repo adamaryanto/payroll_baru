@@ -1,5 +1,45 @@
 <?php
 // Library sync realisasi (dipakai kelola.php & tarik_ajax.php). Guarded agar aman double-include.
+if (!function_exists('is_flexible_shift')) {
+    // Deteksi shift fleksibel dua ejaan: Flexible (X) & Fleksibel/Fleksi (KS).
+    // Seluruh kode yg tadinya cek 'FLEXI' saja gagal mengenali "Fleksibel".
+    function is_flexible_shift($s) {
+        $u = strtoupper(trim((string)($s ?? '')));
+        return (strpos($u, 'FLEXI') !== false || strpos($u, 'FLEKSI') !== false);
+    }
+}
+if (!function_exists('late_minutes')) {
+    // Menit keterlambatan (negatif = lebih awal), normalisasi lintas-midnight persis tarik-data.
+    function late_minutes($actual, $expected) {
+        if (empty($actual) || empty($expected) || $actual == '00:00:00' || $expected == '00:00:00' || $expected == 'Bebas') return 0;
+        $diff = (strtotime($actual) - strtotime($expected) + 86400) % 86400;
+        if ($diff > 43200) $diff -= 86400;
+        return (int)($diff / 60);
+    }
+    // Menit kepulangan-awal (positif = pulang lebih cepat), normalisasi sama.
+    function early_minutes($actual, $expected) {
+        if (empty($actual) || empty($expected) || $actual == '00:00:00' || $expected == '00:00:00' || $expected == 'Bebas') return 0;
+        $diff = (strtotime($expected) - strtotime($actual) + 86400) % 86400;
+        if ($diff > 43200) $diff -= 86400;
+        return (int)($diff / 60);
+    }
+}
+if (!function_exists('load_toleransi')) {
+    // Ambil batas toleransi (menit) dari tb_toleransi; default ikut tarik-data (10/5/5/10).
+    function load_toleransi($koneksi) {
+        try {
+            $q = $koneksi->query("SELECT * FROM tb_toleransi LIMIT 1");
+            $r = $q ? $q->fetch_assoc() : [];
+        } catch (Throwable $e) { $r = []; }
+        if (!is_array($r)) $r = [];
+        return [
+            'masuk' => (int)($r['toleransi_masuk'] ?? 10),
+            'pulang' => (int)($r['toleransi_pulang'] ?? 5),
+            'ist_keluar' => (int)($r['toleransi_istirahat_keluar'] ?? 5),
+            'ist_masuk' => (int)($r['toleransi_istirahat_masuk'] ?? 10),
+        ];
+    }
+}
 if (!function_exists('is_time_late')) {
     function is_time_late($actual, $expected) {
         if (empty($actual) || empty($expected) || $actual == '00:00:00' || $expected == '00:00:00' || $expected == 'Bebas') return false;
@@ -51,6 +91,8 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
     $gd_istirahat_telat = $denda['denda_istirahat_masuk'] ?? 0;
     $gd_pulang = $denda['denda_pulang'] ?? 0;
     $gd_tidak_lengkap = $denda['denda_tidak_lengkap'] ?? 0;
+    // Toleransi (menit) — SAMA kayak halaman tarik data
+    $tol = function_exists('load_toleransi') ? load_toleransi($koneksi) : ['masuk' => 10, 'pulang' => 5, 'ist_keluar' => 5, 'ist_masuk' => 10];
 
     // ID grup TIDAK DALAM RENCANA (baris tap tanpa master): jangan ditimpa sync
     $gid_tdr = 0;
@@ -58,7 +100,7 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
     if ($qg0 && ($gg0 = $qg0->fetch_assoc())) $gid_tdr = (int)$gg0['id_grup'];
 
     // 2. Get all employees in this realization (using LEFT JOIN to include manual employees and RKK fallback)
-    $query_details = $koneksi->query("SELECT RD.id_realisasi_detail, RD.id_grup AS grup_id, K.no_absen, K.upah as upah_master, RD.id_jadwal as detail_jadwal, RKKD.id_jadwal as rkk_jadwal, RD.status_realisasi_detail, 
+    $query_details = $koneksi->query("SELECT RD.id_realisasi_detail, RD.id_karyawan, RD.id_grup AS grup_id, K.no_absen, K.upah as upah_master, RD.id_jadwal as detail_jadwal, RKKD.id_jadwal as rkk_jadwal, RD.status_realisasi_detail, 
                                       COALESCE(J.keterangan, JR.keterangan) as shift_ket,
                                       COALESCE(J.jam_masuk, JR.jam_masuk) as s_masuk, 
                                       COALESCE(J.jam_keluar, JR.jam_keluar) as s_keluar, 
@@ -77,11 +119,12 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
         // Baris TIDAK DALAM RENCANA dilewati (datanya dari tap langsung, jangan ditimpa jadi kosong)
         if ($gid_tdr > 0 && (int)($row['grup_id'] ?? -1) === $gid_tdr) continue;
         $no_absen = $row['no_absen'];
+        $idk_row = (int)($row['id_karyawan'] ?? 0);
         $status_rd = $row['status_realisasi_detail'];
         
         // Include manual employees (Previously skipped)
         $shift_ket = $row['shift_ket'] ?? '';
-        $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+        $is_flexible = is_flexible_shift($shift_ket);
 
         $s_masuk = $row['s_masuk'] ?? '00:00:00';
         $s_keluar = $row['s_keluar'] ?? '00:00:00';
@@ -109,6 +152,25 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
                 }
             }
 
+            // PIN lain milik karyawan yang sama di mesin berbeda (mapping nama per mesin)
+            if ($idk_row > 0 && function_exists('karyawan_pins_by_id')) {
+                $extra_pins = karyawan_pins_by_id($koneksi)[$idk_row] ?? [];
+                $tgl_next2 = date('Y-m-d', strtotime('+1 day', strtotime($tgl_real)));
+                $tgl_e = $koneksi->real_escape_string($tgl_real);
+                $tgl_e2 = $koneksi->real_escape_string($tgl_next2);
+                foreach ($extra_pins as $ep) {
+                    $did_ep = (int)($ep[0] ?? 0);
+                    $pin_ep = trim((string)($ep[1] ?? ''));
+                    if ($pin_ep === '' || $pin_ep === (string)$no_absen) continue;
+                    $pin_e = $koneksi->real_escape_string($pin_ep);
+                    $q_ep = $koneksi->query("SELECT * FROM tb_record WHERE source_device_id = '$did_ep' AND TRIM(userid) = '$pin_e' AND tgl IN ('$tgl_e','$tgl_e2') ORDER BY tgl ASC, detail_waktu ASC");
+                    while ($q_ep && ($r_ep = $q_ep->fetch_assoc())) $raw_logs[] = $r_ep;
+                }
+                if (!empty($raw_logs)) usort($raw_logs, function($a, $b) {
+                    return strcmp(($a['tgl'] ?? '') . ' ' . ($a['detail_waktu'] ?? ''), ($b['tgl'] ?? '') . ' ' . ($b['detail_waktu'] ?? ''));
+                });
+            }
+
             $log_masuk = null;
             $log_keluar = null;
             $log_ist_keluar = null;
@@ -134,7 +196,9 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
             
             if ($log_masuk) {
                 $in_timestamp = strtotime($tgl_real . ' ' . $log_masuk);
-                
+                // Tap <10 menit dari masuk = dobel/absen ganda, abaikan (sama kayak dedup tarik data)
+                $gap10 = 10 / 60;
+
                 // Find check-out (status 1) within 16 hours (check backwards for the latest valid checkout)
                 for ($i = count($raw_logs) - 1; $i >= 0; $i--) {
                     $l = $raw_logs[$i];
@@ -142,13 +206,13 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
                         $curr_time = substr($l['detail_waktu'], 11, 8);
                         $curr_timestamp = strtotime($l['tgl'] . ' ' . $curr_time);
                         $diff_hours = ($curr_timestamp - $in_timestamp) / 3600;
-                        if ($diff_hours > 0 && $diff_hours <= 16) {
+                        if ($diff_hours > $gap10 && $diff_hours <= 16) {
                             $log_keluar = $curr_time;
                             break;
                         }
                     }
                 }
-                
+
                 // Fallback: if no check-out with status 1 is found, use the latest scan within 16 hours of check-in
                 if (!$log_keluar) {
                     for ($i = count($raw_logs) - 1; $i >= 0; $i--) {
@@ -159,19 +223,19 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
                         }
                         $curr_timestamp = strtotime($l['tgl'] . ' ' . $curr_time);
                         $diff_hours = ($curr_timestamp - $in_timestamp) / 3600;
-                        if ($diff_hours > 0 && $diff_hours <= 16) {
+                        if ($diff_hours > $gap10 && $diff_hours <= 16) {
                             $log_keluar = $curr_time;
                             break;
                         }
                     }
                 }
-                
+
                 // Find break-out (status 2) and break-in (status 3) within 16 hours
                 foreach ($raw_logs as $l) {
                     $curr_time = substr($l['detail_waktu'], 11, 8);
                     $curr_timestamp = strtotime($l['tgl'] . ' ' . $curr_time);
                     $diff_hours = ($curr_timestamp - $in_timestamp) / 3600;
-                    if ($diff_hours > 0 && $diff_hours <= 16) {
+                    if ($diff_hours > $gap10 && $diff_hours <= 16) {
                         if ($l['status'] == 2 && !$log_ist_keluar) {
                             $log_ist_keluar = $curr_time;
                         }
@@ -262,21 +326,21 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
             $is_total_missing = true;
         }
 
-        if (!$is_total_missing) {
-            // Late Entrance
-            if ($has_masuk && is_time_late($logs['log_masuk'], $s_masuk)) {
+        if (!$is_total_missing && !$is_flexible) {
+            // Late Entrance (lewat toleransi; flexi murni bebas)
+            if ($has_masuk && late_minutes($logs['log_masuk'], $s_masuk) > $tol['masuk']) {
                 $p_telat = $gd_masuk;
             }
-            // Early Departure
-            if ($has_keluar && is_time_early($logs['log_keluar'], $s_keluar)) {
+            // Early Departure (lewat toleransi)
+            if ($has_keluar && early_minutes($logs['log_keluar'], $s_keluar) > $tol['pulang']) {
                 $p_pulang = $gd_pulang;
             }
-            // Early Break
-            if ($has_ist_keluar && is_time_early($logs['log_ist_keluar'], $s_ist_keluar)) {
+            // Early Break (lewat toleransi)
+            if ($has_ist_keluar && early_minutes($logs['log_ist_keluar'], $s_ist_keluar) > $tol['ist_keluar']) {
                 $p_ist_awal = $gd_istirahat_awal;
             }
-            // Late Break Return
-            if ($has_ist_masuk && is_time_late($logs['log_ist_masuk'], $s_ist_masuk)) {
+            // Late Break Return (lewat toleransi)
+            if ($has_ist_masuk && late_minutes($logs['log_ist_masuk'], $s_ist_masuk) > $tol['ist_masuk']) {
                 $p_ist_telat = $gd_istirahat_telat;
             }
 

@@ -2,6 +2,7 @@
 $ref = $_GET['ref'] ?? 'boneless';
 $view_param = isset($_GET['view']) ? '&view=1' : '';
 $simpan = @$_POST['simpan'];
+include_once __DIR__ . '/mobil_lib.php';
 
 // Ambil biaya per mobil dari database
 $ambil_biaya = $koneksi->query("SELECT id_biayamobil, biaya_mobil FROM tb_biayamobil LIMIT 1");
@@ -34,10 +35,20 @@ if ($ckSatH && $ckSatH->num_rows == 0) {
 
 if ($simpan) {
     $tgl = @$_POST['tgl'];
-    $jumlah_mobil = @$_POST['jumlah_mobil'];
     $keterangan = @$_POST['keterangan'];
     $id_rkk = @$_POST['id_rkk'];
     $id_bm = @$_POST['id_biayamobil'];
+
+    // Truck yg dicentang (snapshot nama+harga master saat simpan)
+    $fleet_map = [];
+    foreach (boneless_mobil_fleet($koneksi) as $fm) $fleet_map[(int)$fm['id_mobil']] = $fm;
+    $trucks = [];
+    foreach ((array)($_POST['mob_pick'] ?? []) as $mid_raw) {
+        $mid = (int)$mid_raw;
+        if ($mid <= 0 || !isset($fleet_map[$mid])) continue;
+        $trucks[] = $fleet_map[$mid];
+    }
+    $jumlah_mobil = count($trucks);
 
     // Insert Header
     $sql_header = $koneksi->query("INSERT INTO tb_boneless (id_rkk, id_biayamobil, tgl, jumlah_mobil, keterangan, tgl_updt) 
@@ -45,6 +56,12 @@ if ($simpan) {
     $id_header = $koneksi->insert_id;
 
     if ($id_header) {
+        // Simpan link truck (snapshot nama+harga)
+        foreach ($trucks as $tr) {
+            $nm = $koneksi->real_escape_string($tr['nama']);
+            $hg = (float)($tr['harga'] ?? 0);
+            $koneksi->query("INSERT INTO tb_boneless_mobil (id_boneless, id_mobil, nama, harga) VALUES ('$id_header', '" . (int)$tr['id_mobil'] . "', '$nm', '$hg')");
+        }
         $nama_items = (array)($_POST['nama_item'] ?? []);
         $qtys       = (array)($_POST['qty'] ?? []);
         $hargas     = (array)($_POST['harga'] ?? []);
@@ -96,6 +113,7 @@ $default_plus = ["BORAS" => 800, "BONELESS KEVIN" => 700, "PAHA SP HOKA" => 500]
 $default_minus = ["SHILIN" => 500, "CIMORY" => 500];
 $default_satuan = ["MULYANTI", "EDAH", "YUSI HASTUTIK", "RUSDIANA", "HARNI", "CICHA MARYANA", "SITI PATONAH", "RUTINAH", "TIARA VETI FEBRIANA"];
 $default_harga_satuan = 800;
+$fleet_form = function_exists('boneless_mobil_fleet') ? boneless_mobil_fleet($koneksi) : [];
 ?>
 
 <div class="container-fluid px-2 mt-4 mb-4">
@@ -130,16 +148,35 @@ $default_harga_satuan = 800;
                                 <input type="hidden" name="tgl" id="tgl_hidden">
                             </div>
                             <div class="col-md-4 form-group">
-                                <label class="text-xs font-bold text-gray-700 uppercase mb-1">Jumlah Mobil (Potong)</label>
-                                <input type="number" name="jumlah_mobil" class="form-control h-[42px]" placeholder="0" required>
+                                <label class="text-xs font-bold text-gray-700 uppercase mb-1">Jumlah Mobil (otomatis)</label>
+                                <div class="h-[42px] flex items-center px-3 bg-amber-50 border border-amber-200 rounded-lg font-black text-amber-700 shadow-sm">
+                                    <i class="fas fa-truck mr-2"></i> <span id="mobCountBadge"><?= count($fleet_form) ?> Unit</span>
+                                </div>
+                                <input type="hidden" name="jumlah_mobil" id="jumlah_mobil_hidden" value="<?= count($fleet_form) ?>">
                             </div>
                             <div class="col-md-4 form-group">
-                                <label class="text-xs font-bold text-gray-700 uppercase mb-1">Biaya / Mobil (Lock)</label>
-                                <div class="h-[42px] flex items-center px-3 bg-gray-100 border border-gray-200 rounded-lg font-bold text-gray-600 shadow-sm">
-                                    <i class="fas fa-lock mr-2 text-gray-400"></i> Rp <?= number_format($harga_per_mobil, 0, ',', '.') ?>
-                                </div>
+                                <label class="text-xs font-bold text-gray-700 uppercase mb-1">Total Mobil (otomatis)</label>
+                                <div class="h-[42px] flex items-center px-3 bg-amber-50 border border-amber-200 rounded-lg font-black text-amber-700 shadow-sm" id="mobTotalView">Rp 0</div>
                             </div>
                         </div>
+
+                        <div class="mt-4">
+                            <label class="text-xs font-bold text-amber-700 uppercase mb-3 block"><i class="fas fa-truck mr-1"></i> Mobil yg Jalan (centang dari master)</label>
+                            <?php if (empty($fleet_form)): ?>
+                                <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">Belum ada armada. Isi dulu di <a href="?page=boneless&aksi=master" class="font-bold underline">MASTER → Mobil</a>.</div>
+                            <?php else: ?>
+                            <div id="mobCheckList" class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                <?php foreach ($fleet_form as $fm): ?>
+                                <label class="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg cursor-pointer hover:border-amber-400 text-sm font-semibold text-gray-700">
+                                    <input type="checkbox" name="mob_pick[]" value="<?= (int)$fm['id_mobil'] ?>" data-harga="<?= (float)($fm['harga'] ?? 0) ?>" class="mob-pick w-4 h-4 text-amber-600 rounded" checked>
+                                    <span><?= htmlspecialchars($fm['nama']) ?> <span class="text-gray-400 font-normal">Rp <?= number_format($fm['harga'] ?? 0, 0, ',', '.') ?></span></span>
+                                </label>
+                                <?php endforeach; ?>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <hr class="my-5 border-gray-200">
 
                         <div class="mt-4">
                             <label class="text-xs font-bold text-green-700 uppercase mb-3 block"><i class="fas fa-plus-circle mr-1"></i> Tim Tanpa Mesin Boneless</label>
@@ -331,20 +368,35 @@ $default_harga_satuan = 800;
                 }
             });
 
-            const jmlMobil = parseFloat(document.querySelector('input[name="jumlah_mobil"]').value) || 0;
+            // Total mobil = Σ harga truck yg dicentang
+            let totalMobil = 0, nMobil = 0;
+            document.querySelectorAll('.mob-pick:checked').forEach(cb => {
+                nMobil++;
+                totalMobil += parseFloat(cb.getAttribute('data-harga')) || 0;
+            });
+            const badge = document.getElementById('mobCountBadge');
+            if (badge) badge.innerText = nMobil + ' Unit';
+            const hid = document.getElementById('jumlah_mobil_hidden');
+            if (hid) hid.value = nMobil;
+            const mtv = document.getElementById('mobTotalView');
+            if (mtv) mtv.innerText = 'Rp ' + Math.round(totalMobil).toLocaleString('id-ID');
 
-            // Logika Grand Total: (Nambah - Kurang) + (Biaya Mobil)
+            // Logika Grand Total: (Nambah - Kurang) + (Total Mobil)
             const bonelessNet = totalPlus - totalMinus;
-            const grandTotal = bonelessNet + (jmlMobil * masterCost);
+            const grandTotal = bonelessNet + totalMobil;
 
             document.getElementById('summaryBonelessNet').innerText = 'Rp ' + Math.round(bonelessNet).toLocaleString('id-ID');
             document.getElementById('summaryGrandTotal').innerText = 'Rp ' + Math.round(grandTotal).toLocaleString('id-ID');
         };
 
         document.addEventListener('input', e => {
-            if (e.target.classList.contains('qty-input') || e.target.classList.contains('harga-input') || e.target.name === 'jumlah_mobil') {
+            if (e.target.classList.contains('qty-input') || e.target.classList.contains('harga-input')) {
                 calculate();
             }
+        });
+
+        document.addEventListener('change', e => {
+            if (e.target.classList.contains('mob-pick')) calculate();
         });
 
         document.addEventListener('click', e => {

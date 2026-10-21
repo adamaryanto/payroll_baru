@@ -387,8 +387,8 @@ uasort($grouped, function($ag, $bg) { $cg = strcmp($ag['date'], $bg['date']); re
                     <th width="6%" class="text-center">Tanggal</th>
                     <th width="5%" class="text-center">No. Absen</th>
                     <th width="10%">Nama Karyawan</th>
-                    <th width="8%">Departemen</th>
-                    <th width="8%">Sub Bagian</th>
+                    <th width="8%">Bagian</th>
+                    <th width="8%">Posisi</th>
                     <th width="5%" class="text-center">OS/DHK</th>
                     <th width="5%" class="text-center">Golongan</th>
                     <th width="5%" class="text-center">Jam Masuk</th>
@@ -423,10 +423,10 @@ uasort($grouped, function($ag, $bg) { $cg = strcmp($ag['date'], $bg['date']); re
                     $istirahat_masuk = $row['istirahat_masuk'];
                     $pulang = $row['pulang'];
 
-                    $empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, k.id_jadwal, d.nama_departmen, sd.nama_sub_department, o.OS_DHK as label_os, g.golongan as label_gol 
+                    $empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, k.id_jadwal, d.nama_departmen, sd.jabatan as nama_sub_department, o.OS_DHK as label_os, g.golongan as label_gol 
                                                 FROM ms_karyawan k 
                                                 LEFT JOIN ms_departmen d ON k.id_departmen = d.id_departmen 
-                                                LEFT JOIN ms_sub_department sd ON k.id_sub_department = sd.id_sub_department
+                                                LEFT JOIN ms_jabatan sd ON k.id_jabatan = sd.id_jabatan
                                                 LEFT JOIN ms_os_dhk o ON k.id_os_dhk = o.id_os_dhk
                                                 LEFT JOIN ms_golongan g ON k.id_golongan = g.id_golongan
                                                 WHERE k.no_absen = '$PIN' LIMIT 1");

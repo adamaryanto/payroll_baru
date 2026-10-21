@@ -283,13 +283,13 @@ foreach ($grouped as $key => $row) {
 	$empQuery = $koneksi->query("SELECT k.nama_karyawan, k.upah, k.id_departmen, d.nama_departmen,
 									   k.id_os_dhk, o.OS_DHK as label_os,
 									   k.id_golongan, g.golongan as label_gol,
-									   k.id_sub_department, s.nama_sub_department as posisi,
+									   k.id_jabatan, s.jabatan as posisi,
 									   k.id_jadwal
 								FROM ms_karyawan k 
 								LEFT JOIN ms_departmen d ON k.id_departmen = d.id_departmen 
 								LEFT JOIN ms_os_dhk o ON k.id_os_dhk = o.id_os_dhk
 								LEFT JOIN ms_golongan g ON k.id_golongan = g.id_golongan
-								LEFT JOIN ms_sub_department s ON k.id_sub_department = s.id_sub_department
+								LEFT JOIN ms_jabatan s ON k.id_jabatan = s.id_jabatan
 								WHERE k.no_absen = '$PIN' LIMIT 1");
 	$emp = $empQuery->fetch_assoc();
 	
@@ -361,8 +361,8 @@ ksort($grouped_by_dept);
                 <th style='background:#e5e7eb;'>TANGGAL</th>
                 <th style='background:#e5e7eb;'>NO ABSEN</th>
                 <th style='background:#e5e7eb;'>NAMA SESUAI KTP</th>
-                <th style='background:#e5e7eb;'>DEPARTEMEN</th>
-                <th style='background:#e5e7eb;'>SUB BAGIAN</th>
+                <th style='background:#e5e7eb;'>Bagian</th>
+                <th style='background:#e5e7eb;'>POSISI</th>
                 <th style='background:#e5e7eb;'>OS/DHK</th>
                 <th style='background:#e5e7eb;'>GOLONGAN</th>
                 <th style='background:#e5e7eb;'>JAM MASUK</th>

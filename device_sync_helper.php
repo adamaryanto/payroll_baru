@@ -60,17 +60,229 @@ function pull_cache_fresh($koneksi, $start_date, $end_date, $minutes = 10) {
 }
 
 /**
+ * Normalisasi nama untuk pencocokan nama mesin <-> master karyawan.
+ */
+function norm_nama_karyawan($s) {
+    $s = strtoupper(trim((string)$s));
+    $s = preg_replace('/[^A-Z0-9]+/', ' ', $s);
+    return trim(preg_replace('/\s+/', ' ', $s));
+}
+
+/**
+ * Tabel mapping PIN per mesin -> karyawan.
+ * Satu orang boleh punya PIN berbeda di tiap mesin.
+ */
+function ensure_karyawan_pin_table($koneksi) {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    @$koneksi->query("CREATE TABLE IF NOT EXISTS ms_karyawan_pin (
+        id_mesin INT NOT NULL,
+        pin VARCHAR(32) NOT NULL,
+        id_karyawan INT NOT NULL,
+        nama_mesin VARCHAR(255) DEFAULT NULL,
+        tgl_updt DATETIME DEFAULT NULL,
+        PRIMARY KEY (id_mesin, pin),
+        KEY idx_karyawan (id_karyawan)
+    ) ENGINE=InnoDB");
+}
+
+/**
+ * Ambil daftar user tiap mesin: [id_mesin][pin] = nama.
+ * Hanya mesin yang online. Dipakai sekali saat Tarik untuk mengisi mapping.
+ */
+function get_device_users_full($koneksi, $force = false) {
+    $dbname = '';
+    if ($qdb = @$koneksi->query("SELECT DATABASE() AS d")) { $rdb = $qdb->fetch_assoc(); $dbname = (string)($rdb['d'] ?? ''); }
+    $cacheFile = rtrim(sys_get_temp_dir(), '\\/') . DIRECTORY_SEPARATOR . 'payroll_devusers2_' . md5($dbname) . '.json';
+    if (!$force && is_file($cacheFile) && (time() - (int)@filemtime($cacheFile)) < 600) {
+        $cached = json_decode((string)@file_get_contents($cacheFile), true);
+        // Cache kosong (mesin offline saat itu) hanya dipakai 1 menit, lalu coba baca lagi.
+        if (is_array($cached) && isset($cached['u']) && is_array($cached['u']) && (!empty($cached['u']) || (time() - (int)@filemtime($cacheFile)) < 60)) return $cached;
+    }
+    // Simpan data lama: kalau satu mesin gagal/response terpotong, nama lama tetap dipakai.
+    $prevU = []; $prevP = [];
+    if (is_file($cacheFile)) {
+        $prev = json_decode((string)@file_get_contents($cacheFile), true);
+        if (is_array($prev)) { $prevU = is_array($prev['u'] ?? null) ? $prev['u'] : []; $prevP = is_array($prev['p2'] ?? null) ? $prev['p2'] : []; }
+    }
+    $out = []; $out2 = [];
+    if (!function_exists('get_all_devices')) return ['u' => $out, 'p2' => $out2];
+    foreach (get_all_devices($koneksi) as $device) {
+        $did = (int)($device['id_mesin'] ?? 0);
+        if ($did <= 0 || empty($device['ip_mesin'])) continue;
+        if (function_exists('test_device_connection') && !test_device_connection($device['ip_mesin'], $device['port'])) {
+            if (!empty($prevU[$did])) { $out[$did] = $prevU[$did]; $out2[$did] = $prevP[$did] ?? []; }
+            continue;
+        }
+        if (($device['protocol'] ?? 'soap') === 'zkudp') {
+            if (!function_exists('zkb_get_users')) continue;
+            $zr = zkb_get_users($device['ip_mesin'], $device['port'] ?? 4370, intval($device['comm_key'] ?? 0));
+            if (empty($zr['success'])) {
+                if (!empty($prevU[$did])) { $out[$did] = $prevU[$did]; $out2[$did] = $prevP[$did] ?? []; }
+                continue;
+            }
+            foreach (($zr['users'] ?? []) as $u) {
+                $pin = trim((string)($u['pin'] ?? ''));
+                $nm = trim((string)($u['nama'] ?? ''));
+                $p2 = trim((string)($u['pin2'] ?? ''));
+                if ($pin !== '' && $nm !== '') { $out[$did][$pin] = $nm; $out2[$did][$pin] = $p2; }
+            }
+            continue;
+        }
+        if (!function_exists('send_soap_request')) continue;
+        $comm_key = $device['comm_key'] ?? 0;
+        $soap_users = "<GetAllUserInfo><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></GetAllUserInfo>";
+        // Daftar user bisa besar; timeout 5 detik sering memotong response di tengah XML
+        // sehingga sebagian nama hilang. Beri waktu lebih, dan ulangi bila response terpotong.
+        $resp = send_soap_request($device['ip_mesin'], $device['port'], $soap_users, 15);
+        $complete = is_string($resp) && strpos($resp, '</GetAllUserInfoResponse>') !== false;
+        if (is_string($resp) && trim($resp) !== '' && !$complete) {
+            $resp = send_soap_request($device['ip_mesin'], $device['port'], $soap_users, 30);
+            $complete = is_string($resp) && strpos($resp, '</GetAllUserInfoResponse>') !== false;
+        }
+        $didU = []; $didP = [];
+        if ($resp) {
+            $pos = 0;
+            while (($start = strpos($resp, '<Row>', $pos)) !== false && ($end = strpos($resp, '</Row>', $start)) !== false) {
+                $row = substr($resp, $start + 5, $end - $start - 5);
+                $pin = $pin2 = $name = '';
+                if (preg_match('/<PIN>([^<]*)<\/PIN>/', $row, $m)) $pin = trim($m[1]);
+                if (preg_match('/<PIN2>([^<]*)<\/PIN2>/', $row, $m)) $pin2 = trim($m[1]);
+                if (preg_match('/<Name>([^<]*)<\/Name>/', $row, $m)) $name = trim($m[1]);
+                if ($pin !== '' && $name !== '') { $didU[$pin] = $name; $didP[$pin] = $pin2; }
+                $pos = $end + 6;
+            }
+        }
+        if (!empty($didU) && ($complete || empty($prevU[$did]))) {
+            $out[$did] = $didU; $out2[$did] = $didP;
+        } else {
+            // Response gagal/terpotong: gabungkan nama lama + nama baru yang terbaca.
+            $out[$did] = array_merge($prevU[$did] ?? [], $didU);
+            $out2[$did] = array_merge($prevP[$did] ?? [], $didP);
+        }
+    }
+    $data = ['u' => $out, 'p2' => $out2];
+    @file_put_contents($cacheFile, json_encode($data));
+    return $data;
+}
+
+/** [id_mesin][pin] = nama */
+function get_device_users_map($koneksi, $force = false) {
+    $d = get_device_users_full($koneksi, $force);
+    return is_array($d['u'] ?? null) ? $d['u'] : [];
+}
+
+/** [id_mesin][pin] = PIN2 (nomor absen yang sama antar mesin) */
+function get_device_pin2_map($koneksi, $force = false) {
+    $d = get_device_users_full($koneksi, $force);
+    return is_array($d['p2'] ?? null) ? $d['p2'] : [];
+}
+
+/**
+ * Isi/segarkan mapping (id_mesin, pin) -> id_karyawan:
+ * 1) nama mesin == nama master (unik) -> prioritas utama
+ * 2) kalau tidak, pin == no_absen master (unik) -> fallback
+ * Nama kembar di master dilewati (tidak ditebak) agar tidak salah orang.
+ */
+function refresh_karyawan_pin_map($koneksi, $force = false) {
+    ensure_karyawan_pin_table($koneksi);
+    $by_name = []; $dup_name = [];
+    $by_pin = [];
+    $qk = $koneksi->query("SELECT id_karyawan, nama_karyawan, no_absen FROM ms_karyawan WHERE nama_karyawan NOT LIKE 'User PIN%'");
+    while ($qk && ($r = $qk->fetch_assoc())) {
+        $nn = norm_nama_karyawan($r['nama_karyawan'] ?? '');
+        if ($nn !== '') {
+            if (isset($by_name[$nn])) $dup_name[$nn] = true;
+            else $by_name[$nn] = (int)$r['id_karyawan'];
+        }
+        $pin = trim((string)($r['no_absen'] ?? ''));
+        if ($pin !== '') $by_pin[$pin][] = (int)$r['id_karyawan'];
+    }
+    $dev = get_device_users_map($koneksi, $force);
+    $devp2 = get_device_pin2_map($koneksi, $force);
+    // Rebuild hanya untuk mesin yang berhasil dibaca (mesin offline tidak menghapus mapping lama).
+    foreach (array_keys($dev) as $did_del) $koneksi->query("DELETE FROM ms_karyawan_pin WHERE id_mesin = " . (int)$did_del);
+    // Satu PIN bisa orang berbeda di mesin berbeda: kumpulkan sidik nama per PIN.
+    // Kalau nama di mesin-mesin berbeda, fallback nomor absen TIDAK dipakai.
+    $pin_sigs = []; $alias_sigs = [];
+    foreach ($dev as $did => $pins) {
+        foreach ($pins as $pin => $nm) {
+            $nn2 = norm_nama_karyawan($nm);
+            $sig = $nn2 !== '' ? $nn2 : '##blank';
+            $pin_sigs[$pin][$sig] = true;
+            $p2 = trim((string)($devp2[$did][$pin] ?? ''));
+            if ($p2 !== '') $alias_sigs[$p2][$sig] = true;
+        }
+    }
+    $vals = [];
+    foreach ($dev as $did => $pins) {
+        foreach ($pins as $pin => $nm) {
+            $kid = 0;
+            $nn = norm_nama_karyawan($nm);
+            $p2 = trim((string)($devp2[$did][$pin] ?? ''));
+            if ($nn !== '' && isset($by_name[$nn]) && !isset($dup_name[$nn])) {
+                $kid = $by_name[$nn];
+            } elseif ($p2 !== '' && isset($by_pin[$p2]) && count($by_pin[$p2]) === 1) {
+                // PIN2 = nomor absen yang konsisten antar mesin
+                $kid = $by_pin[$p2][0];
+            } elseif (isset($by_pin[$pin]) && count($by_pin[$pin]) === 1) {
+                $kid = $by_pin[$pin][0];
+            }
+            if ($kid <= 0) continue;
+            $pin_e = $koneksi->real_escape_string($pin);
+            $nm_e = $koneksi->real_escape_string($nm);
+            $vals[] = "(" . (int)$did . ", '$pin_e', $kid, '$nm_e', NOW())";
+        }
+    }
+    $n = 0;
+    foreach (array_chunk($vals, 200) as $chunk) {
+        $sql = "INSERT INTO ms_karyawan_pin (id_mesin, pin, id_karyawan, nama_mesin, tgl_updt) VALUES " . implode(", ", $chunk)
+             . " ON DUPLICATE KEY UPDATE id_karyawan = VALUES(id_karyawan), nama_mesin = VALUES(nama_mesin), tgl_updt = NOW()";
+        if ($koneksi->query($sql)) $n += count($chunk);
+    }
+    return $n;
+}
+
+/**
+ * Mapping siap pakai: [id_mesin][pin] => id_karyawan.
+ */
+function karyawan_pin_map($koneksi) {
+    static $map = null;
+    if ($map !== null) return $map;
+    $map = [];
+    ensure_karyawan_pin_table($koneksi);
+    $q = $koneksi->query("SELECT id_mesin, pin, id_karyawan FROM ms_karyawan_pin");
+    while ($q && ($r = $q->fetch_assoc())) $map[(int)$r['id_mesin']][trim((string)$r['pin'])] = (int)$r['id_karyawan'];
+    return $map;
+}
+
+/**
+ * PIN-PIN yang terhubung ke satu karyawan: [ [id_mesin, pin], ... ].
+ */
+function karyawan_pins_by_id($koneksi) {
+    static $map = null;
+    if ($map !== null) return $map;
+    $map = [];
+    ensure_karyawan_pin_table($koneksi);
+    $q = $koneksi->query("SELECT id_mesin, pin, id_karyawan FROM ms_karyawan_pin");
+    while ($q && ($r = $q->fetch_assoc())) $map[(int)$r['id_karyawan']][] = [(int)$r['id_mesin'], trim((string)$r['pin'])];
+    return $map;
+}
+
+/**
  * Proses tap tak-terdaftar jadi baris grup TIDAK DALAM RENCANA (upah 0, anti-dobel).
  * Dipakai tombol Tarik di kelola.php & endpoint tarik_ajax.php. Return ['added' => int].
  */
-function realisasi_proses_tdr($koneksi, $idrealisasi, $tgl_override = null) {
+function realisasi_proses_tdr($koneksi, $idrealisasi, $tgl_override = null, $skip_dev_names = false) {
     $added = 0;
+    $err = '';
     $idrealisasi = (int)$idrealisasi;
-    if ($idrealisasi <= 0) return ['added' => 0];
+    if ($idrealisasi <= 0) return ['added' => 0, 'error' => ''];
     try {
         $qr = $koneksi->query("SELECT tgl_realisasi, id_rkk FROM tb_realisasi WHERE id_realisasi = '$idrealisasi'");
         $dr = $qr ? $qr->fetch_assoc() : null;
-        if (!$dr || empty($dr['tgl_realisasi'])) return ['added' => 0];
+        if (!$dr || empty($dr['tgl_realisasi'])) return ['added' => 0, 'error' => ''];
         $t0 = $dr['tgl_realisasi'];
         // Override tanggal manual (datepicker): proses tap tanggal pilihan
         if (!empty($tgl_override) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$tgl_override)) $t0 = (string)$tgl_override;
@@ -78,91 +290,376 @@ function realisasi_proses_tdr($koneksi, $idrealisasi, $tgl_override = null) {
         $t0e = $koneksi->real_escape_string($t0);
         $t1e = $koneksi->real_escape_string($t1);
 
-        $gid_tdr = 0;
-        $qg0 = $koneksi->query("SELECT id_grup FROM ms_grup_borongan WHERE UPPER(TRIM(nama_grup)) = 'TIDAK DALAM RENCANA' LIMIT 1");
-        if ($qg0 && ($gg0 = $qg0->fetch_assoc())) $gid_tdr = (int)$gg0['id_grup'];
-        if ($gid_tdr <= 0 && $koneksi->query("INSERT INTO ms_grup_borongan (nama_grup, keterangan, tgl_updt) VALUES ('TIDAK DALAM RENCANA', 'Otomatis: penampung tap tanpa master', NOW())")) $gid_tdr = (int)$koneksi->insert_id;
-        if ($gid_tdr <= 0) return ['added' => 0];
+        $gid_tdr = 0; $gids_tdr = [];
+        $qg0 = $koneksi->query("SELECT id_grup FROM ms_grup_borongan WHERE UPPER(TRIM(nama_grup)) = 'TIDAK DALAM RENCANA' ORDER BY id_grup ASC");
+        while ($qg0 && ($gg0 = $qg0->fetch_assoc())) {
+            $gids_tdr[] = (int)$gg0['id_grup'];
+            if ($gid_tdr <= 0) $gid_tdr = (int)$gg0['id_grup'];
+        }
+        // Bisa ada lebih dari satu grup bernama sama (sisa proses lama) -> bersihkan semuanya.
+        $gid_in = !empty($gids_tdr) ? implode(',', $gids_tdr) : '0';
 
-        // Preload log 2 hari SEKALI (ganti N query per PIN)
-        $bulk_logs = []; $bulk_ok = false;
-        $qbulk = $koneksi->query("SELECT userid, tgl, status, detail_waktu FROM tb_record WHERE tgl IN ('$t0e','$t1e') ORDER BY tgl ASC, detail_waktu ASC");
-        if ($qbulk) {
-            $bulk_ok = true;
-            while ($qb2 = $qbulk->fetch_assoc()) $bulk_logs[$qb2['userid']][] = $qb2;
+        // Mapping PIN per mesin -> karyawan (nama mesin = nama master)
+        ensure_karyawan_pin_table($koneksi);
+        $pinmap = karyawan_pin_map($koneksi);
+
+        // Peta master: id -> data, pin/no_absen -> daftar id (fallback bila mapping kosong)
+        $master = []; $pin_owner = []; $by_name = []; $dup_name = [];
+        $qk = $koneksi->query("SELECT id_karyawan, nama_karyawan, no_absen, id_departmen, id_sub_department, id_os_dhk, id_golongan FROM ms_karyawan WHERE nama_karyawan NOT LIKE 'User PIN%'");
+        while ($qk && ($rk = $qk->fetch_assoc())) {
+            $kid = (int)$rk['id_karyawan'];
+            $master[$kid] = $rk;
+            $nn = norm_nama_karyawan($rk['nama_karyawan'] ?? '');
+            if ($nn !== '') {
+                if (isset($by_name[$nn])) $dup_name[$nn] = true;
+                else $by_name[$nn] = $kid;
+            }
+            $pin = trim((string)($rk['no_absen'] ?? ''));
+            if ($pin !== '') $pin_owner[$pin][] = $kid;
         }
 
-        $pins = [];
-        $qp = $koneksi->query("SELECT DISTINCT TRIM(userid) AS pin FROM tb_record WHERE tgl = '$t0' AND TRIM(userid) <> '' AND NOT EXISTS (SELECT 1 FROM ms_karyawan k WHERE k.no_absen IS NOT NULL AND TRIM(k.no_absen) <> '' AND TRIM(k.no_absen) = TRIM(tb_record.userid))");
-        while ($qp && ($rp = $qp->fetch_assoc())) $pins[] = $rp['pin'];
-        // Nama di mesin hanya ditarik bila ada PIN tak dikenal (hemat: SOAP per mesin)
-        $devmap = [];
-        if (!empty($pins) && function_exists('get_device_user_names')) $devmap = get_device_user_names($koneksi);
+        // Kumpulkan tap: yang ter-resolve ke karyawan vs PIN yang tetap tak dikenal
+        $by_emp = []; $by_pin = [];
+        $recs = []; $pin_devs = [];
+        // PIN2 (nomor absen konsisten antar mesin) + nama mesin untuk tampilan
+        $devmap_did = get_device_users_map($koneksi);
+        $pin2map = get_device_pin2_map($koneksi);
+        // Kebalikan PIN2 -> PIN mesin: sebagian mesin mencatat PIN2 di log absensi.
+        $pin2rev = [];
+        foreach ($pin2map as $dmd => $pins) {
+            if (!is_array($pins)) continue;
+            foreach ($pins as $pp => $p2v) {
+                $pp = trim((string)$pp); $p2v = trim((string)$p2v);
+                if ($pp !== '' && $p2v !== '' && !isset($pin2rev[$dmd][$p2v])) $pin2rev[$dmd][$p2v] = $pp;
+            }
+        }
+        // Cadangan nama global (PIN -> nama) untuk tap lama yang source_device_id-nya 0
+        $global_names = [];
+        foreach ($devmap_did as $pins_g) {
+            if (!is_array($pins_g)) continue;
+            foreach ($pins_g as $pp => $nn) {
+                $pp = trim((string)$pp); $nn = trim((string)$nn);
+                if ($pp !== '' && $nn !== '' && !isset($global_names[$pp])) $global_names[$pp] = $nn;
+            }
+        }
+        $pin2_sigs = [];
+        foreach ($devmap_did as $dmd => $pins) {
+            foreach ($pins as $pp => $nn) {
+                $p2 = trim((string)($pin2map[$dmd][$pp] ?? ''));
+                if ($p2 !== '') $pin2_sigs[$p2][norm_nama_karyawan($nn)] = true;
+            }
+        }
+        // Nama global per PIN2 (lintas mesin). Tap kadang mencatat PIN2, dan PIN2
+        // konsisten antar mesin -> nama orang bisa dikenali walau daftar user mesin
+        // asal tap sedang gagal dibaca.
+        $global_p2name = [];
+        foreach ($pin2map as $dmd => $pins) {
+            if (!is_array($pins)) continue;
+            foreach ($pins as $pp => $p2v) {
+                $p2v = trim((string)$p2v); $nn2 = trim((string)($devmap_did[$dmd][$pp] ?? ''));
+                if ($p2v !== '' && $nn2 !== '' && !isset($global_p2name[$p2v])) $global_p2name[$p2v] = $nn2;
+            }
+        }
+        // Nama hasil "Tarik Nama" (tersimpan di ms_karyawan_pin) sebagai cadangan
+        // saat daftar user mesin sedang tidak terbaca.
+        $pin_db_name = [];
+        $global_db_name = [];
+        $qdbn = $koneksi->query("SELECT id_mesin, pin, nama_mesin FROM ms_karyawan_pin WHERE nama_mesin IS NOT NULL AND nama_mesin <> ''");
+        while ($qdbn && ($rdbn = $qdbn->fetch_assoc())) {
+            $ddb = (int)$rdbn['id_mesin']; $pdb = trim((string)$rdbn['pin']); $ndb = trim((string)$rdbn['nama_mesin']);
+            if ($pdb === '' || $ndb === '') continue;
+            $pin_db_name[$ddb][$pdb] = $ndb;
+            if (!isset($global_db_name[$pdb])) $global_db_name[$pdb] = $ndb;
+        }
+        $qrec = $koneksi->query("SELECT TRIM(userid) AS pin, source_device_id, tgl, status, detail_waktu FROM tb_record WHERE tgl IN ('$t0e','$t1e') ORDER BY tgl ASC, detail_waktu ASC");
+        while ($qrec && ($rc = $qrec->fetch_assoc())) {
+            $rc['pin'] = trim((string)$rc['pin']);
+            if ($rc['pin'] === '') continue;
+            $rc['did'] = (int)($rc['source_device_id'] ?? 0);
+            $recs[] = $rc;
+            // PIN yang sama di lebih dari 1 mesin = ambigu (bisa orang berbeda)
+            $pin_devs[$rc['pin']][$rc['did']] = true;
+        }
+        foreach ($recs as $rc) {
+            $pin = $rc['pin']; $did = $rc['did'];
+            $pin_alt = $pin;
+            if (empty($devmap_did[$did][$pin]) && !empty($pin2rev[$did][$pin])) $pin_alt = $pin2rev[$did][$pin];
+            $kid = (int)($pinmap[$did][$pin] ?? 0);
+            if ($kid <= 0 && $pin_alt !== $pin) $kid = (int)($pinmap[$did][$pin_alt] ?? 0);
+            // Cocokkan langsung lewat nama yang tersimpan di mesin (tanpa perlu mapping tersimpan)
+            if ($kid <= 0) {
+                $nmraw = $devmap_did[$did][$pin_alt] ?? ($devmap_did[$did][$pin] ?? '');
+                if ($nmraw === '') $nmraw = $global_names[$pin] ?? ($global_names[$pin_alt] ?? '');
+                if ($nmraw === '') $nmraw = $global_p2name[$pin] ?? ($global_p2name[$pin_alt] ?? '');
+                $nmdev = norm_nama_karyawan($nmraw);
+                if ($nmdev !== '' && isset($by_name[$nmdev]) && !isset($dup_name[$nmdev])) $kid = (int)$by_name[$nmdev];
+            }
+            if ($kid <= 0) {
+                $p2g = trim((string)($global_p2name[$pin] ?? ($global_p2name[$pin_alt] ?? '')));
+                $nn3 = norm_nama_karyawan($p2g);
+                if ($nn3 !== '' && isset($by_name[$nn3]) && !isset($dup_name[$nn3])) $kid = (int)$by_name[$nn3];
+            }
+            $p2 = trim((string)($pin2map[$did][$pin_alt] ?? ($pin2map[$did][$pin] ?? '')));
+            if ($kid <= 0 && $p2 !== '' && isset($pin_owner[$p2]) && count($pin_owner[$p2]) === 1) {
+                $kid = (int)$pin_owner[$p2][0];
+            }
+            if ($kid <= 0 && isset($pin_owner[$pin]) && count($pin_owner[$pin]) === 1) $kid = (int)$pin_owner[$pin][0];
+            if ($kid <= 0 && $pin_alt !== $pin && isset($pin_owner[$pin_alt]) && count($pin_owner[$pin_alt]) === 1) $kid = (int)$pin_owner[$pin_alt][0];
+            if ($kid > 0 && isset($master[$kid])) {
+                $by_emp[$kid][] = $rc;
+            } else {
+                $key = $did . '|' . $pin;
+                if (!isset($by_pin[$key])) $by_pin[$key] = ['pin' => $pin, 'alt' => $pin_alt, 'did' => $did, 'logs' => []];
+                $by_pin[$key]['logs'][] = $rc;
+            }
+        }
 
+        // Ada tap yang belum dapat nama? Coba segarkan daftar user mesin sekali
+        // (maks. tiap 2 menit) supaya nama yang ada di mesin tetap terpakai.
+        if (!empty($by_pin)) {
+            $need_refresh = false;
+            foreach ($by_pin as $g) {
+                $dd = (int)($g['did'] ?? 0); $pp = (string)($g['pin'] ?? '');
+                $pp_use = (!isset($devmap_did[$dd][$pp]) && !empty($pin2rev[$dd][$pp])) ? $pin2rev[$dd][$pp] : $pp;
+                if (!isset($devmap_did[$dd][$pp_use]) && !isset($global_names[$pp_use])) { $need_refresh = true; break; }
+            }
+            if ($need_refresh) {
+                $dbn = '';
+                if ($qd = @$koneksi->query("SELECT DATABASE() AS d")) { $rd = $qd->fetch_assoc(); $dbn = (string)($rd['d'] ?? ''); }
+                $cf = rtrim(sys_get_temp_dir(), '\\/') . DIRECTORY_SEPARATOR . 'payroll_devusers2_' . md5($dbn) . '.json';
+                if (!is_file($cf) || (time() - (int)@filemtime($cf)) > 120) {
+                    $fresh = get_device_users_full($koneksi, true);
+                    if (!empty($fresh['u'])) {
+                        $devmap_did = $fresh['u'];
+                        $pin2map = is_array($fresh['p2'] ?? null) ? $fresh['p2'] : $pin2map;
+                        $pin2rev = [];
+                        foreach ($pin2map as $dmd2 => $pins2) {
+                            if (!is_array($pins2)) continue;
+                            foreach ($pins2 as $pp3 => $p2v3) {
+                                $pp3 = trim((string)$pp3); $p2v3 = trim((string)$p2v3);
+                                if ($pp3 !== '' && $p2v3 !== '' && !isset($pin2rev[$dmd2][$p2v3])) $pin2rev[$dmd2][$p2v3] = $pp3;
+                            }
+                        }
+                        $global_names = [];
+                        foreach ($devmap_did as $pins_g) {
+                            if (!is_array($pins_g)) continue;
+                            foreach ($pins_g as $pp2 => $nn2) {
+                                $pp2 = trim((string)$pp2); $nn2 = trim((string)$nn2);
+                                if ($pp2 !== '' && $nn2 !== '' && !isset($global_names[$pp2])) $global_names[$pp2] = $nn2;
+                            }
+                        }
+                        $global_p2name = [];
+                        foreach ($pin2map as $dmd2 => $pins2) {
+                            if (!is_array($pins2)) continue;
+                            foreach ($pins2 as $pp3 => $p2v3) {
+                                $p2v3 = trim((string)$p2v3); $nn3 = trim((string)($devmap_did[$dmd2][$pp3] ?? ''));
+                                if ($p2v3 !== '' && $nn3 !== '' && !isset($global_p2name[$p2v3])) $global_p2name[$p2v3] = $nn3;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (empty($by_emp) && empty($by_pin)) return ['added' => 0, 'error' => ''];
+        if ($gid_tdr <= 0) {
+            if (!$koneksi->query("INSERT INTO ms_grup_borongan (nama_grup, keterangan, tgl_updt) VALUES ('TIDAK DALAM RENCANA', 'Otomatis: penampung tap di luar rencana', NOW())")) return ['added' => 0, 'error' => 'Grup TIDAK DALAM RENCANA gagal dibuat.'];
+            $gid_tdr = (int)$koneksi->insert_id;
+            $gid_in = (string)$gid_tdr;
+        }
+
+        // Hitung jam masuk/pulang/istirahat dari kumpulan log (sama untuk semua baris TDR)
+        $hitung_tap = function ($logs) use ($t0) {
+            $ra_masuk = '00:00:00'; $ra_keluar = '00:00:00'; $ra_ik = '00:00:00'; $ra_im = '00:00:00';
+            if (empty($logs)) return [$ra_masuk, $ra_keluar, $ra_ik, $ra_im];
+            usort($logs, function ($a, $b) { return strcmp($a['detail_waktu'], $b['detail_waktu']); });
+            $masuk_time = '';
+            foreach ($logs as $l) {
+                if (substr($l['detail_waktu'], 0, 10) == $t0 && (int)$l['status'] === 0) { $masuk_time = substr($l['detail_waktu'], 11, 8); break; }
+            }
+            if ($masuk_time === '') $masuk_time = substr($logs[0]['detail_waktu'], 11, 8);
+            $in_ts = strtotime($t0 . ' ' . $masuk_time);
+            $gap10 = 10 / 60;
+            foreach ($logs as $l) {
+                $ct = substr($l['detail_waktu'], 11, 8);
+                $cts = strtotime(substr($l['detail_waktu'], 0, 10) . ' ' . $ct);
+                $dh = ($cts - $in_ts) / 3600;
+                if ($dh > $gap10 && $dh <= 16) {
+                    if ((int)$l['status'] === 1) $ra_keluar = $ct;
+                    elseif ((int)$l['status'] === 2 && $ra_ik === '00:00:00') $ra_ik = $ct;
+                    elseif ((int)$l['status'] === 3 && $ra_im === '00:00:00') $ra_im = $ct;
+                }
+            }
+            if ($ra_keluar === '00:00:00') {
+                for ($ix = count($logs) - 1; $ix >= 0; $ix--) {
+                    $ct = substr($logs[$ix]['detail_waktu'], 11, 8);
+                    if (substr($logs[$ix]['detail_waktu'], 0, 10) == $t0 && $ct == $masuk_time) continue;
+                    $cts = strtotime($logs[$ix]['detail_waktu']);
+                    $dh = ($cts - $in_ts) / 3600;
+                    if ($dh > $gap10 && $dh <= 16) { $ra_keluar = $ct; break; }
+                }
+            }
+            return [$masuk_time, $ra_keluar, $ra_ik, $ra_im];
+        };
+
+        // Karyawan yang sudah ada di rencana realisasi ini (bukan baris TDR).
+        // Baris TANPA GRUP tidak dihitung sebagai rencana: orangnya tidak punya
+        // grup perencanaan, jadi kalau tap harus masuk TDR.
+        $in_plan = [];
+        $qi = $koneksi->query("SELECT id_karyawan FROM tb_realisasi_detail WHERE id_realisasi = '$idrealisasi' AND id_karyawan <> 0 AND id_grup > 0 AND id_grup NOT IN ($gid_in)");
+        while ($qi && ($ri = $qi->fetch_assoc())) $in_plan[(int)$ri['id_karyawan']] = true;
+
+        // Nama karyawan yang SUDAH ada di rencana (untuk buang baris TDR dobel).
+        // Pakai nama master MAUPUN nama manual, supaya baris rencana ber-id_karyawan=0
+        // (input manual) juga tidak ikut dibuat di TDR.
+        $plan_norm = [];
+        $qpn = $koneksi->query("SELECT COALESCE(NULLIF(TRIM(K.nama_karyawan), ''), TRIM(RD.nama_karyawan_manual)) AS nm
+                                FROM tb_realisasi_detail RD
+                                LEFT JOIN ms_karyawan K ON K.id_karyawan = RD.id_karyawan
+                                WHERE RD.id_realisasi = '$idrealisasi' AND RD.id_grup > 0 AND RD.id_grup NOT IN ($gid_in)");
+        while ($qpn && ($rpn = $qpn->fetch_assoc())) {
+            $np = norm_nama_karyawan($rpn['nm'] ?? '');
+            if ($np !== '') $plan_norm[$np] = true;
+        }
+        foreach ($in_plan as $kidp => $_) {
+            if (isset($master[$kidp])) {
+                $np = norm_nama_karyawan($master[$kidp]['nama_karyawan'] ?? '');
+                if ($np !== '') $plan_norm[$np] = true;
+            }
+        }
+        $plan_names = array_keys($plan_norm);
+        // Nama di mesin sering terpotong (maks ~25 karakter) atau beda 1-2 huruf,
+        // mis. "MEDI DERIANTO YUNUS SOLL" vs "MEDI DERIANTO YUNUS SOLLE".
+        // Anggap orang yang sama bila namanya persis, saling awalan, atau mirip
+        // (jarak Levenshtein kecil). Dipakai untuk MENGELUARKAN dari TDR.
+        $nama_sama = function ($a, $b) {
+            if ($a === '' || $b === '') return false;
+            if ($a === $b) return true;
+            $min = min(strlen($a), strlen($b));
+            if ($min >= 15 && (strpos($a, $b) === 0 || strpos($b, $a) === 0)) return true;
+            $maxd = $min >= 15 ? 2 : ($min >= 10 ? 1 : 0);
+            if ($maxd > 0 && levenshtein($a, $b) <= $maxd) return true;
+            return false;
+        };
+        $in_plan_name = function ($nm) use ($plan_names, $nama_sama) {
+            if ($nm === '') return false;
+            foreach ($plan_names as $pn) if ($nama_sama($nm, $pn)) return true;
+            return false;
+        };
+
+        // Orang yang tap tapi hanya punya baris TANPA GRUP (bukan rencana bergrup):
+        // hapus barisnya supaya dibuat ulang di TDR, bukan nongkrong di TANPA GRUP.
+        if (!empty($by_emp)) {
+            $ids_ng = implode(',', array_map('intval', array_keys($by_emp)));
+            $qng = $koneksi->query("SELECT id_realisasi_detail, id_karyawan FROM tb_realisasi_detail WHERE id_realisasi = '$idrealisasi' AND (id_grup IS NULL OR id_grup = 0) AND id_karyawan IN ($ids_ng)");
+            $del_ng = [];
+            while ($qng && ($rng = $qng->fetch_assoc())) {
+                if (!isset($in_plan[(int)$rng['id_karyawan']])) $del_ng[] = (int)$rng['id_realisasi_detail'];
+            }
+            if (!empty($del_ng)) {
+                $in_ng = implode(',', $del_ng);
+                $koneksi->query("DELETE FROM tb_realisasi_borongan WHERE id_realisasi_detail IN ($in_ng)");
+                $koneksi->query("DELETE FROM tb_realisasi_detail WHERE id_realisasi_detail IN ($in_ng)");
+            }
+        }
+
+        // REBUILD TOTAL: buang semua baris TDR realisasi ini (termasuk sisa format
+        // lama "PIN ...", nama dobel, grup duplikat), lalu isi ulang dari data tap
+        // yang ada sekarang. Jadi tidak ada baris nyangkut antar versi.
+        if ($gid_tdr > 0) {
+            $koneksi->query("DELETE FROM tb_realisasi_detail WHERE id_realisasi = '$idrealisasi' AND id_grup IN ($gid_in)");
+        }
+        // Buang juga sisa baris PIN dari versi lama yang mungkin nyangkut di grup
+        // lain / id_grup kosong, supaya tidak dobel "PIN 13 (Mesin 1)".
+        $koneksi->query("DELETE FROM tb_realisasi_detail WHERE id_realisasi = '$idrealisasi'
+            AND (nama_karyawan_manual REGEXP '^PIN [0-9]+' OR nama_karyawan_manual LIKE 'User PIN%' OR nama_karyawan_manual LIKE 'TANPA NAMA%')");
         $exist_names = [];
-        $qe = $koneksi->query("SELECT nama_karyawan_manual FROM tb_realisasi_detail WHERE id_realisasi = '$idrealisasi' AND id_karyawan = 0 AND id_grup = '$gid_tdr'");
-        while ($qe && ($re = $qe->fetch_assoc())) $exist_names[trim((string)$re['nama_karyawan_manual'])] = true;
+
+        // Kolom opsional (DB lama tetap jalan)
+        static $has_os_col = null, $has_gol_col = null;
+        if ($has_os_col === null) {
+            $cko = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_os_dhk'");
+            $has_os_col = ($cko && $cko->num_rows > 0);
+            $ckg = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_golongan'");
+            $has_gol_col = ($ckg && $ckg->num_rows > 0);
+        }
+        $cols = "id_realisasi, id_rkk_detail, id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department"
+            . ($has_os_col ? ", id_os_dhk" : "") . ($has_gol_col ? ", id_golongan" : "")
+            . ", r_upah, r_potongan_telat, r_potongan_istirahat_awal, r_potongan_istirahat_telat, r_potongan_lainnya, r_jam_masuk, r_jam_keluar, r_istirahat_masuk, r_istirahat_keluar, r_status, r_update, ra_masuk, ra_keluar, ra_istirahat_masuk, ra_istirahat_keluar, id_jadwal, status_realisasi_detail, hasil_kerja, lembur, tgl_realisasi_detail, r_potongan_pulang, r_potongan_tidak_lengkap, lembur_jam, id_grup, id_pengganti";
 
         $now_tu = date('Y-m-d H:i:s');
         $idrkk_ref = (int)($dr['id_rkk'] ?? 0);
-        $tdr_vals = [];
-        foreach ($pins as $pin) {
-            $pin_esc = $koneksi->real_escape_string($pin);
-            $disp = trim((string)($devmap[$pin] ?? ''));
+        $vals = [];
+
+        // 1) Karyawan TERDAFTAR (nama ada di salah satu mesin + ada di master) tapi di luar rencana
+        foreach ($by_emp as $kid => $logs) {
+            if (isset($in_plan[$kid])) continue;
+            $m = $master[$kid];
+            $nm = trim((string)($m['nama_karyawan'] ?? ''));
+            if ($nm === '' || isset($exist_names[$nm])) continue;
+            if ($in_plan_name(norm_nama_karyawan($nm))) continue;
+            list($ra_masuk, $ra_keluar, $ra_ik, $ra_im) = $hitung_tap($logs);
+            $nm_e = $koneksi->real_escape_string($nm);
+            $dep = (int)($m['id_departmen'] ?? 0);
+            $sub = (int)($m['id_sub_department'] ?? 0);
+            $os = (int)($m['id_os_dhk'] ?? 0);
+            $gol = (int)($m['id_golongan'] ?? 0);
+            $vals[] = "('$idrealisasi', 0, '$idrkk_ref', 0, '$nm_e', $dep, $sub"
+                . ($has_os_col ? ", $os" : "") . ($has_gol_col ? ", $gol" : "")
+                . ", 0, 0, 0, 0, 0, '', '', '', '', 'Hadir', '$now_tu', '$ra_masuk', '$ra_keluar', '$ra_im', '$ra_ik', 0, 2, '-', 0, '$t0', 0, 0, 0, '$gid_tdr', NULL)";
+            $exist_names[$nm] = true;
+        }
+
+        // 2) Tap yang tidak ada di master: tetap ditampilkan memakai NAMA dari mesin.
+        //    Tap tanpa nama digabung per PIN (bukan per mesin) supaya PIN yang sama
+        //    di beberapa mesin jadi SATU baris dengan gabungan jam tap.
+        $pin_rows = [];
+        foreach ($by_pin as $g) {
+            $pin = $g['pin'];
+            $did = (int)($g['did'] ?? 0);
+            $pin_use = trim((string)($g['alt'] ?? $pin));
+            $disp = trim((string)($devmap_did[$did][$pin] ?? ''));
+            if ($disp === '') $disp = trim((string)($devmap_did[$did][$pin_use] ?? ''));
+            // Nama placeholder di mesin ("User PINxxx") dianggap tidak punya nama.
+            if ($disp !== '' && preg_match('/^User PIN[0-9]+$/i', $disp)) $disp = '';
+            if ($disp === '') $disp = trim((string)($global_names[$pin] ?? ''));
+            if ($disp === '') $disp = trim((string)($global_names[$pin_use] ?? ''));
+            if ($disp === '') $disp = trim((string)($global_p2name[$pin] ?? ($global_p2name[$pin_use] ?? '')));
+            if ($disp === '' && isset($pin_db_name[$did])) $disp = trim((string)($pin_db_name[$did][$pin] ?? ($pin_db_name[$did][$pin_use] ?? '')));
+            if ($disp === '') $disp = trim((string)($global_db_name[$pin] ?? ($global_db_name[$pin_use] ?? '')));
+            if ($disp !== '' && preg_match('/^User PIN[0-9]+$/i', $disp)) $disp = '';
+            // Tap tanpa nama di mesin tetap ditampilkan sebagai PIN supaya tidak ada
+            // data tap yang hilang.
             if ($disp === '') $disp = 'PIN ' . $pin;
+            // Jangan dobel: kalau nama itu sudah ada di rencana realisasi, lewati.
+            $disp_norm = norm_nama_karyawan($disp);
+            if ($in_plan_name($disp_norm)) continue;
+            if ($disp_norm !== '' && isset($by_name[$disp_norm]) && !isset($dup_name[$disp_norm]) && isset($in_plan[(int)$by_name[$disp_norm]])) continue;
             if (isset($exist_names[$disp])) continue;
-            $ra_masuk = '00:00:00'; $ra_keluar = '00:00:00'; $ra_ik = '00:00:00'; $ra_im = '00:00:00';
-            // Ambil dari peta preload (kunci TRIM, sama kayak WHERE TRIM lama).
-            // Fallback ke query per PIN bila preload gagal.
-            $logs = [];
-            if ($bulk_ok) {
-                foreach ($bulk_logs as $bk => $brows) {
-                    if (trim((string)$bk) === $pin) { foreach ($brows as $br2) $logs[] = $br2; }
-                }
-                usort($logs, function($a, $b) { return strcmp($a['detail_waktu'], $b['detail_waktu']); });
-            } else {
-                $ql = $koneksi->query("SELECT status, detail_waktu FROM tb_record WHERE TRIM(userid) = '$pin_esc' AND tgl IN ('$t0', '$t1') ORDER BY detail_waktu ASC");
-                while ($ql && ($rl = $ql->fetch_assoc())) $logs[] = $rl;
-            }
-            if (!empty($logs)) {
-                $masuk_time = '';
-                foreach ($logs as $l) {
-                    if (substr($l['detail_waktu'], 0, 10) == $t0 && (int)$l['status'] === 0) { $masuk_time = substr($l['detail_waktu'], 11, 8); break; }
-                }
-                if ($masuk_time === '') $masuk_time = substr($logs[0]['detail_waktu'], 11, 8);
-                $in_ts = strtotime($t0 . ' ' . $masuk_time);
-                foreach ($logs as $l) {
-                    $ct = substr($l['detail_waktu'], 11, 8);
-                    $cts = strtotime(substr($l['detail_waktu'], 0, 10) . ' ' . $ct);
-                    $dh = ($cts - $in_ts) / 3600;
-                    if ($dh > 0 && $dh <= 16) {
-                        if ((int)$l['status'] === 1) $ra_keluar = $ct;
-                        elseif ((int)$l['status'] === 2 && $ra_ik === '00:00:00') $ra_ik = $ct;
-                        elseif ((int)$l['status'] === 3 && $ra_im === '00:00:00') $ra_im = $ct;
-                    }
-                }
-                if ($ra_keluar === '00:00:00') {
-                    for ($ix = count($logs) - 1; $ix >= 0; $ix--) {
-                        $ct = substr($logs[$ix]['detail_waktu'], 11, 8);
-                        if (substr($logs[$ix]['detail_waktu'], 0, 10) == $t0 && $ct == $masuk_time) continue;
-                        $cts = strtotime($logs[$ix]['detail_waktu']);
-                        $dh = ($cts - $in_ts) / 3600;
-                        if ($dh > 0 && $dh <= 16) { $ra_keluar = $ct; break; }
-                    }
-                }
-                $ra_masuk = $masuk_time;
-            }
-            $nm_esc = $koneksi->real_escape_string($disp);
-            $tdr_vals[] = "('$idrealisasi', 0, '$idrkk_ref', 0, '$nm_esc', NULL, NULL, 0, 0, 0, 0, 0, '', '', '', '', 'Hadir', '$now_tu', '$ra_masuk', '$ra_keluar', '$ra_im', '$ra_ik', 0, 2, '-', 0, '$t0', 0, 0, 0, '$gid_tdr', NULL)";
+            $mkey = (strpos($disp, 'PIN ') === 0) ? 'P:' . $pin : 'N:' . $disp_norm;
+            if (!isset($pin_rows[$mkey])) $pin_rows[$mkey] = ['disp' => $disp, 'logs' => []];
+            foreach ($g['logs'] as $lg) $pin_rows[$mkey]['logs'][] = $lg;
+        }
+        foreach ($pin_rows as $it) {
+            $disp = $it['disp'];
+            if (isset($exist_names[$disp])) continue;
+            list($ra_masuk, $ra_keluar, $ra_ik, $ra_im) = $hitung_tap($it['logs']);
+            $nm_e = $koneksi->real_escape_string($disp);
+            $vals[] = "('$idrealisasi', 0, '$idrkk_ref', 0, '$nm_e', 0, 0"
+                . ($has_os_col ? ", 0" : "") . ($has_gol_col ? ", 0" : "")
+                . ", 0, 0, 0, 0, 0, '', '', '', '', 'Hadir', '$now_tu', '$ra_masuk', '$ra_keluar', '$ra_im', '$ra_ik', 0, 2, '-', 0, '$t0', 0, 0, 0, '$gid_tdr', NULL)";
             $exist_names[$disp] = true;
         }
-        // Satu INSERT batch (ganti N INSERT per PIN) — SEKALI setelah loop
-        if (!empty($tdr_vals)) {
-            $ok = $koneksi->query("INSERT INTO tb_realisasi_detail (id_realisasi, id_rkk_detail, id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, r_upah, r_potongan_telat, r_potongan_istirahat_awal, r_potongan_istirahat_telat, r_potongan_lainnya, r_jam_masuk, r_jam_keluar, r_istirahat_masuk, r_istirahat_keluar, r_status, r_update, ra_masuk, ra_keluar, ra_istirahat_masuk, ra_istirahat_keluar, id_jadwal, status_realisasi_detail, hasil_kerja, lembur, tgl_realisasi_detail, r_potongan_pulang, r_potongan_tidak_lengkap, lembur_jam, id_grup, id_pengganti) VALUES " . implode(", ", $tdr_vals));
-            if ($ok) $added = count($tdr_vals);
+
+        if (!empty($vals)) {
+            $ok = $koneksi->query("INSERT INTO tb_realisasi_detail ($cols) VALUES " . implode(", ", $vals));
+            if ($ok) $added = count($vals);
+            else $err = $koneksi->error;
         }
-    } catch (Throwable $e) {}
-    return ['added' => $added];
+    } catch (Throwable $e) {
+        $err = $e->getMessage();
+    }
+    return ['added' => $added, 'error' => $err];
 }
 
 /**
@@ -181,12 +678,12 @@ function ensure_protocol_column($koneksi){
 /**
  * Send SOAP request to the device using socket
  */
-function send_soap_request($ip, $port, $request) {
+function send_soap_request($ip, $port, $request, $timeout = 5) {
     $socket = @fsockopen($ip, $port, $errno, $errstr, 2.0);
     if (!$socket) {
         return false;
     }
-    stream_set_timeout($socket, 5);
+    stream_set_timeout($socket, max(1, (int)$timeout));
     $newLine = "\r\n";
     // @: x902/tipe lain kadang me-reset koneksi saat POST (errno 10054) — jangan bocorkan notice ke halaman/JSON
     if(@fputs($socket, "POST /iWsService HTTP/1.0" . $newLine)===false){ @fclose($socket); return false; }
@@ -196,7 +693,7 @@ function send_soap_request($ip, $port, $request) {
     
     $response = "";
     while (!@feof($socket)) {
-        $line = @fgets($socket, 1024);
+        $line = @fgets($socket, 8192);
         if($line===false) break;
         $response .= $line;
         $meta=stream_get_meta_data($socket);
@@ -1209,6 +1706,13 @@ function pull_attendance_from_all_devices($koneksi, $start_date, $end_date) {
             // pin|tgl yang sama — termasuk yg baru disimpan di batch ini).
             $batch_values = [];
             foreach($attendance as $record) {
+                // Ambil hanya tap pada rentang tanggal yang diminta.
+                // Sebagian mesin mengabaikan StartDate/EndDate dan mengirim SEMUA log historis.
+                if ($record['date'] < $start_date || $record['date'] > $end_date) {
+                    $device_results['duplicates_ignored']++;
+                    $results['duplicates_ignored']++;
+                    continue;
+                }
                 $pin = $koneksi->real_escape_string($record['pin']);
                 $date = $koneksi->real_escape_string($record['date']);
                 $datetime = $koneksi->real_escape_string($record['datetime']);
@@ -1438,33 +1942,12 @@ if (!function_exists('get_device_user_names')) {
 // Dipakai untuk menampilkan nama PIN yang belum terdaftar di master karyawan.
 function get_device_user_names($koneksi) {
     $map = [];
-    if (!function_exists('get_all_devices')) return $map;
-    foreach (get_all_devices($koneksi) as $device) {
-        if (empty($device['ip_mesin'])) continue;
-        if (function_exists('test_device_connection') && !test_device_connection($device['ip_mesin'], $device['port'])) continue;
-        if (($device['protocol'] ?? 'soap') === 'zkudp') {
-            if (!function_exists('zkb_get_users')) continue;
-            $zr = zkb_get_users($device['ip_mesin'], $device['port'] ?? 4370, intval($device['comm_key'] ?? 0));
-            if (empty($zr['success'])) continue;
-            foreach (($zr['users'] ?? []) as $u) {
-                $pin = trim((string)($u['pin'] ?? ''));
-                $nm = trim((string)($u['nama'] ?? ''));
-                if ($pin !== '' && $nm !== '' && !isset($map[$pin])) $map[$pin] = $nm;
-            }
-            continue;
-        }
-        if (!function_exists('send_soap_request')) continue;
-        $comm_key = $device['comm_key'] ?? 0;
-        $resp = send_soap_request($device['ip_mesin'], $device['port'], "<GetAllUserInfo><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></GetAllUserInfo>");
-        if (!$resp) continue;
-        $pos = 0;
-        while (($start = strpos($resp, '<Row>', $pos)) !== false && ($end = strpos($resp, '</Row>', $start)) !== false) {
-            $row = substr($resp, $start + 5, $end - $start - 5);
-            $pin = $name = '';
-            if (preg_match('/<PIN>([^<]*)<\/PIN>/', $row, $m)) $pin = trim($m[1]);
-            if (preg_match('/<Name>([^<]*)<\/Name>/', $row, $m)) $name = trim($m[1]);
-            if ($pin !== '' && $name !== '' && !isset($map[$pin])) $map[$pin] = $name;
-            $pos = $end + 6;
+    if (!function_exists('get_device_users_map')) return $map;
+    foreach (get_device_users_map($koneksi) as $pins) {
+        if (!is_array($pins)) continue;
+        foreach ($pins as $pin => $nm) {
+            $pin = trim((string)$pin); $nm = trim((string)$nm);
+            if ($pin !== '' && $nm !== '' && !isset($map[$pin])) $map[$pin] = $nm;
         }
     }
     return $map;

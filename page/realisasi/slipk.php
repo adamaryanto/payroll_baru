@@ -25,7 +25,7 @@ $q_list = $koneksi->query("SELECT A.id_karyawan, A.no_absen, A.nama_karyawan, B.
                         <tr class="bg-gray-50">
                             <th class="py-4 px-4 text-[11px] font-bold text-gray-500 uppercase tracking-widest border-b">No. Absen</th>
                             <th class="py-4 px-4 text-[11px] font-bold text-gray-500 uppercase tracking-widest border-b">Nama Karyawan</th>
-                            <th class="py-4 px-4 text-[11px] font-bold text-gray-500 uppercase tracking-widest border-b">Departemen</th>
+                            <th class="py-4 px-4 text-[11px] font-bold text-gray-500 uppercase tracking-widest border-b">Bagian</th>
                             <th class="py-4 px-4 text-[11px] font-bold text-gray-500 uppercase tracking-widest border-b text-center">Aksi</th>
                         </tr>
                     </thead>

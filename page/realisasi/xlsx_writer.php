@@ -100,6 +100,22 @@ class RealisasiXlsx {
         foreach ($this->sheets[$sh]['merge'] as $m) {
             if ($r1 <= $m[2] && $r2 >= $m[0] && $c1 <= $m[3] && $c2 >= $m[1]) return; // tumpang tindih, buang
         }
+        // Ratakan style sel anchor ke seluruh area merge (border/fill tidak putus).
+        // Hanya sel kosong yang diisi; isi sel lain yang sudah ada tidak ditimpa.
+        $anchor = $this->sheets[$sh]['rows'][$r1][$c1] ?? null;
+        if ($anchor && isset($anchor['s'])) {
+            for ($rr = $r1; $rr <= $r2; $rr++) {
+                for ($cc = $c1; $cc <= $c2; $cc++) {
+                    if ($rr === $r1 && $cc === $c1) continue;
+                    if (!isset($this->sheets[$sh]['rows'][$rr][$cc])) {
+                        $this->sheets[$sh]['rows'][$rr][$cc] = ['v' => '', 't' => 'e', 's' => $anchor['s']];
+                    } elseif (($this->sheets[$sh]['rows'][$rr][$cc]['v'] ?? '') === '') {
+                        $this->sheets[$sh]['rows'][$rr][$cc]['s'] = $anchor['s'];
+                    }
+                }
+            }
+            if ($c2 > $this->sheets[$sh]['maxcol']) $this->sheets[$sh]['maxcol'] = $c2;
+        }
         $this->sheets[$sh]['merge'][] = [$r1, $c1, $r2, $c2];
     }
 
@@ -280,38 +296,76 @@ class RealisasiXlsx {
         return $x;
     }
 
-    // Lebar kolom ngepas isi (seperti tabel HTML): dihitung dari perkiraan TAMPILAN,
-    // bukan panjang mentah — angka ikut formatnya (Rp, ribuan, desimal).
-    // Sel kosong tidak ikut menghitung. Baris merge (judul/section) dilewati.
+    // Perkiraan lebar TAMPILAN satu sel (satuan kolom Excel).
+    // Memperhitungkan: format angka (Rp/ribuan/desimal), ukuran font sel,
+    // dan bold — karena kolom Excel diukur dgn font normal 11pt.
+    private function needFor($cell) {
+        if (!is_array($cell) || ($cell['t'] ?? '') === 'e') return null;
+        $sty = $this->xfs[$cell['s']] ?? null;
+        $sz = $sty ? (int)$sty[1] : 11;
+        $b = $sty ? !empty($sty[0]) : false;
+        if ($cell['t'] === 'n') {
+            $digits = strlen(preg_replace('/[^0-9]/', '', (string)$cell['v']));
+            if ($digits === 0) $digits = 1;
+            $commas = (int)floor(($digits - 1) / 3);
+            $num = $sty ? ($sty[7] ?? null) : null;
+            $suffix = ($num === 'dec2') ? 3 : (($num === 'rp') ? 2 : (($num === 'rp2') ? 5 : 0));
+            $len = $digits + $commas + $suffix;
+        } else {
+            $str = ($cell['t'] === 's') ? ($this->strings[(int)$cell['v']] ?? '') : (string)($cell['v'] ?? '');
+            $mlen = function_exists('mb_strlen') ? mb_strlen($str, 'UTF-8') : strlen($str);
+            if ($mlen === 0) return null;
+            $len = min($mlen, 100);
+        }
+        return ($len * 1.02 * max(0.8, $sz / 11) + 2) * ($b ? 1.15 : 1.1);
+    }
+
+    // Lebar kolom ngepas isi (seperti tabel HTML).
+    // Pass 1: semua sel KECUALI sel non-anchor di dalam merge, dan anchor
+    // merge LEBAR (>4 kolom, mis. judul/section — biar kolom No tidak melar).
+    // Pass 2: anchor merge horizontal 1 baris (mis. footer) — bila gabungan
+    // kolom kurang lebar, selisihnya ditambahkan ke kolom terakhir rentang.
     // $max = batas atas, $min = batas bawah.
     public function autofit($sh, $max = 60, $min = 10) {
         $sh = (int)$sh;
         if (!isset($this->sheets[$sh])) return;
-        $skip = [];
-        foreach ($this->sheets[$sh]['merge'] as $m) for ($r = $m[0]; $r <= $m[2]; $r++) $skip[$r] = true;
+        $covered = []; // "r|c" sel non-anchor dalam merge -> lewati
+        $spanAnchor = []; // "r|c" anchor merge multi-kolom -> lewati di pass 1 (diurus pass 2)
+        foreach ($this->sheets[$sh]['merge'] as $m) {
+            for ($r = $m[0]; $r <= $m[2]; $r++) {
+                for ($c = $m[1]; $c <= $m[3]; $c++) {
+                    if ($r === $m[0] && $c === $m[1]) {
+                        if ($m[3] > $m[1] || $m[2] > $m[0]) $spanAnchor["$r|$c"] = true;
+                    } else {
+                        $covered["$r|$c"] = true;
+                    }
+                }
+            }
+        }
         $w = [];
         foreach ($this->sheets[$sh]['rows'] as $r => $cols) {
-            if (isset($skip[$r])) continue;
             foreach ($cols as $c => $cell) {
-                if ($cell['t'] === 'e') continue;
-                if ($cell['t'] === 'n') {
-                    $digits = strlen(preg_replace('/[^0-9]/', '', (string)$cell['v']));
-                    if ($digits === 0) $digits = 1;
-                    $commas = (int)floor(($digits - 1) / 3);
-                    $num = $this->xfs[$cell['s']][7] ?? null;
-                    $suffix = ($num === 'dec2') ? 3 : (($num === 'rp') ? 2 : (($num === 'rp2') ? 5 : 0));
-                    $len = $digits + $commas + $suffix;
-                } else {
-                    $str = $this->strings[(int)$cell['v']] ?? '';
-                    $mlen = function_exists('mb_strlen') ? mb_strlen($str, 'UTF-8') : strlen($str);
-                    if ($mlen === 0) continue;
-                    $len = min($mlen, 100);
-                }
-                $need = $len * 1.05 + 2;
+                if (isset($covered["$r|$c"]) || isset($spanAnchor["$r|$c"])) continue;
+                $need = $this->needFor($cell);
+                if ($need === null) continue;
                 if (!isset($w[$c]) || $need > $w[$c]) $w[$c] = $need;
             }
         }
         foreach ($w as $c => $need) $this->sheets[$sh]['widths'][$c] = max($min, min($max, round($need, 1)));
+        foreach ($this->sheets[$sh]['merge'] as $m) {
+            if ($m[0] !== $m[2]) continue; // hanya merge horizontal 1 baris
+            $anchor = $this->sheets[$sh]['rows'][$m[0]][$m[1]] ?? null;
+            // Hanya angka yang butuh pelebaran (teks tidak jadi ######, melainkan overflow).
+            if (!is_array($anchor) || ($anchor['t'] ?? '') !== 'n') continue;
+            $need = $this->needFor($anchor);
+            if ($need === null) continue;
+            $total = 0;
+            for ($c = $m[1]; $c <= $m[3]; $c++) $total += $this->sheets[$sh]['widths'][$c] ?? $min;
+            if ($need > $total) {
+                $lc = $m[3];
+                $this->sheets[$sh]['widths'][$lc] = round(max($min, min($max, ($this->sheets[$sh]['widths'][$lc] ?? $min) + ($need - $total))), 1);
+            }
+        }
     }
 
     public function save($path) {

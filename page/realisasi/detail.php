@@ -10,6 +10,10 @@ if ($checkGantiCol->num_rows == 0) {
     $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_pengganti INT NULL DEFAULT NULL");
 }
 
+// Helper waktu + toleransi terpusat (SAMA kayak tarik data & kelola)
+require_once __DIR__ . '/sync_lib.php';
+$toleransi_d = function_exists('load_toleransi') ? load_toleransi($koneksi) : ['masuk' => 10, 'pulang' => 5, 'ist_keluar' => 5, 'ist_masuk' => 10];
+
 // Helpers for cross-midnight time comparisons
 if (!function_exists('is_time_late')) {
     function is_time_late($actual, $expected) {
@@ -48,7 +52,7 @@ if (isset($_GET['id'])) {
                            BB.nama_karyawan, 
                            BB.jenis_kelamin,
                            D.nama_departmen, 
-                           SD.nama_sub_department,
+                           JB.jabatan as jabatan_tampil,
                            D2.nama_departmen as bagian_manual_str,
                            SD2.nama_sub_department as sub_bagian_manual_str,
                            RD.upah as upah_master
@@ -59,7 +63,7 @@ if (isset($_GET['id'])) {
                     LEFT JOIN tb_rkk_detail RD ON A.id_rkk_detail = RD.id_rkk_detail
                     /* Mengambil data Departemen & Sub-Dept langsung dari master karyawan */
                     LEFT JOIN ms_departmen D ON BB.id_departmen = D.id_departmen
-                    LEFT JOIN ms_sub_department SD ON BB.id_sub_department = SD.id_sub_department
+                    LEFT JOIN ms_jabatan JB ON BB.id_jabatan = JB.id_jabatan
                     /* Mengambil data Departemen & Sub-Dept untuk karyawan manual */
                     LEFT JOIN ms_departmen D2 ON A.id_departmen = D2.id_departmen
                     LEFT JOIN ms_sub_department SD2 ON A.id_sub_department = SD2.id_sub_department
@@ -154,38 +158,32 @@ if (isset($_GET['id'])) {
     $has_ist_masuk = !empty($jamIstirahatMasukRealisasi) && $jamIstirahatMasukRealisasi != '00:00:00';
     $has_ist_keluar = !empty($jamIstirahatKeluarRealisasi) && $jamIstirahatKeluarRealisasi != '00:00:00';
 
-    $is_flexible = (strpos(strtoupper($datadetail['shift'] ?? ''), 'FLEXI') !== false);
-    $expected_hours = 7;
-    if ($is_flexible && preg_match('/(\d+)\s*JAM/i', $datadetail['shift'], $matches)) {
-        $expected_hours = (int)$matches[1];
-    }
+    $is_flexible = is_flexible_shift($datadetail['shift'] ?? '');
+    // Flexi murni = bebas jam (tanpa target & tanpa denda waktu); lembur manual saja.
 
     $isTotalMissing = (!$has_masuk && !$has_keluar);
     $hasIncompleteMain = ($has_masuk XOR $has_keluar);
     
     if ($is_flexible) {
+        // Flexi murni: bebas jam masuk/pulang/istirahat — tanpa denda waktu
         $isLate = false;
         $isLateBreak = false;
         $isEarlyBreak = false;
         $isEarlyOut = false;
-        if ($has_masuk && $has_keluar) {
-            $expected_keluar_time = date('H:i:s', strtotime($jamMasukRealisasi) + ($expected_hours * 3600));
-            $isEarlyOut = is_time_early($jamKeluarRealisasi, $expected_keluar_time);
-        }
         $hasIncompleteBreak = false;
     } else {
         $isRestExpected = (!empty($datadetail['shift_istirahat_keluar']) && $datadetail['shift_istirahat_keluar'] != '00:00:00');
         $hasIncompleteBreak = ($isRestExpected && ($has_ist_keluar XOR $has_ist_masuk));
         
-        $isLate = ($has_masuk && !empty($datadetail['shift_masuk']) && is_time_late($jamMasukRealisasi, $datadetail['shift_masuk']));
-        $isEarlyOut = ($has_keluar && !empty($datadetail['shift_keluar']) && is_time_early($jamKeluarRealisasi, $datadetail['shift_keluar'])); 
-        $isLateBreak = ($has_ist_masuk && !empty($datadetail['shift_istirahat_masuk']) && is_time_late($jamIstirahatMasukRealisasi, $datadetail['shift_istirahat_masuk']));
-        $isEarlyBreak = ($has_ist_keluar && !empty($datadetail['shift_istirahat_keluar']) && is_time_early($jamIstirahatKeluarRealisasi, $datadetail['shift_istirahat_keluar']));
+        $isLate = ($has_masuk && !empty($datadetail['shift_masuk']) && late_minutes($jamMasukRealisasi, $datadetail['shift_masuk']) > $toleransi_d['masuk']);
+        $isEarlyOut = ($has_keluar && !empty($datadetail['shift_keluar']) && early_minutes($jamKeluarRealisasi, $datadetail['shift_keluar']) > $toleransi_d['pulang']); 
+        $isLateBreak = ($has_ist_masuk && !empty($datadetail['shift_istirahat_masuk']) && late_minutes($jamIstirahatMasukRealisasi, $datadetail['shift_istirahat_masuk']) > $toleransi_d['ist_masuk']);
+        $isEarlyBreak = ($has_ist_keluar && !empty($datadetail['shift_istirahat_keluar']) && early_minutes($jamIstirahatKeluarRealisasi, $datadetail['shift_istirahat_keluar']) > $toleransi_d['ist_keluar']);
     }
 
-    // Logic denda: Kalkulasi otomatis berdasarkan jam hadir/jadwal
+    // Logic denda: Kalkulasi otomatis berdasarkan jam hadir/jadwal (flexi murni bebas semua denda waktu)
     $hasilpotonganpulang = ($isEarlyOut && !$isTotalMissing) ? $globalDendaPulang : 0;
-    $hasilpotongantidaklengkap = (!$isTotalMissing && ($hasIncompleteMain || $hasIncompleteBreak)) ? $globalDendaTidakLengkap : 0;
+    $hasilpotongantidaklengkap = (!$isTotalMissing && !$is_flexible && ($hasIncompleteMain || $hasIncompleteBreak)) ? $globalDendaTidakLengkap : 0;
     $hasilpotongantelat = ($isLate) ? $globalDendaMasuk : 0;
     $hasilpotonganistirahatkeluar = ($isEarlyBreak) ? $globalDendaIstirahatKeluar : 0;
     $hasilpotonganistirahatmasuk = ($isLateBreak) ? $globalDendaIstirahatMasuk : 0;
@@ -217,18 +215,8 @@ if (isset($_GET['id'])) {
         $upahPokokTampil = 0;
     }
 
-    // Logika Lembur Otomatis jika flexible
+    // Logika Lembur: manual / tersimpan (flexi murni tanpa target jam otomatis)
     $lembur_jam_val = isset($datadetail['lembur_jam']) ? (float)$datadetail['lembur_jam'] : 0;
-    if ($lembur_jam_val == 0 && $is_flexible && $has_masuk && $has_keluar) {
-        $work_duration = (strtotime($jamKeluarRealisasi) - strtotime($jamMasukRealisasi));
-        if ($work_duration > 43200) $work_duration -= 86400;
-        elseif ($work_duration < -43200) $work_duration += 86400;
-        
-        $work_hours = $work_duration / 3600;
-        if ($work_hours > $expected_hours) {
-            $lembur_jam_val = round($work_hours - $expected_hours, 1);
-        }
-    }
     $lemburPokokTampil = ($lembur_jam_val > 0) ? ($lembur_jam_val * $globalLemburPerJam) : (float)($datadetail['lembur'] ?? 0);
 
     // Additional Safeguard for Draft (Status 0): Force zero penalties
@@ -335,8 +323,8 @@ if (!function_exists('rupiah')) {
                         <input type="text" readonly value="<?= !empty($datadetail['nama_departmen']) ? $datadetail['nama_departmen'] : ($datadetail['bagian_manual_str'] ?? '') ?>" class="form-control" style="background: #f9fafb;">
                     </div>
                     <div class="form-group col-md-3">
-                        <label>SUB BAGIAN</label>
-                        <input type="text" readonly value="<?= !empty($datadetail['nama_sub_department']) ? $datadetail['nama_sub_department'] : ($datadetail['sub_bagian_manual_str'] ?? '') ?>" class="form-control" style="background: #f9fafb;">
+                        <label>POSISI</label>
+                        <input type="text" readonly value="<?= htmlspecialchars((string)($datadetail['jabatan_tampil'] ?? '')) ?>" class="form-control" style="background: #f9fafb;">
                     </div>
                 </div>
                 <div class="row">
@@ -352,7 +340,7 @@ if (!function_exists('rupiah')) {
                             $tukar_in = [];
                             $q_in = $koneksi->query("SELECT DISTINCT id_karyawan FROM tb_realisasi_detail WHERE id_realisasi = '" . (int)$dataidrealisasi . "' AND id_karyawan <> 0");
                             while ($q_in && ($rr = $q_in->fetch_assoc())) $tukar_in[(int)$rr['id_karyawan']] = true;
-                            $q_tukar = $koneksi->query("SELECT K.id_karyawan, K.nama_karyawan, O.OS_DHK as os FROM ms_karyawan K LEFT JOIN ms_os_dhk O ON K.id_os_dhk = O.id_os_dhk WHERE K.status_karyawan = 'Aktif' ORDER BY K.nama_karyawan ASC");
+                            $q_tukar = $koneksi->query("SELECT K.id_karyawan, K.nama_karyawan, O.OS_DHK as os FROM ms_karyawan K LEFT JOIN ms_os_dhk O ON K.id_os_dhk = O.id_os_dhk WHERE K.status_karyawan = 'Aktif' AND K.nama_karyawan NOT LIKE 'User PIN%' ORDER BY K.nama_karyawan ASC");
                             while ($q_tukar && ($tk = $q_tukar->fetch_assoc())) {
                                 $tid = (int)$tk['id_karyawan'];
                                 $locked = ($tid !== $tukar_cur && isset($tukar_in[$tid]));
@@ -572,26 +560,27 @@ if (isset($_POST['simpan'])) {
     $has_ist_masuk = !empty($tistirahatmasuk) && $tistirahatmasuk != '00:00:00';
     $has_ist_keluar = !empty($tistirahatkeluar) && $tistirahatkeluar != '00:00:00';
 
+    $is_flex_save = is_flexible_shift(($dJadwal['keterangan'] ?? '') !== '' ? $dJadwal['keterangan'] : ($datadetail['shift'] ?? ''));
     if ($has_masuk || $has_keluar) {
-        // Late Entrance
-        if ($has_masuk && is_time_late($tjammasuk, $s_masuk)) {
+        // Late Entrance (lewat toleransi; flexi murni bebas)
+        if (!$is_flex_save && $has_masuk && late_minutes($tjammasuk, $s_masuk) > $toleransi_d['masuk']) {
             $p_telat = $gd_masuk;
         }
-        // Early Departure
-        if ($has_keluar && is_time_early($tjamkeluar, $s_keluar)) {
+        // Early Departure (lewat toleransi; flexi murni bebas)
+        if (!$is_flex_save && $has_keluar && early_minutes($tjamkeluar, $s_keluar) > $toleransi_d['pulang']) {
             $p_pulang = $gd_pulang;
         }
-        // Early Break
-        if ($has_ist_keluar && is_time_early($tistirahatkeluar, $s_ist_keluar)) {
+        // Early Break (lewat toleransi; flexi murni bebas)
+        if (!$is_flex_save && $has_ist_keluar && early_minutes($tistirahatkeluar, $s_ist_keluar) > $toleransi_d['ist_keluar']) {
             $p_ist_awal = $gd_istirahat_awal;
         }
-        // Late Break Return
-        if ($has_ist_masuk && is_time_late($tistirahatmasuk, $s_ist_masuk)) {
+        // Late Break Return (lewat toleransi; flexi murni bebas)
+        if (!$is_flex_save && $has_ist_masuk && late_minutes($tistirahatmasuk, $s_ist_masuk) > $toleransi_d['ist_masuk']) {
             $p_ist_telat = $gd_istirahat_telat;
         }
 
         $shift_ket = $dJadwal['keterangan'] ?? '';
-        $is_flexible = (strpos(strtoupper($shift_ket), 'FLEXI') !== false);
+        $is_flexible = is_flexible_shift($shift_ket);
         $isRestExpected = (!$is_flexible && !empty($s_ist_keluar) && $s_ist_keluar != '00:00:00');
         $hasIncompleteBreak = ($isRestExpected && (!$has_ist_keluar || !$has_ist_masuk));
         
@@ -713,7 +702,7 @@ $(document).ready(function() {
         let finalUpahPokok = (currentRUpah > 0) ? currentRUpah : upahMaster;
 
         const shift = shiftData[shiftId];
-        const isFlexible = (shift && shift.keterangan.toUpperCase().indexOf('FLEXI') !== -1);
+        const isFlexible = (shift && (shift.keterangan.toUpperCase().indexOf('FLEXI') !== -1 || shift.keterangan.toUpperCase().indexOf('FLEKSI') !== -1));
         let expectedHours = 7;
         if (isFlexible) {
             let match = shift.keterangan.match(/(\d+)\s*JAM/i);
@@ -751,11 +740,7 @@ $(document).ready(function() {
                 // Manual input in draft - show what will happen
                 if (shift) {
                     if (isFlexible) {
-                        if (hasMasuk && hasKeluar) {
-                            let expectedKeluarSecs = timeToSeconds(jamMasuk) + (expectedHours * 3600);
-                            if (expectedKeluarSecs > 86400) expectedKeluarSecs -= 86400;
-                            if (timeToSeconds(jamKeluar) < expectedKeluarSecs) pPulang = dendaGlobal.pulang;
-                        }
+                        // Flexi murni: bebas jam (hanya tidak-lengkap bila salah satu kosong)
                         if (hasMasuk !== hasKeluar) pTidakLengkap = dendaGlobal.tidakLengkap;
                     } else {
                         if (hasMasuk && shift.masuk !== '00:00:00' && timeToSeconds(jamMasuk) > timeToSeconds(shift.masuk)) pTelat = dendaGlobal.masuk;
@@ -776,11 +761,7 @@ $(document).ready(function() {
             // Normal calculation for HADIR (Status > 0)
             if (shift) {
                 if (isFlexible) {
-                    if (hasMasuk && hasKeluar) {
-                        let expectedKeluarSecs = timeToSeconds(jamMasuk) + (expectedHours * 3600);
-                        if (expectedKeluarSecs > 86400) expectedKeluarSecs -= 86400;
-                        if (timeToSeconds(jamKeluar) < expectedKeluarSecs) pPulang = dendaGlobal.pulang;
-                    }
+                    // Flexi murni: bebas jam (hanya tidak-lengkap bila salah satu kosong)
                     if (hasMasuk !== hasKeluar) pTidakLengkap = dendaGlobal.tidakLengkap;
                 } else {
                     if (hasMasuk && shift.masuk !== '00:00:00' && timeToSeconds(jamMasuk) > timeToSeconds(shift.masuk)) pTelat = dendaGlobal.masuk;
@@ -810,32 +791,7 @@ $(document).ready(function() {
         $('[style*="background: #eff6ff"]').val(totalFmt);
     }
 
-    // Auto-calculate lembur jam when scan times change for flexible shift
-    $('[name="tjammasuk"], [name="tjamkeluar"]').on('change input', function() {
-        const shiftId = $('[name="tshift"]').val();
-        const shift = shiftData[shiftId];
-        const isFlexible = (shift && shift.keterangan.toUpperCase().indexOf('FLEXI') !== -1);
-        if (isFlexible) {
-            let match = shift.keterangan.match(/(\d+)\s*JAM/i);
-            let expectedHours = match ? parseInt(match[1]) : 7;
-            const jamMasuk = $('[name="tjammasuk"]').val();
-            const jamKeluar = $('[name="tjamkeluar"]').val();
-            if (jamMasuk && jamKeluar && jamMasuk !== '00:00:00' && jamKeluar !== '00:00:00') {
-                let masukSecs = timeToSeconds(jamMasuk);
-                let keluarSecs = timeToSeconds(jamKeluar);
-                let workSecs = keluarSecs - masukSecs;
-                if (workSecs > 43200) workSecs -= 86400;
-                else if (workSecs < -43200) workSecs += 86400;
-                
-                let workHours = workSecs / 3600;
-                if (workHours > expectedHours) {
-                    $('[name="tlembur_jam"]').val(Math.round((workHours - expectedHours) * 10) / 10);
-                } else {
-                    $('[name="tlembur_jam"]').val(0);
-                }
-            }
-        }
-    });
+    // Lembur flexi diisi manual (tanpa target jam otomatis).
 
     $('[name="tshift"], [name="tjammasuk"], [name="tjamkeluar"], [name="tistirahatmasuk"], [name="tistirahatkeluar"], [name="tlembur_jam"], [name="tpotlainnya"]').on('change input', calculate);
 });
