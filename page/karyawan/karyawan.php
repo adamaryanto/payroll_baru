@@ -1084,6 +1084,28 @@ if (isset($_POST['bulk_copy_selected'])) {
                 if (!result.isConfirmed) return;
                 Swal.fire({title:'Menghapus...', allowOutsideClick:false, showConfirmButton:false, showCancelButton:false, didOpen:()=>Swal.showLoading()});
                 $.post('page/karyawan/ajax_hapus.php',{action:'delete_direct',id:id},function(ex){
+                    if(ex.need_confirm){
+                        Swal.fire({
+                            title:'PIN2 Dipakai Orang Lain',
+                            html: ex.msg + '<br><br><b>Lanjut hapus?</b> (orang lain itu juga akan terhapus dari mesin)',
+                            icon:'warning',
+                            showCancelButton:true,
+                            confirmButtonText:'Ya, Tetap Hapus',
+                            cancelButtonText:'Batal',
+                            confirmButtonColor:'#e11d48'
+                        }).then((r2)=>{
+                            if(!r2.isConfirmed) return;
+                            Swal.fire({title:'Menghapus...', allowOutsideClick:false, showConfirmButton:false, showCancelButton:false, didOpen:()=>Swal.showLoading()});
+                            $.post('page/karyawan/ajax_hapus.php',{action:'delete_direct',id:id,confirm_pin2:1},function(ex2){
+                                if(!ex2.success){ Swal.fire({title:'Gagal',text:ex2.msg,icon:'error'}); return; }
+                                let h2='<div class="text-left text-sm">'+ex2.msg+'<div class="mt-2">';
+                                for(const did in (ex2.results||{})){ const x=ex2.results[did]; if(!x.device) continue; h2+='<div class="p-2 border rounded mb-1"><b>'+x.device+'</b>: '+x.message+'</div>'; }
+                                h2+='</div></div>';
+                                Swal.fire({title:'Berhasil',html:h2,icon:'success',confirmButtonColor:'#4f46e5'}).then(()=>location.reload());
+                            },'json');
+                        });
+                        return;
+                    }
                     if(!ex.success){ Swal.fire({title:'Gagal',text:ex.msg,icon:'error'}); return; }
                     let h='<div class="text-left text-sm">'+ex.msg+'<div class="mt-2">';
                     for(const did in (ex.results||{})){ const x=ex.results[did]; if(!x.device) continue; h+='<div class="p-2 border rounded mb-1"><b>'+x.device+'</b>: '+x.message+'</div>'; }

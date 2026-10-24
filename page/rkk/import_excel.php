@@ -72,9 +72,12 @@ if ($step === 'commit') {
                 }
                 if (!$alert) {
                     set_time_limit(0); // file besar butuh waktu
+                    include_once __DIR__ . '/../../device_sync_helper.php';
+                    create_sync_log_table($koneksi);
                     $koneksi->begin_transaction();
                     $tx_fail = '';
                     $now = date('Y-m-d H:i:s');
+                    $new_karyawan_ids = []; // karyawan baru -> auto push ke mesin setelah commit
                     $ket = $koneksi->real_escape_string('Import Excel ' . ($imp['title'] ?? $tgl));
                     $jamkerja = 0; // durasi shift terlama (jam); dihitung per baris di loop bawah.
                     // Catatan: kolom JAM KERJA di Excel = fraksi JAM MASUK shift (0.25 = jam 6), bukan durasi — jangan di-max langsung.
@@ -122,6 +125,7 @@ if ($step === 'commit') {
                             $kid = rx_make_karyawan($koneksi, $r['nama'], $r['osdhk'] ?? '', $r['golongan'] ?? '', $r['posisi'] ?? '', $jd, $r['upah'] ?? 0, $tgl, $dep, $sub);
                             if ($kid > 0) {
                                 $c_new++;
+                                $new_karyawan_ids[] = $kid;
                                 // Paksa dept/posisi master ikut pilihan preview (bukan tebakan teks Excel)
                                 $koneksi->query("UPDATE ms_karyawan SET id_departmen='$dep', id_sub_department='$sub' WHERE id_karyawan='$kid'");
                             }
@@ -148,11 +152,31 @@ if ($step === 'commit') {
                         $alert = ["icon" => "error", "title" => "Import Gagal", "text" => $tx_fail . " Semua dibatalkan, tidak ada data setengah jadi. Coba lagi."];
                     } else {
                         $koneksi->commit();
+                        // Auto-push karyawan baru hasil import ke semua mesin absen
+                        $sync_msg = '';
+                        if (!empty($new_karyawan_ids)) {
+                            $sync_ok = 0; $sync_fail = 0; $sync_skip = 0;
+                            foreach ($new_karyawan_ids as $new_id) {
+                                try {
+                                    $sync_res = sync_karyawan_to_devices($koneksi, (int)$new_id);
+                                    foreach ((array)$sync_res as $did => $srr) {
+                                        $st = $srr['status'] ?? '';
+                                        if ($st === 'success') $sync_ok++;
+                                        elseif ($st === 'error') $sync_fail++;
+                                        else $sync_skip++;
+                                    }
+                                } catch (Throwable $e) {
+                                    $sync_fail++;
+                                    error_log('Import auto-sync #' . $new_id . ': ' . $e->getMessage());
+                                }
+                            }
+                            $sync_msg = ", sync mesin: $sync_ok sukses" . ($sync_fail > 0 ? ", $sync_fail gagal" : '') . ($sync_skip > 0 ? ", $sync_skip skip" : '');
+                        }
                         // Boneless auto-isi halaman Boneless (bukan kelola), setelah RKK tersimpan
                         $bon_msg = rx_save_boneless($koneksi, $tgl, $id_rkk, $imp['boneless'] ?? null, $imp['title'] ?? '');
                     unset($_SESSION['rx_import']);
                     $alert = ["icon" => "success", "title" => "Import Selesai",
-                        "text" => "RKK#$id_rkk ($tgl): $c_kar karyawan" . ($c_new > 0 ? " ($c_new karyawan baru)" : "") . ($c_grup > 0 ? ", $c_grup grup baru" : "") . ($c_shift > 0 ? ", $c_shift shift baru" : "") . ($c_agt > 0 ? ", $c_agt anggota masuk master grup" : "") . $bon_msg . "."];
+                        "text" => "RKK#$id_rkk ($tgl): $c_kar karyawan" . ($c_new > 0 ? " ($c_new karyawan baru)" : "") . ($c_grup > 0 ? ", $c_grup grup baru" : "") . ($c_shift > 0 ? ", $c_shift shift baru" : "") . ($c_agt > 0 ? ", $c_agt anggota masuk master grup" : "") . $bon_msg . $sync_msg . "."];
                         $redirect = "?page=rkk";
                     }
                 }

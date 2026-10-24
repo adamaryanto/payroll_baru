@@ -91,7 +91,8 @@ function ensure_karyawan_pin_table($koneksi) {
  * Ambil daftar user tiap mesin: [id_mesin][pin] = nama.
  * Hanya mesin yang online. Dipakai sekali saat Tarik untuk mengisi mapping.
  */
-function get_device_users_full($koneksi, $force = false) {
+function get_device_users_full($koneksi, $force = false, $only_did = 0, $include_empty = false) {
+    $only_did = (int)$only_did;
     $dbname = '';
     if ($qdb = @$koneksi->query("SELECT DATABASE() AS d")) { $rdb = $qdb->fetch_assoc(); $dbname = (string)($rdb['d'] ?? ''); }
     $cacheFile = rtrim(sys_get_temp_dir(), '\\/') . DIRECTORY_SEPARATOR . 'payroll_devusers2_' . md5($dbname) . '.json';
@@ -111,6 +112,7 @@ function get_device_users_full($koneksi, $force = false) {
     foreach (get_all_devices($koneksi) as $device) {
         $did = (int)($device['id_mesin'] ?? 0);
         if ($did <= 0 || empty($device['ip_mesin'])) continue;
+        if ($only_did > 0 && $did !== $only_did) continue;
         if (function_exists('test_device_connection') && !test_device_connection($device['ip_mesin'], $device['port'])) {
             if (!empty($prevU[$did])) { $out[$did] = $prevU[$did]; $out2[$did] = $prevP[$did] ?? []; }
             continue;
@@ -126,7 +128,7 @@ function get_device_users_full($koneksi, $force = false) {
                 $pin = trim((string)($u['pin'] ?? ''));
                 $nm = trim((string)($u['nama'] ?? ''));
                 $p2 = trim((string)($u['pin2'] ?? ''));
-                if ($pin !== '' && $nm !== '') { $out[$did][$pin] = $nm; $out2[$did][$pin] = $p2; }
+                if ($pin !== '' && ($nm !== '' || $include_empty)) { $out[$did][$pin] = $nm; $out2[$did][$pin] = $p2; }
             }
             continue;
         }
@@ -150,7 +152,7 @@ function get_device_users_full($koneksi, $force = false) {
                 if (preg_match('/<PIN>([^<]*)<\/PIN>/', $row, $m)) $pin = trim($m[1]);
                 if (preg_match('/<PIN2>([^<]*)<\/PIN2>/', $row, $m)) $pin2 = trim($m[1]);
                 if (preg_match('/<Name>([^<]*)<\/Name>/', $row, $m)) $name = trim($m[1]);
-                if ($pin !== '' && $name !== '') { $didU[$pin] = $name; $didP[$pin] = $pin2; }
+                if ($pin !== '' && ($name !== '' || $include_empty)) { $didU[$pin] = $name; $didP[$pin] = $pin2; }
                 $pos = $end + 6;
             }
         }
@@ -163,7 +165,8 @@ function get_device_users_full($koneksi, $force = false) {
         }
     }
     $data = ['u' => $out, 'p2' => $out2];
-    @file_put_contents($cacheFile, json_encode($data));
+    // Jangan timpa cache lengkap bila hanya membaca satu mesin (data mesin lain bisa hilang).
+    if ($only_did <= 0 && !$include_empty) @file_put_contents($cacheFile, json_encode($data));
     return $data;
 }
 
@@ -1012,9 +1015,10 @@ function sync_all_karyawan_to_device($koneksi, $device_id) {
  * Dipakai halaman konfirmasi hapus: user pilih PIN mana yang mau dihapus.
  * Return [device_id => ['device'=>..,'ip'=>..,'online'=>bool,'matches'=>[['pin'=>..,'pin2'=>..,'name'=>..]],'message'=>..]]
  */
-function find_users_by_name($koneksi, $nama) {
+function find_users_by_name($koneksi, $nama, &$pin2_owners = null) {
     $nama = trim((string)$nama);
     $out = [];
+    if (is_array($pin2_owners)) $pin2_owners = [];
     foreach (get_all_devices($koneksi) as $device) {
         $did = $device['id_mesin'];
         $entry = ['device' => $device['nama_mesin'] ?? ('Mesin '.$did),
@@ -1029,9 +1033,15 @@ function find_users_by_name($koneksi, $nama) {
             $entry['online'] = true;
             foreach (($zr['users'] ?? []) as $u) {
                 $nm = trim((string)($u['nama'] ?? ''));
-                if ($nm !== '' && strcasecmp($nm, $nama) === 0) {
-                    $entry['matches'][] = ['pin' => trim((string)($u['pin'] ?? '')), 'pin2' => '', 'name' => $nm];
-                }
+            if ($nm !== '' && strcasecmp($nm, $nama) === 0) {
+                $entry['matches'][] = ['pin' => trim((string)($u['pin'] ?? '')), 'pin2' => '', 'name' => $nm];
+            }
+            // Kumpulkan pemilik PIN2 (untuk deteksi tabrakan)
+            $p2u = trim((string)($u['pin2'] ?? ''));
+            if (is_array($pin2_owners) && $p2u !== '') {
+                if (!isset($pin2_owners[$p2u])) $pin2_owners[$p2u] = [];
+                $pin2_owners[$p2u][] = $nm;
+            }
             }
             $entry['message'] = count($entry['matches']) . ' cocok';
             $out[$did] = $entry;
@@ -1053,6 +1063,10 @@ function find_users_by_name($koneksi, $nama) {
             if ($name !== '' && strcasecmp($name, $nama) === 0 && $pin !== '') {
                 $entry['matches'][] = ['pin' => $pin, 'pin2' => $pin2, 'name' => $name, 'priv' => $priv];
             }
+            if (is_array($pin2_owners) && $pin2 !== '') {
+                if (!isset($pin2_owners[$pin2])) $pin2_owners[$pin2] = [];
+                $pin2_owners[$pin2][] = $name !== '' ? $name : '(kosong)';
+            }
             $pos = $end + 6;
         }
         $entry['message'] = count($entry['matches']) . ' cocok';
@@ -1066,7 +1080,7 @@ function find_users_by_name($koneksi, $nama) {
  * $force = [device_id => [pin, ...]] untuk hapus PIN pilihan user dari halaman konfirmasi.
  * Kalau $force null: hapus semua PIN yang namanya cocok (dengan pengaman PIN-sharing).
  */
-function delete_karyawan_from_devices($koneksi, $nama, $dry_run = true, $force = null) {
+function delete_karyawan_from_devices($koneksi, $nama, $dry_run = true, $force = null, $fast = false) {
     $nama = trim((string)$nama);
     if ($nama === '' && empty($force)) {
         return [];
@@ -1163,6 +1177,61 @@ function delete_karyawan_from_devices($koneksi, $nama, $dry_run = true, $force =
                 'message' => $fail_b == 0
                     ? "Nama '$nama' berhasil dihapus dari mesin (PIN " . implode(',', $pins_biner) . ", biner)"
                     : ('Gagal menghapus: ' . implode(' | ', $msg_b))
+            ];
+            continue;
+        }
+
+        // MODE CEPAT: 1x DeleteUser by PIN (auto) + PIN2 (no_absen), tanpa wipe/verifikasi/retry.
+        if (!empty($fast)) {
+            $comm_key = $device['comm_key'] ?? 0;
+            $fast_pairs = [];
+            if (is_array($force) && array_key_exists($device['id_mesin'], $force)) {
+                foreach ((array)$force[$device['id_mesin']] as $fp) {
+                    $pin = ''; $pin2 = '';
+                    if (is_array($fp) && isset($fp['pin'])) { $pin = trim((string)$fp['pin']); $pin2 = trim((string)($fp['pin2'] ?? '')); }
+                    else {
+                        $fp = trim((string)$fp);
+                        if (strpos($fp, ':') !== false) { list($pin, $pin2) = array_map('trim', explode(':', $fp, 2)); }
+                        else { $pin = $fp; }
+                    }
+                    if ($pin !== '' && is_numeric($pin)) $fast_pairs[] = ['pin' => $pin, 'pin2' => $pin2];
+                }
+            }
+            $seen = [];
+            $fast_pairs = array_values(array_filter($fast_pairs, function($p) use (&$seen) {
+                if (isset($seen[$p['pin']])) return false;
+                $seen[$p['pin']] = true;
+                return true;
+            }));
+            if (empty($fast_pairs)) {
+                $results[$device['id_mesin']] = ['device' => $device['nama_mesin'], 'status' => 'skipped', 'message' => 'Tidak ada PIN'];
+                continue;
+            }
+            $ok = true; $msgs = [];
+            send_soap_request($device['ip_mesin'], $device['port'], "<DisableDevice><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></DisableDevice>");
+            foreach ($fast_pairs as $pp) {
+                $pin = $pp['pin']; $pin2 = $pp['pin2'] !== '' ? $pp['pin2'] : $pin;
+                $tried = [];
+                // 1) by-uid: PIN = PIN2 (no_absen)
+                $tried[] = ['label' => 'by-uid', 'soap' => build_delete_user_soap($comm_key, $pin2, '')];
+                // 2) by-pin2: PIN = auto, PIN2 = no_absen
+                if ($pin2 !== $pin) $tried[] = ['label' => 'by-pin2', 'soap' => build_delete_user_soap($comm_key, $pin, $pin2)];
+                $good = false; $resp = null;
+                foreach ($tried as $t) {
+                    $resp = send_soap_request($device['ip_mesin'], $device['port'], $t['soap']);
+                    $fail = $resp && (stripos($resp,'Fail') !== false || stripos($resp,'Error') !== false || preg_match('/<Result>\s*-?[1-9]\d*\s*</', $resp));
+                    $good = $resp && !$fail && (stripos($resp,'Success') !== false || stripos($resp,'Successfully') !== false || stripos($resp,'<DeleteUserResponse>') !== false || strpos($resp,'200 OK') !== false);
+                    if ($good) break;
+                }
+                if (!$good) { $ok = false; $msgs[] = "PIN $pin (PIN2 $pin2): " . substr(trim(strip_tags($resp ?? '')), 0, 60); }
+                send_soap_request($device['ip_mesin'], $device['port'], "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></RefreshData>");
+            }
+            send_soap_request($device['ip_mesin'], $device['port'], "<EnableDevice><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></EnableDevice>");
+            $pinsLabel = implode(',', array_column($fast_pairs, 'pin'));
+            $results[$device['id_mesin']] = [
+                'device' => $device['nama_mesin'],
+                'status' => $ok ? 'success' : 'error',
+                'message' => $ok ? 'Hapus cepat selesai (PIN ' . $pinsLabel . ')' : ('Gagal: ' . implode(' | ', $msgs))
             ];
             continue;
         }
@@ -1362,18 +1431,7 @@ function delete_karyawan_from_devices($koneksi, $nama, $dry_run = true, $force =
             $vmsg = 'Karyawan berhasil dihapus dari mesin';
             $still = $real_pins;
             $vresp = false;
-            for($va = 0; $va < 3 && !empty($still); $va++){
-                if($va > 0){
-                    foreach($still as $rp2){
-                        $soap2 = build_delete_user_soap($comm_key, $rp2, $real_pin2[$rp2] ?? '');
-                        $resp2 = send_soap_request($device['ip_mesin'], $device['port'], $soap2);
-                        log_sync_activity($koneksi, 'delete_attempt', $device['id_mesin'], $nama, $resp2 ? 'sent' : 'no_response',
-                            "Retry delete PIN:$rp2 (percobaan " . ($va+1) . ") - Response: " . ($resp2 ? substr(strip_tags($resp2),0,200) : 'null'));
-                    }
-                    $refresh = "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></RefreshData>";
-                    send_soap_request($device['ip_mesin'], $device['port'], $refresh);
-                }
-                sleep(2);
+            for($va = 0; $va < 1 && !empty($still); $va++){
                 $vresp = send_soap_request($device['ip_mesin'], $device['port'], $check_soap);
                 if(!$vresp) break;
                 $still = [];
@@ -1399,7 +1457,6 @@ function delete_karyawan_from_devices($koneksi, $nama, $dry_run = true, $force =
         } else {
             // Semua varian ditolak — tapi pastikan dulu via baca ulang (firmware kadang
             // ngerjain tapi balas Result 1, seperti kasus copy template kemarin)
-            sleep(2);
             $vresp0 = send_soap_request($device['ip_mesin'], $device['port'], $check_soap);
             $gone = false;
             if($vresp0){

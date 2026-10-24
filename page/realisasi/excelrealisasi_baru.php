@@ -379,8 +379,8 @@ foreach ($boneless_details as $bd0) {
 $val_bon_net = $sum_plus - $sum_minus;   // net boneless (plus - pengurangan)
 $val_grand = $tot_dibayar + $val_bon_net; // total realisasi
 $val_permobil = ($potong > 0) ? $val_grand / $potong : 0;
-$val_pabrik = $val_bon_mobil + $val_grand;
-$val_pabrik_mobil = ($potong > 0) ? $val_pabrik / $potong : 0;
+$val_pabrik = $tot_dibayar; // cuma total upah karyawan (biaya pabrik)
+$val_permobil = ($potong > 0) ? $val_grand / $potong : 0;
 
 $stOSH  = $x->style(['b' => true, 'sz' => 16, 'align' => 'center', 'fill' => 'B4C7E7', 'border' => true]);
 $stGT   = $x->style(['b' => true, 'sz' => 16, 'align' => 'left', 'color' => 'FFFFFF', 'fill' => '1F3864', 'border' => true]);
@@ -472,7 +472,7 @@ $rL = $rTop;
 $x->cell($s1, $rL, 1, 'REALISASI TOTAL REKAP BIAYA PABRIK', $stOSH); $x->merge($s1, $rL, 1, $rL, 3); $rL++;
 $x->cell($s1, $rL, 1, strtoupper(date('d-M-y', strtotime($tanggal_sql ?: 'now'))), $stOSH); $x->merge($s1, $rL, 1, $rL, 3); $rL++;
 $left_row($rL, $stCB, $stOSR, 'Biaya ' . (int)$potong . ' mobil', round($val_pabrik, 2)); $rL++;
-$left_row($rL, $stCB, $stOSR, 'Biaya permobil', round($val_pabrik_mobil, 2)); $rL++;
+$left_row($rL, $stCB, $stOSR, 'Biaya permobil', round($val_permobil, 2)); $rL++;
 
 // --- KIRI bawah: rekap outsourcing, rata bawah dengan HASIL AKHIR ---
 $os_box_h = 2 + 1 + count($os_master) + 1;

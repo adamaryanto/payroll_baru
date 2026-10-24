@@ -343,11 +343,11 @@ $grand_total_all = $grand_total + $total_boneless_final;
                 </tr>
                 <tr style="font-weight:bold;">
                     <td>Biaya <?php echo (int)$potong; ?> mobil</td>
-                    <td align="right">Rp <?php echo number_format($grand_total + $biaya_mobil_pure + $total_boneless_final, 2, '.', ','); ?></td>
+                    <td align="right">Rp <?php echo number_format($grand_total, 2, '.', ','); ?></td>
                 </tr>
                 <tr style="font-weight:bold;">
                     <td>Biaya permobil</td>
-                    <td align="right">Rp <?php echo ($potong > 0) ? number_format(($grand_total + $biaya_mobil_pure + $total_boneless_final) / $potong, 2, '.', ',') : '0.00'; ?></td>
+                    <td align="right">Rp <?php echo ($potong > 0) ? number_format($grand_total / $potong, 2, '.', ',') : '0.00'; ?></td>
                 </tr>
             </table>
         </td>

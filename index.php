@@ -235,6 +235,9 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
               <li class="nav-item">
               <a href="?page=mesin" class="nav-link"><i class="nav-icon fas fa-cog"></i><p>Setting Device</p></a>
               </li>
+              <li class="nav-item">
+              <a href="?page=telegram" class="nav-link"><i class="nav-icon fab fa-telegram"></i><p>Setting Telegram</p></a>
+              </li>
               <?php } ?>
               <?php } ?>
 
@@ -326,6 +329,8 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                     elseif ($aksi == "hapus") { include "page/grup_borongan/hapus.php"; }
                   } else if ($page == 'mesin') {
                     if ($aksi == "") { include "page/mesin/mesin.php"; }
+                  } else if ($page == 'telegram') {
+                    if ($aksi == "") { include "page/master/telegram.php"; }
                   } else if ($page == 'generate') {
                     if ($aksi == "") { include "page/generate/generate.php"; } 
                     elseif ($aksi == "tarik") { include "page/generate/tarik-data.php"; }

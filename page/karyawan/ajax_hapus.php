@@ -49,21 +49,51 @@ if ($action === 'exec') {
 }
 
 if ($action === 'delete_direct') {
-    // Hapus langsung by PIN tanpa preview (cepat: tidak baca GetAllUserInfo).
+        // Hapus langsung by NAMA (baca PIN+PIN2 dari mesin sekali, lalu hapus cepat by PIN2).
     $dbOnly = !empty($_POST['db_only']);
     $targets = [];
+    $pin2_owners = [];
     if (!$dbOnly) {
-        $no_absen = trim((string)($emp['no_absen'] ?? ''));
-        if ($no_absen === '') { echo json_encode(['success'=>false,'msg'=>'No. absen kosong — tidak bisa hapus dari mesin. Pakai hapus biasa lalu pilih DB Saja.']); exit; }
-        if (function_exists('get_all_devices')) {
-            foreach (get_all_devices($koneksi) as $d) {
-                $targets[$d['id_mesin']][] = $no_absen;
+        $found = function_exists('find_users_by_name') ? find_users_by_name($koneksi, $nama, $pin2_owners) : [];
+        foreach ($found as $did => $d) {
+            if (empty($d['online'])) continue;
+            $list = [];
+            foreach (($d['matches'] ?? []) as $m) {
+                $p = trim((string)($m['pin'] ?? ''));
+                if ($p === '' || !is_numeric($p)) continue;
+                $list[] = ['pin' => $p, 'pin2' => trim((string)($m['pin2'] ?? ''))];
             }
+            if (!empty($list)) $targets[$did] = $list;
+        }
+        if (empty($targets)) {
+            echo json_encode(['success'=>false,'msg'=>"Nama '$nama' tidak ditemukan di mesin yang online. Pilih 'DB Saja' bila hanya ingin hapus database."]);
+            exit;
+        }
+        // Deteksi tabrakan PIN2: kalau PIN2 (no. absen) dipakai orang lain di mesin lain
+        $collisions = [];
+        foreach ($targets as $did => $list) {
+            foreach ($list as $m) {
+                $p2 = $m['pin2'];
+                if ($p2 === '') continue;
+                $owners = array_values(array_unique($pin2_owners[$p2] ?? []));
+                $others = [];
+                foreach ($owners as $on) { if (strcasecmp(trim($on), $nama) !== 0) $others[] = $on; }
+                if (!empty($others)) $collisions[$p2] = array_values(array_unique($others));
+            }
+        }
+        if (!empty($collisions) && empty($_POST['confirm_pin2'])) {
+            $detail = '';
+            foreach ($collisions as $p2 => $names) {
+                $detail .= "PIN2 $p2 dipakai juga oleh: " . implode(', ', $names) . ". ";
+            }
+            echo json_encode(['success'=>false,'need_confirm'=>true,'collisions'=>$collisions,
+                'msg'=>"Peringatan: PIN2 (no. absen) yang akan dihapus dipakai orang lain di mesin lain. $detail Konfirmasi untuk tetap hapus (orang lain itu juga akan terhapus)."]);
+            exit;
         }
     }
     $results = [];
     if (!$dbOnly && !empty($targets)) {
-        $results = delete_karyawan_from_devices($koneksi, $nama, false, $targets);
+        $results = delete_karyawan_from_devices($koneksi, $nama, false, $targets, true);
         foreach ($results as $did => $r) {
             if ($did === '_dry_run_mode' || $did === '_dry_run_info') continue;
             log_sync_activity($koneksi, 'karyawan_delete_direct', $did, $id, $r['status'] ?? 'error', "Hapus langsung '$nama': " . ($r['message'] ?? ''));

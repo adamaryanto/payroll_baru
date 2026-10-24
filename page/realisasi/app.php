@@ -3,6 +3,10 @@ $id = $_GET['id'];
 $status = $_GET['iddetail'] ?? '';
 $tgl = date("Y-m-d H:i:s");
 
+if (file_exists(__DIR__ . '/../../telegram_helper.php')) {
+    include_once __DIR__ . '/../../telegram_helper.php';
+}
+
 // Direct Approval system with numeric status
 if ($status == "unapp" || $status == "unpro") {
     $sql = $koneksi->query("UPDATE tb_realisasi SET status_realisasi = 0, tgl_status = '$tgl' WHERE id_realisasi = '$id'");
@@ -16,6 +20,9 @@ if ($status == "unapp" || $status == "unpro") {
 }
 
 if ($sql) {
+    if ($status === 'pro' && function_exists('tg_notify_proposal')) {
+        try { tg_notify_proposal($koneksi, 'realisasi', (int)$id); } catch (Throwable $e) { error_log('Telegram notify realisasi: ' . $e->getMessage()); }
+    }
     $prev_url = isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '?page=rkk';
 ?>
     <!DOCTYPE html>

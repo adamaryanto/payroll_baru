@@ -3,6 +3,10 @@
 $id = $_GET['id'];
 $status = $_GET['iddetail'];
 
+if (file_exists(__DIR__ . '/../../telegram_helper.php')) {
+    include_once __DIR__ . '/../../telegram_helper.php';
+}
+
 if ($status == "pro") {
     // Validasi Boneless: Ambil tgl_rkk dari RKK
     $cek_rkk = $koneksi->query("SELECT tgl_rkk FROM tb_rkk WHERE id_rkk = '$id'");
@@ -77,6 +81,9 @@ if ($status == "pro") {
 
     $sql =   $koneksi->query("update tb_rkk set status_rkk = 1 where id_rkk = '$id' ");
     if ($sql) {
+        if (function_exists('tg_notify_proposal')) {
+            try { tg_notify_proposal($koneksi, 'rencana', (int)$id); } catch (Throwable $e) { error_log('Telegram notify rkk: ' . $e->getMessage()); }
+        }
         $prev_url = isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '?page=rkk';
 ?>
         <!DOCTYPE html>
