@@ -9,6 +9,12 @@ $checkGantiCol = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id
 if ($checkGantiCol->num_rows == 0) {
     $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_pengganti INT NULL DEFAULT NULL");
 }
+// Kolom jabatan per baris (Posisi di Detail): 0 = ikut jabatan master karyawan.
+// Dibuat di sini supaya Detail lama tanpa kolom ini tetap jalan.
+$checkJabCol = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_jabatan'");
+if ($checkJabCol && $checkJabCol->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_jabatan INT NOT NULL DEFAULT 0");
+}
 
 // Helper waktu + toleransi terpusat (SAMA kayak tarik data & kelola)
 require_once __DIR__ . '/sync_lib.php';
@@ -55,6 +61,9 @@ if (isset($_GET['id'])) {
                            JB.jabatan as jabatan_tampil,
                            D2.nama_departmen as bagian_manual_str,
                            SD2.nama_sub_department as sub_bagian_manual_str,
+                           BB.id_departmen as dept_master_id,
+                           BB.id_jabatan as jabatan_master_id,
+                           JB_D.jabatan as jabatan_detail_str,
                            RD.upah as upah_master
                     FROM tb_realisasi_detail A 
                     LEFT JOIN tb_realisasi B ON A.id_realisasi = B.id_realisasi
@@ -67,6 +76,7 @@ if (isset($_GET['id'])) {
                     /* Mengambil data Departemen & Sub-Dept untuk karyawan manual */
                     LEFT JOIN ms_departmen D2 ON A.id_departmen = D2.id_departmen
                     LEFT JOIN ms_sub_department SD2 ON A.id_sub_department = SD2.id_sub_department
+                    LEFT JOIN ms_jabatan JB_D ON A.id_jabatan = JB_D.id_jabatan
                     WHERE A.id_realisasi_detail = '$id'";
     
     $tampildetail = $koneksi->query($queryDetail);
@@ -94,6 +104,32 @@ if (isset($_GET['id'])) {
         </html>';
         exit;
     }
+
+    // Bagian & Posisi saat ini (untuk dropdown di bawah).
+    // Bagian: baris ini punya id_departmen sendiri (dari RKK/manual) -> itu yang
+    // dipakai; kalau 0 baru ikut master karyawan. Posisi: id_jabatan baris (0 =
+    // belum pernah diubah di Detail) -> ikut master karyawan.
+    $bagian_cur_id = (int)($datadetail['id_departmen'] ?? 0);
+    if ($bagian_cur_id <= 0) $bagian_cur_id = (int)($datadetail['dept_master_id'] ?? 0);
+    $bagian_cur_nama = $bagian_cur_id > 0 && (int)($datadetail['id_departmen'] ?? 0) > 0
+        ? ($datadetail['bagian_manual_str'] ?? '')
+        : ($datadetail['nama_departmen'] ?? '');
+    $posisi_cur_id = (int)($datadetail['id_jabatan'] ?? 0);
+    if ($posisi_cur_id <= 0) $posisi_cur_id = (int)($datadetail['jabatan_master_id'] ?? 0);
+    $posisi_cur_nama = (int)($datadetail['id_jabatan'] ?? 0) > 0
+        ? ($datadetail['jabatan_detail_str'] ?? '')
+        : ($datadetail['jabatan_tampil'] ?? '');
+
+    // 2026-10-26: Admin HR view-only di Realisasi, KECUALI Ganti Karyawan.
+    // Semua input di bawah di-disable untuk Admin HR, KECUALI dropdown Ganti
+    // Karyawan yang tetap aktif; tombol Simpan untuk Admin HR hanya menyimpan
+    // Ganti Karyawan saja (cabang khusus di handler Simpan di bawah, field lain
+    // diabaikan di server, jadi tidak bisa ditembus lewat POST langsung).
+    $is_admin_hr_ro = (strtolower($_SESSION['role'] ?? '') === 'admin hr');
+    $detail_ro = $is_admin_hr_ro ? ' disabled' : '';
+    // 2026-10-26: Bagian & Posisi SELALU enabled untuk semua role, termasuk Admin HR.
+    // $detail_ro tetap dipakai untuk field lain (shift, jam, upah, dll) yang masih
+    // dikunci untuk Admin HR. Owner juga tetap enabled (bukan dikunci).
 
     // Mapping Data Detail
     $dataidrealisasi = $datadetail['id_realisasi'];
@@ -145,6 +181,15 @@ if (isset($_GET['id'])) {
 
     // Get Global Daily Wage as fallback for manual employees (Hardcoded fallback)
     $default_upah = 115000;
+
+    // Baris borongan: upahnya ikut total borongan, jadi kolom UPAH di Detail
+    // tetap readonly untuk baris ini (sama seperti aturan edit upah di Kelola dulu).
+    $is_borongan_detail = false;
+    $q_bor_detail = $koneksi->query("SHOW TABLES LIKE 'tb_realisasi_borongan'");
+    if ($q_bor_detail && $q_bor_detail->num_rows > 0) {
+        $q_bor_c = $koneksi->query("SELECT COUNT(*) c FROM tb_realisasi_borongan WHERE id_realisasi_detail = '$id'");
+        $is_borongan_detail = $q_bor_c && (int)$q_bor_c->fetch_assoc()['c'] > 0;
+    }
 
     // Tentukan data yang digunakan untuk kalkulasi potongan (Input ra_ atau Log Mesin)
     $jamMasukRealisasi = !empty($datadetail['ra_masuk']) ? $datadetail['ra_masuk'] : ($datadetailabsen['absen_masuk'] ?? '');
@@ -320,35 +365,85 @@ if (!function_exists('rupiah')) {
                     </div>
                     <div class="form-group col-md-3">
                         <label>BAGIAN</label>
-                        <input type="text" readonly value="<?= !empty($datadetail['nama_departmen']) ? $datadetail['nama_departmen'] : ($datadetail['bagian_manual_str'] ?? '') ?>" class="form-control" style="background: #f9fafb;">
+                        <select name="tbagian" id="tbagian" class="form-control">
+                            <?php
+                            // Dropdown Bagian untuk SEMUA role (Detail memang sudah terbuka
+                            // untuk semua role, jadi tidak ada gate role di sini).
+                            $q_bag = $koneksi->query("SELECT id_departmen, nama_departmen FROM ms_departmen ORDER BY nama_departmen ASC");
+                            while ($q_bag && ($bg = $q_bag->fetch_assoc())) {
+                                echo '<option value="' . (int)$bg['id_departmen'] . '"' . ((int)$bg['id_departmen'] === $bagian_cur_id ? ' selected' : '') . '>' . htmlspecialchars($bg['nama_departmen']) . '</option>';
+                            }
+                            if ($bagian_cur_id > 0 && $bagian_cur_nama === '') {
+                                echo '<option value="' . $bagian_cur_id . '" selected>Bagian #' . $bagian_cur_id . ' (master sudah tidak ada)</option>';
+                            }
+                            ?>
+                            <option value="__baru__">+ Tambah Bagian Baru...</option>
+                        </select>
+                        <input type="text" name="tbagian_baru" id="tbagian_baru" class="form-control mt-2" placeholder="Nama Bagian Baru, mis. PRODUKSI" style="display:none;" autocomplete="off">
                     </div>
                     <div class="form-group col-md-3">
                         <label>POSISI</label>
-                        <input type="text" readonly value="<?= htmlspecialchars((string)($datadetail['jabatan_tampil'] ?? '')) ?>" class="form-control" style="background: #f9fafb;">
+                        <select name="tposisi" id="tposisi" class="form-control">
+                            <?php
+                            $q_pos = $koneksi->query("SELECT id_jabatan, jabatan FROM ms_jabatan ORDER BY jabatan ASC");
+                            while ($q_pos && ($ps = $q_pos->fetch_assoc())) {
+                                echo '<option value="' . (int)$ps['id_jabatan'] . '"' . ((int)$ps['id_jabatan'] === $posisi_cur_id ? ' selected' : '') . '>' . htmlspecialchars($ps['jabatan']) . '</option>';
+                            }
+                            if ($posisi_cur_id > 0 && $posisi_cur_nama === '') {
+                                echo '<option value="' . $posisi_cur_id . '" selected>Posisi #' . $posisi_cur_id . ' (master sudah tidak ada)</option>';
+                            }
+                            ?>
+                            <option value="__baru__">+ Tambah Posisi Baru...</option>
+                        </select>
+                        <input type="text" name="tposisi_baru" id="tposisi_baru" class="form-control mt-2" placeholder="Nama Posisi Baru, mis. KEPALA PRODUKSI" style="display:none;" autocomplete="off">
                     </div>
+                    <script>
+                    (function() {
+                        function toggleBaru(selId, inpId) {
+                            var s = document.getElementById(selId), i = document.getElementById(inpId);
+                            if (!s || !i) return;
+                            var show = (s.value === '__baru__');
+                            i.style.display = show ? '' : 'none';
+                            if (show) i.focus();
+                        }
+                        var b = document.getElementById('tbagian'), pb = document.getElementById('tbagian_baru');
+                        var j = document.getElementById('tposisi'), pj = document.getElementById('tposisi_baru');
+                        if (b) b.addEventListener('change', function() { toggleBaru('tbagian', 'tbagian_baru'); });
+                        if (j) j.addEventListener('change', function() { toggleBaru('tposisi', 'tposisi_baru'); });
+                    })();
+                    </script>
                 </div>
                 <div class="row">
                     <div class="form-group col-md-6">
                         <label>GANTI KARYAWAN <span class="text-muted">(nama tetap — tercatat "Digantikan oleh ...", ikut tersimpan saat Simpan)</span></label>
                         <input type="text" id="tukar_search" class="form-control mb-2" placeholder="Ketik untuk cari karyawan..." autocomplete="off">
                         <select name="tukar_id_karyawan" id="tukar_select" class="form-control">
-                            <option value="">- Tidak ganti -</option>
+                            <!-- 2026-10-26: "Tidak Ganti" kini opsi nyata bernilai 0 (bukan cuma
+                                 placeholder Select2), jadi kalau sudah terlanjur pilih pengganti,
+                                 bisa dipilih kembali ke Tidak Ganti lalu Simpan = batal ganti.
+                                 Memilih nama karyawan asli juga tetap = batal ganti. -->
+                            <option value="0"<?= ((int)($datadetail['id_pengganti'] ?? 0) === 0) ? ' selected' : '' ?>>- Tidak Ganti -</option>
                             <?php
                             $tukar_cur = (int)($datadetail['id_pengganti'] ?? 0);
+                            $tukar_owner = (int)($datadetail['id_karyawan'] ?? 0);
                             // Semua karyawan aktif tampil; yang sudah masuk rencana dikunci (disabled),
                             // hanya yang belum masuk rencana yang bisa dipilih jadi pengganti.
+                            // PENGECUALIAN: karyawan asli baris ini TIDAK dikunci — memilih namanya
+                            // artinya batal ganti (kembali ke karyawan asli), bukan error lagi.
                             $tukar_in = [];
                             $q_in = $koneksi->query("SELECT DISTINCT id_karyawan FROM tb_realisasi_detail WHERE id_realisasi = '" . (int)$dataidrealisasi . "' AND id_karyawan <> 0");
                             while ($q_in && ($rr = $q_in->fetch_assoc())) $tukar_in[(int)$rr['id_karyawan']] = true;
                             $q_tukar = $koneksi->query("SELECT K.id_karyawan, K.nama_karyawan, O.OS_DHK as os FROM ms_karyawan K LEFT JOIN ms_os_dhk O ON K.id_os_dhk = O.id_os_dhk WHERE K.status_karyawan = 'Aktif' AND K.nama_karyawan NOT LIKE 'User PIN%' ORDER BY K.nama_karyawan ASC");
                             while ($q_tukar && ($tk = $q_tukar->fetch_assoc())) {
                                 $tid = (int)$tk['id_karyawan'];
-                                $locked = ($tid !== $tukar_cur && isset($tukar_in[$tid]));
-                                $lbl = $tk['nama_karyawan'] . ' — ' . ($tk['os'] ?: '-') . ($locked ? ' (sudah di rencana)' : '');
+                                $locked = ($tid !== $tukar_cur && $tid !== $tukar_owner && isset($tukar_in[$tid]));
+                                $suffix = $locked ? ' (sudah di rencana)' : (($tid === $tukar_owner && $tukar_cur > 0) ? ' (karyawan asli — pilih untuk batal ganti)' : '');
+                                $lbl = $tk['nama_karyawan'] . ' — ' . ($tk['os'] ?: '-') . $suffix;
                                 echo "<option value=\"$tid\"" . ($tid === $tukar_cur ? ' selected' : '') . ($locked ? ' disabled' : '') . ">" . htmlspecialchars($lbl) . "</option>";
                             }
                             ?>
                         </select>
+                        <small class="text-muted">Untuk kembali ke karyawan asli, pilih "- Tidak ganti -" atau nama karyawan asli di atas, lalu Simpan.</small>
                         <script>
                         (function() {
                             var inp = document.getElementById('tukar_search');
@@ -358,7 +453,7 @@ if (!function_exists('rupiah')) {
                                 var q = inp.value.toLowerCase().trim();
                                 for (var i = 0; i < sel.options.length; i++) {
                                     var o = sel.options[i];
-                                    if (o.selected || o.value === '') { o.hidden = false; continue; }
+                                    if (o.selected || o.value === '' || o.value === '0') { o.hidden = false; continue; }
                                     o.hidden = (q !== '' && o.text.toLowerCase().indexOf(q) === -1);
                                 }
                             });
@@ -376,7 +471,7 @@ if (!function_exists('rupiah')) {
                 <div class="row">
                     <div class="form-group col-md-3">
                         <label>SHIFT REALISASI</label>
-                        <select class="form-control" name="tshift" required>
+                        <select class="form-control" name="tshift"<?= $detail_ro ?> required>
                             <option value="<?= $datadetail['id_jadwal'] ?>"><?= $datadetail['shift'] ?></option>
                             <?php 
                             $sqlJadwal = $koneksi->query("SELECT * FROM tb_jadwal");
@@ -386,14 +481,14 @@ if (!function_exists('rupiah')) {
                             ?>
                         </select>
                     </div>
-                    <div class="form-group col-md-2"> <label>ABSEN MASUK</label> <input type="time" name="tjammasuk" value="<?= (empty($datadetail['ra_masuk']) || $datadetail['ra_masuk'] == '00:00:00') ? '' : $datadetail['ra_masuk'] ?>" class="form-control"> </div>
-                    <div class="form-group col-md-2"> <label>ABSEN KELUAR</label> <input type="time" name="tjamkeluar" value="<?= (empty($datadetail['ra_keluar']) || $datadetail['ra_keluar'] == '00:00:00') ? '' : $datadetail['ra_keluar'] ?>" class="form-control"> </div>
-                    <div class="form-group col-md-2"> <label>ISTIRAHAT MASUK</label> <input type="time" name="tistirahatmasuk" value="<?= (empty($datadetail['ra_istirahat_masuk']) || $datadetail['ra_istirahat_masuk'] == '00:00:00') ? '' : $datadetail['ra_istirahat_masuk'] ?>" class="form-control"> </div>
-                    <div class="form-group col-md-2"> <label>ISTIRAHAT KELUAR</label> <input type="time" name="tistirahatkeluar" value="<?= (empty($datadetail['ra_istirahat_keluar']) || $datadetail['ra_istirahat_keluar'] == '00:00:00') ? '' : $datadetail['ra_istirahat_keluar'] ?>" class="form-control"> </div>
+                    <div class="form-group col-md-2"> <label>ABSEN MASUK</label> <input type="time" name="tjammasuk"<?= $detail_ro ?> value="<?= (empty($datadetail['ra_masuk']) || $datadetail['ra_masuk'] == '00:00:00') ? '' : $datadetail['ra_masuk'] ?>" class="form-control"> </div>
+                    <div class="form-group col-md-2"> <label>ABSEN KELUAR</label> <input type="time" name="tjamkeluar"<?= $detail_ro ?> value="<?= (empty($datadetail['ra_keluar']) || $datadetail['ra_keluar'] == '00:00:00') ? '' : $datadetail['ra_keluar'] ?>" class="form-control"> </div>
+                    <div class="form-group col-md-2"> <label>ISTIRAHAT MASUK</label> <input type="time" name="tistirahatmasuk"<?= $detail_ro ?> value="<?= (empty($datadetail['ra_istirahat_masuk']) || $datadetail['ra_istirahat_masuk'] == '00:00:00') ? '' : $datadetail['ra_istirahat_masuk'] ?>" class="form-control"> </div>
+                    <div class="form-group col-md-2"> <label>ISTIRAHAT KELUAR</label> <input type="time" name="tistirahatkeluar"<?= $detail_ro ?> value="<?= (empty($datadetail['ra_istirahat_keluar']) || $datadetail['ra_istirahat_keluar'] == '00:00:00') ? '' : $datadetail['ra_istirahat_keluar'] ?>" class="form-control"> </div>
                 </div>
 
                 <div class="row">
-                    <div class="form-group col-md-2"> <label>UPAH (POKOK)</label> <input type="number" name="tupah" value="<?= $upahPokokTampil ?>" class="form-control" readonly style="background: #f9fafb;"> </div>
+                    <div class="form-group col-md-2"> <label>UPAH (POKOK)</label> <input type="number" name="tupah"<?= $detail_ro ?> value="<?= $upahPokokTampil ?>" class="form-control" min="0" <?= !empty($is_borongan_detail) ? 'readonly style="background: #f9fafb;" title="Baris borongan: upah ikut total borongan, tidak bisa diubah manual"' : 'title="Bisa diedit manual di sini — nilai ini yang disimpan (ubah upah hanya di Detail, bukan di Kelola)"' ?>> </div>
                     <div class="form-group col-md-2"> <label>POT. TELAT</label> <input type="number" name="tpottelat" value="<?= $hasilpotongantelat ?>" class="form-control" readonly style="background: #f9fafb;"> </div>
                     <div class="form-group col-md-2"> <label>POT. IST (AWAL)</label> <input type="number" name="tpotistirahatkeluar" value="<?= $hasilpotonganistirahatkeluar ?>" class="form-control" readonly style="background: #f9fafb;"> </div>
                     <div class="form-group col-md-2"> <label>POT. IST (TELAT)</label> <input type="number" name="tpotistirahatmasuk" value="<?= $hasilpotonganistirahatmasuk ?>" class="form-control" readonly style="background: #f9fafb;"> </div>
@@ -402,10 +497,10 @@ if (!function_exists('rupiah')) {
                 </div>
 
                 <div class="row">
-                    <div class="form-group col-md-2"> <label>POT. LAINNYA</label> <input type="number" name="tpotlainnya" value="<?= $datadetail['r_potongan_lainnya'] ?>" class="form-control" required> </div>
+                    <div class="form-group col-md-2"> <label>POT. LAINNYA</label> <input type="number" name="tpotlainnya"<?= $detail_ro ?> value="<?= $datadetail['r_potongan_lainnya'] ?>" class="form-control" required> </div>
                     <div class="form-group col-md-2"> 
                         <label>LEMBUR (JAM) <span class="text-indigo-600 font-bold">@<?= rupiah($globalLemburPerJam) ?>/Jam</span></label> 
-                        <input type="number" step="0.1" name="tlembur_jam" value="<?= $lembur_jam_val ?>" class="form-control"> 
+                        <input type="number" step="0.1" name="tlembur_jam"<?= $detail_ro ?> value="<?= $lembur_jam_val ?>" class="form-control"> 
                     </div>
                     <div class="form-group col-md-2"> 
                         <label>TOTAL UPAH LEMBUR (Rp)</label> 
@@ -421,7 +516,7 @@ if (!function_exists('rupiah')) {
                 <div class="row">
                     <div class="form-group col-md-12">
                         <label>HASIL KERJA / KETERANGAN DETAIL</label>
-                        <textarea name="thasilkerja" class="form-control" rows="3"><?= $datadetail['hasil_kerja'] ?></textarea>
+                        <textarea name="thasilkerja" class="form-control" rows="3"<?= $detail_ro ?>><?= $datadetail['hasil_kerja'] ?></textarea>
                     </div>
                 </div>
 
@@ -429,9 +524,15 @@ if (!function_exists('rupiah')) {
                     <a href="?page=realisasi&aksi=kelola&id=<?= $dataidrealisasi ?>" class="btn btn-warning-custom btn-custom">
                         <i class="fa fa-arrow-left"></i> Kembali
                     </a>
+                    <?php if (!empty($is_admin_hr_ro)): ?>
+                    <button type="submit" name="simpan" class="btn btn-primary-custom btn-custom">
+                        <i class="fa fa-save"></i> Simpan Ganti Karyawan & Bagian/Posisi
+                    </button>
+                    <?php else: ?>
                     <button type="submit" name="simpan" class="btn btn-primary-custom btn-custom">
                         <i class="fa fa-save"></i> Simpan Data Realisasi
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
         </form>
@@ -440,6 +541,125 @@ if (!function_exists('rupiah')) {
 
 <?php
 if (isset($_POST['simpan'])) {
+    // Admin HR: Simpan menyimpan Ganti Karyawan + Bagian/Posisi saja (2026-10-26).
+    // Field lain (shift, jam, upah, potongan, lembur, hasil kerja) SENGAJA diabaikan
+    // di sini, walau POST dikirim langsung — jadi tidak bisa ditembus untuk mengubah
+    // field lain. Bagian/Posisi kini enabled di form untuk Admin HR, jadi nilainya
+    // ikut terkirim dan disimpan per baris (sama seperti handler lengkap, termasuk
+    // "+ Tambah Bagian/Posisi Baru..." yang di-INSERT ke master kalau belum ada).
+    if (strtolower($_SESSION['role'] ?? '') === 'admin hr') {
+        // --- Bagian & Posisi untuk Admin HR (validasi dulu, sebelum tukar) ---
+        $bagian_id_hr = (int)($datadetail['id_departmen'] ?? 0);
+        if ($bagian_id_hr <= 0) $bagian_id_hr = (int)($datadetail['dept_master_id'] ?? 0);
+        $posisi_id_hr = (int)($datadetail['id_jabatan'] ?? 0);
+        if ($posisi_id_hr <= 0) $posisi_id_hr = (int)($datadetail['jabatan_master_id'] ?? 0);
+        $bp_err_hr = '';
+        $bagian_post_hr = trim((string)($_POST['tbagian'] ?? ''));
+        $posisi_post_hr = trim((string)($_POST['tposisi'] ?? ''));
+        if ($bagian_post_hr === '__baru__') {
+            $b_nama_hr = trim((string)($_POST['tbagian_baru'] ?? ''));
+            if ($b_nama_hr === '') $bp_err_hr = 'Nama Bagian Baru belum diisi!';
+            else {
+                $esc_b_hr = $koneksi->real_escape_string($b_nama_hr);
+                $q_b_hr = $koneksi->query("SELECT id_departmen FROM ms_departmen WHERE UPPER(TRIM(nama_departmen)) = UPPER(TRIM('$esc_b_hr')) LIMIT 1");
+                if ($q_b_hr && ($rb_hr = $q_b_hr->fetch_assoc())) $bagian_id_hr = (int)$rb_hr['id_departmen'];
+                elseif ($koneksi->query("INSERT INTO ms_departmen (nama_departmen, id_perusahaan) VALUES ('$esc_b_hr', '1')")) $bagian_id_hr = (int)$koneksi->insert_id;
+                else $bp_err_hr = 'Gagal menambah Bagian baru: ' . $koneksi->error;
+            }
+        } elseif ($bagian_post_hr !== '' && is_numeric($bagian_post_hr)) $bagian_id_hr = (int)$bagian_post_hr;
+        if ($bp_err_hr === '' && $posisi_post_hr === '__baru__') {
+            $p_nama_hr = trim((string)($_POST['tposisi_baru'] ?? ''));
+            if ($p_nama_hr === '') $bp_err_hr = 'Nama Posisi Baru belum diisi!';
+            else {
+                $esc_p_hr = $koneksi->real_escape_string($p_nama_hr);
+                $q_p_hr = $koneksi->query("SELECT id_jabatan FROM ms_jabatan WHERE UPPER(TRIM(jabatan)) = UPPER(TRIM('$esc_p_hr')) LIMIT 1");
+                if ($q_p_hr && ($rp_hr = $q_p_hr->fetch_assoc())) $posisi_id_hr = (int)$rp_hr['id_jabatan'];
+                elseif ($koneksi->query("INSERT INTO ms_jabatan (jabatan, id_perusahaan) VALUES ('$esc_p_hr', '1')")) $posisi_id_hr = (int)$koneksi->insert_id;
+                else $bp_err_hr = 'Gagal menambah Posisi baru: ' . $koneksi->error;
+            }
+        } elseif ($bp_err_hr === '' && $posisi_post_hr !== '' && is_numeric($posisi_post_hr)) $posisi_id_hr = (int)$posisi_post_hr;
+        if ($bp_err_hr !== '') {
+            echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+                Swal.fire({ icon: "error", title: "Gagal", text: "' . addslashes($bp_err_hr) . ' Data tidak disimpan.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.history.back(); });
+            </script></body></html>';
+            exit;
+        }
+        $now_tk = date("Y-m-d H:i:s");
+        $tukar_new_tk = (int)($_POST['tukar_id_karyawan'] ?? 0);
+        $tukar_cur_tk = (int)($datadetail['id_pengganti'] ?? 0);
+        $tukar_owner_tk = (int)($datadetail['id_karyawan'] ?? 0);
+        // Memilih nama karyawan asli = batal ganti (sama seperti handler lengkap).
+        if ($tukar_new_tk === $tukar_owner_tk) $tukar_new_tk = 0;
+        $tukar_err_tk = '';
+        if ($tukar_new_tk !== $tukar_cur_tk) {
+            if ($tukar_new_tk > 0) {
+                $st_real_tk = $koneksi->query("SELECT status_realisasi FROM tb_realisasi WHERE id_realisasi = '" . (int)$datadetail['id_realisasi'] . "'")->fetch_assoc();
+                if ($st_real_tk && (int)$st_real_tk['status_realisasi'] >= 2) {
+                    $tukar_err_tk = 'Realisasi sudah Approved, tidak bisa tukar karyawan!';
+                } else {
+                    $mk_tk = $koneksi->query("SELECT upah FROM ms_karyawan WHERE id_karyawan = '$tukar_new_tk' AND status_karyawan = 'Aktif' LIMIT 1")->fetch_assoc();
+                    if (!$mk_tk) {
+                        $tukar_err_tk = 'Karyawan pengganti tidak valid / nonaktif!';
+                    } else {
+                        $dup_tk = $koneksi->query("SELECT id_realisasi_detail FROM tb_realisasi_detail WHERE id_realisasi = '" . (int)$datadetail['id_realisasi'] . "' AND id_karyawan = '$tukar_new_tk' AND id_realisasi_detail <> '$id' LIMIT 1");
+                        if ($dup_tk && $dup_tk->num_rows > 0) $tukar_err_tk = 'Karyawan ini sudah masuk rencana (terkunci)!';
+                    }
+                }
+            }
+            if ($tukar_err_tk === '') {
+                if ($tukar_new_tk > 0) {
+                    // Rincian borongan milik orang lama ikut dibuang (sama seperti handler lengkap).
+                    $ckBor_tk = $koneksi->query("SHOW TABLES LIKE 'tb_realisasi_borongan'");
+                    if ($ckBor_tk && $ckBor_tk->num_rows > 0) {
+                        $koneksi->query("DELETE FROM tb_realisasi_borongan WHERE id_realisasi_detail = '$id'");
+                    }
+                    $q_bor_tk = $koneksi->query("SELECT id_karyawan FROM ms_grup_borongan_anggota WHERE id_karyawan = '$tukar_new_tk' LIMIT 1");
+                    $peng_bor_tk = ($q_bor_tk && $q_bor_tk->num_rows > 0);
+                    $is_missing_tk = (empty($datadetail['ra_masuk']) || $datadetail['ra_masuk'] == '00:00:00') && (empty($datadetail['ra_keluar']) || $datadetail['ra_keluar'] == '00:00:00');
+                    if ($peng_bor_tk) {
+                        // Pengganti borongan: upah ikut rincian borongan (yang baru saja
+                        // dihapus), jadi upah pokok di sini 0; status ikut ada/tidaknya jam.
+                        $up_tk = 0; $st_tk = $is_missing_tk ? 'Tidak Hadir' : 'Hadir';
+                        $koneksi->query("UPDATE tb_realisasi_detail SET id_pengganti = '$tukar_new_tk', r_upah = $up_tk, r_status = '$st_tk', status_realisasi_detail = 1, r_update = '$now_tk' WHERE id_realisasi_detail = '$id'");
+                    } elseif ($is_missing_tk) {
+                        // Jam kosong + pengganti non-borongan = dianggap hadir, upah
+                        // pakai yang sudah ada di baris, kalau 0 pakai upah RKK, kalau
+                        // masih 0 pakai upah master pengganti (urutan handler lengkap
+                        // tanpa nilai form, karena form di-disable untuk Admin HR).
+                        $up_tk = ($datadetail['r_upah'] > 0) ? (float)$datadetail['r_upah'] : (!empty($datadetail['upah_master']) ? (float)$datadetail['upah_master'] : 0);
+                        if ($up_tk <= 0) {
+                            $q_pu_tk = $koneksi->query("SELECT upah FROM ms_karyawan WHERE id_karyawan = '$tukar_new_tk' LIMIT 1");
+                            $up_tk = ($q_pu_tk && ($rp_tk = $q_pu_tk->fetch_assoc())) ? (float)$rp_tk['upah'] : 0;
+                        }
+                        $koneksi->query("UPDATE tb_realisasi_detail SET id_pengganti = '$tukar_new_tk', r_upah = $up_tk, r_status = 'Hadir', status_realisasi_detail = 1, r_update = '$now_tk' WHERE id_realisasi_detail = '$id'");
+                    } else {
+                        // Sudah ada jam: upah & status lama dipertahankan, hanya pengganti berubah.
+                        $koneksi->query("UPDATE tb_realisasi_detail SET id_pengganti = '$tukar_new_tk', status_realisasi_detail = 1, r_update = '$now_tk' WHERE id_realisasi_detail = '$id'");
+                    }
+                } else {
+                    // Batal ganti: hanya id_pengganti yang di-NULL-kan, upah & status
+                    // lama dipertahankan (tidak di-nol-kan).
+                    $koneksi->query("UPDATE tb_realisasi_detail SET id_pengganti = NULL, status_realisasi_detail = 1, r_update = '$now_tk' WHERE id_realisasi_detail = '$id'");
+                }
+            }
+        }
+        if ($tukar_err_tk === '' && $tukar_new_tk !== $tukar_cur_tk && $koneksi->error !== '') $tukar_err_tk = 'Gagal menyimpan Ganti Karyawan.';
+        // Simpan Bagian & Posisi untuk Admin HR (walau Ganti Karyawan tidak berubah,
+        // Bagian/Posisi yang diubah tetap harus tersimpan; kolom lain tidak disentuh).
+        if ($tukar_err_tk === '') {
+            $koneksi->query("UPDATE tb_realisasi_detail SET id_departmen = '$bagian_id_hr', id_jabatan = '$posisi_id_hr', status_realisasi_detail = 1, r_update = '$now_tk' WHERE id_realisasi_detail = '$id'");
+        }
+        if ($tukar_err_tk !== '') {
+            echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+                Swal.fire({ icon: "error", title: "Gagal Tukar", text: "' . addslashes($tukar_err_tk) . ' Data tidak disimpan.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.history.back(); });
+            </script></body></html>';
+            exit;
+        }
+        echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+            Swal.fire({ icon: "success", title: "Berhasil", text: "Ganti Karyawan & Bagian/Posisi berhasil disimpan.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.location.href = "?page=realisasi&aksi=detail&id=' . $id . '"; });
+        </script></body></html>';
+        exit;
+    }
     $now = date("Y-m-d H:i:s");
     // Ambil data POST dan bersihkan
     $tupah = (float)($_POST['tupah'] ?? 0);
@@ -455,6 +675,60 @@ if (isset($_POST['simpan'])) {
     $tistirahatmasuk = $_POST['tistirahatmasuk'] ?? '';
     $tistirahatkeluar = $_POST['tistirahatkeluar'] ?? '';
     $hasilkerjanya = mysqli_real_escape_string($koneksi, $_POST['thasilkerja'] ?? '');
+    // Bagian & Posisi: disimpan PER BARIS realisasi ini saja (id_departmen /
+    // id_jabatan di tb_realisasi_detail), TIDAK mengubah master ms_karyawan,
+    // jadi tidak mengubah hari lain / karyawan lain. Semua role boleh mengubah
+    // di Detail ini (tidak ada gate role, sama seperti Detail yang sudah
+    // terbuka untuk semua role).
+    $bagian_post = trim((string)($_POST['tbagian'] ?? ''));
+    $posisi_post = trim((string)($_POST['tposisi'] ?? ''));
+    $bagian_baru_nama = trim((string)($_POST['tbagian_baru'] ?? ''));
+    $posisi_baru_nama = trim((string)($_POST['tposisi_baru'] ?? ''));
+    $bagian_id_save = (int)($datadetail['id_departmen'] ?? 0);
+    if ($bagian_id_save <= 0) $bagian_id_save = (int)($datadetail['dept_master_id'] ?? 0);
+    $posisi_id_save = (int)($datadetail['id_jabatan'] ?? 0);
+    if ($posisi_id_save <= 0) $posisi_id_save = (int)($datadetail['jabatan_master_id'] ?? 0);
+    $master_err = '';
+    if ($bagian_post === '__baru__') {
+        if ($bagian_baru_nama === '') {
+            $master_err = 'Nama Bagian Baru belum diisi!';
+        } else {
+            $esc_b = $koneksi->real_escape_string($bagian_baru_nama);
+            $q_b = $koneksi->query("SELECT id_departmen FROM ms_departmen WHERE UPPER(TRIM(nama_departmen)) = UPPER(TRIM('$esc_b')) LIMIT 1");
+            if ($q_b && ($rb = $q_b->fetch_assoc())) {
+                $bagian_id_save = (int)$rb['id_departmen']; // sudah ada -> pakai yang lama
+            } elseif ($koneksi->query("INSERT INTO ms_departmen (nama_departmen, id_perusahaan) VALUES ('$esc_b', '1')")) {
+                $bagian_id_save = (int)$koneksi->insert_id;
+            } else {
+                $master_err = 'Gagal menambah Bagian baru: ' . $koneksi->error;
+            }
+        }
+    } elseif ($bagian_post !== '' && is_numeric($bagian_post)) {
+        $bagian_id_save = (int)$bagian_post;
+    }
+    if ($master_err === '' && $posisi_post === '__baru__') {
+        if ($posisi_baru_nama === '') {
+            $master_err = 'Nama Posisi Baru belum diisi!';
+        } else {
+            $esc_p = $koneksi->real_escape_string($posisi_baru_nama);
+            $q_p = $koneksi->query("SELECT id_jabatan FROM ms_jabatan WHERE UPPER(TRIM(jabatan)) = UPPER(TRIM('$esc_p')) LIMIT 1");
+            if ($q_p && ($rp = $q_p->fetch_assoc())) {
+                $posisi_id_save = (int)$rp['id_jabatan']; // sudah ada -> pakai yang lama
+            } elseif ($koneksi->query("INSERT INTO ms_jabatan (jabatan, id_perusahaan) VALUES ('$esc_p', '1')")) {
+                $posisi_id_save = (int)$koneksi->insert_id;
+            } else {
+                $master_err = 'Gagal menambah Posisi baru: ' . $koneksi->error;
+            }
+        }
+    } elseif ($master_err === '' && $posisi_post !== '' && is_numeric($posisi_post)) {
+        $posisi_id_save = (int)$posisi_post;
+    }
+    if ($master_err !== '') {
+        echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+            Swal.fire({ icon: "error", title: "Gagal", text: "' . addslashes($master_err) . ' Data tidak disimpan.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.history.back(); });
+        </script></body></html>';
+        exit;
+    }
     $tlembur = (float)($_POST['tlembur'] ?? 0);
     $tlembur_jam = (float)($_POST['tlembur_jam'] ?? 0);
     // Pengganti (tukar karyawan): nama di baris ini TETAP, yang dicatat penggantinya.
@@ -465,13 +739,17 @@ if (isset($_POST['simpan'])) {
     if ($tukar_new !== $tukar_cur) {
         if ($tukar_new <= 0) {
             $vganti = "NULL"; // batal ganti
+        } elseif ($tukar_new === (int)($datadetail['id_karyawan'] ?? 0)) {
+            // Memilih nama karyawan asli = batal ganti juga. Sebelumnya cabang ini
+            // error "Pengganti sama dengan karyawan baris ini!", makanya balik ke
+            // karyawan asli (misal Dedi diganti Abdul, lalu mau balik ke Dedi) terasa gabisa.
+            $vganti = "NULL";
+            $tukar_new = 0; // downstream diperlakukan seperti tidak ganti
         } else {
             $tukar_err = '';
             $st_real = $koneksi->query("SELECT status_realisasi FROM tb_realisasi WHERE id_realisasi = '" . (int)$datadetail['id_realisasi'] . "'")->fetch_assoc();
             if ($st_real && (int)$st_real['status_realisasi'] >= 2) {
                 $tukar_err = 'Realisasi sudah Approved, tidak bisa tukar karyawan!';
-            } elseif ($tukar_new === (int)($datadetail['id_karyawan'] ?? 0)) {
-                $tukar_err = 'Pengganti sama dengan karyawan baris ini!';
             } else {
                 // Pengganti harus yang belum masuk rencana (pengaman server untuk opsi disabled di form).
                 $mk = $koneksi->query("SELECT id_karyawan FROM ms_karyawan WHERE id_karyawan = '$tukar_new' AND status_karyawan = 'Aktif' LIMIT 1")->fetch_assoc();
@@ -508,8 +786,28 @@ if (isset($_POST['simpan'])) {
     }
 
     if ($is_total_missing_post) {
-        $tupah = 0;
-        $tstatus_hadir = ($tukar_new > 0) ? 'Digantikan' : 'Tidak Hadir';
+        if ($tukar_new > 0 && !$pengganti_borongan) {
+            // Pengganti dikonfirmasi manual di Detail = dianggap hadir, jadi upah
+            // JANGAN di-nol-kan. Sebelumnya cabang ini selalu $tupah = 0, makanya
+            // "diganti kok upah kepotong" — apalagi di form ini semua jam masih
+            // kosong (lihat screenshot: ABSEN MASUK/KELUAR --:--). Urutan patokan:
+            // upah di form (biasanya upah RKK) > upah RKK > r_upah lama > upah master pengganti.
+            // r_status tetap 'Hadir', bukan 'Digantikan': kolom r_status di DB yang jalan
+            // hanya ENUM('Hadir','Tidak Hadir') — 'Digantikan' bikin fatal "Data truncated
+            // for column 'r_status'". Label Digantikan di Kelola didapat dari id_pengganti.
+            if ($tupah <= 0) {
+                $tupah = !empty($datadetail['upah_master']) ? (float)$datadetail['upah_master'] : 0;
+                if ($tupah <= 0 && $datadetail['r_upah'] > 0) $tupah = (float)$datadetail['r_upah'];
+                if ($tupah <= 0) {
+                    $q_peng_upah2 = $koneksi->query("SELECT upah FROM ms_karyawan WHERE id_karyawan = '$tukar_new' LIMIT 1");
+                    $tupah = ($q_peng_upah2 && ($rp2 = $q_peng_upah2->fetch_assoc())) ? (float)$rp2['upah'] : 0;
+                }
+            }
+            $tstatus_hadir = 'Hadir';
+        } else {
+            $tupah = 0;
+            $tstatus_hadir = 'Tidak Hadir';
+        }
     } else {
         $tstatus_hadir = 'Hadir';
         // Kembalikan ke upah awal jika upah POST adalah 0 (misal kena override JS saat initial load)
@@ -529,6 +827,13 @@ if (isset($_POST['simpan'])) {
                 $tupah = $upah_ref;
             }
         }
+    }
+
+    // Pengaman server untuk baris borongan (tanpa tukar): upah tetap 0 di sini,
+    // berapapun nilai tupah yang dikirim, karena upah borongan ikut total borongan.
+    // (Kalau ada tukar, rincian borongan sudah dihapus di atas, jadi bukan borongan lagi.)
+    if ($tukar_new <= 0 && !empty($is_borongan_detail)) {
+        $tupah = 0;
     }
 
     // 1. Ambil Pengaturan Denda Global
@@ -590,6 +895,8 @@ if (isset($_POST['simpan'])) {
     }
 
     $update = $koneksi->query("UPDATE tb_realisasi_detail SET 
+        id_departmen = $bagian_id_save,
+        id_jabatan = $posisi_id_save,
         id_pengganti = $vganti,
         r_upah = $tupah, 
         id_jadwal = $tshift,
@@ -682,6 +989,12 @@ $(document).ready(function() {
         return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + (parseInt(parts[2]) || 0);
     }
 
+    // UPAH (POKOK) di Detail bisa diedit manual (2026-10-24): begitu user mengetik
+    // di kolom tupah, nilai itu yang menang — calculate() tidak boleh menimpanya
+    // lagi saat jam/shift/lembur diubah, supaya edit manual tidak hilang diam-diam.
+    let upahManual = false;
+    $('[name="tupah"]').on('input', function() { upahManual = true; calculate(); });
+
     function calculate() {
         const shiftId = $('[name="tshift"]').val();
         const jamMasuk = $('[name="tjammasuk"]').val();
@@ -700,6 +1013,7 @@ $(document).ready(function() {
         // Initial Wage Calculation logic (JS)
         const currentRUpah = <?= (float)($datadetail['r_upah'] ?? 0) ?>;
         let finalUpahPokok = (currentRUpah > 0) ? currentRUpah : upahMaster;
+        if (upahManual) finalUpahPokok = parseFloat($('[name="tupah"]').val()) || 0;
 
         const shift = shiftData[shiftId];
         const isFlexible = (shift && (shift.keterangan.toUpperCase().indexOf('FLEXI') !== -1 || shift.keterangan.toUpperCase().indexOf('FLEKSI') !== -1));
@@ -733,9 +1047,11 @@ $(document).ready(function() {
 
         // Special case for Draft (Status 0): Dynamic penalties ONLY shown if jam is filled manually
         if (recordStatus == 0) {
-            if (isTotalMissing) {
+            if (isTotalMissing && !upahManual) {
                 pTelat = 0; pPulang = 0; pIstAwal = 0; pIstTelat = 0; pTidakLengkap = 0;
                 finalUpahPokok = upahMaster;
+            } else if (isTotalMissing) {
+                pTelat = 0; pPulang = 0; pIstAwal = 0; pIstTelat = 0; pTidakLengkap = 0;
             } else {
                 // Manual input in draft - show what will happen
                 if (shift) {
@@ -754,8 +1070,10 @@ $(document).ready(function() {
                     }
                 }
             }
-        } else if (attStatus !== 'HADIR') { // This means TIDAK HADIR after sync
+        } else if (attStatus !== 'HADIR' && !upahManual) { // This means TIDAK HADIR after sync
             finalUpahPokok = 0;
+            pTelat = 0; pPulang = 0; pIstAwal = 0; pIstTelat = 0; pTidakLengkap = 0;
+        } else if (attStatus !== 'HADIR') {
             pTelat = 0; pPulang = 0; pIstAwal = 0; pIstTelat = 0; pTidakLengkap = 0;
         } else {
             // Normal calculation for HADIR (Status > 0)
@@ -777,8 +1095,8 @@ $(document).ready(function() {
         }
 
 
-        // Update fields
-        $('[name="tupah"]').val(finalUpahPokok);
+        // Update fields (tupah tidak ditimpa kalau sudah diedit manual)
+        if (!upahManual) $('[name="tupah"]').val(finalUpahPokok);
         $('[name="tpottelat"]').val(pTelat);
         $('[name="tpotistirahatkeluar"]').val(pIstAwal);
         $('[name="tpotistirahatmasuk"]').val(pIstTelat);

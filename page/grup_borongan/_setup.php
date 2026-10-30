@@ -61,11 +61,15 @@ if ($ckAB && $ckAB->num_rows == 0) {
 
 if (!function_exists('grup_sync_drafts')) {
 // Samakan baris rencana + realisasi DRAFT dengan keanggotaan master grup.
-// Aturan rangkap: 1 orang boleh di banyak grup; tiap anggota dipastikan punya
-// 1 baris per grup di tiap dokumen draft (RKK status 0/1, realisasi status 0/1).
-// - Baris TANPA GRUP milik anggota dipakai ulang (diisi grup ini).
-// - Bila tak ada baris kosong, baris tertuanya digandakan (id_grup baru).
-// - Rincian borongan TIDAK ikut digandakan (diinput per baris, cegah upah ganda).
+// 2026-10-28 (koreksi): 1 orang = MAKSIMAL 1 baris per dokumen, TIDAK lagi
+// digandakan per grup. Alasan: penggandaan lama bikin double input di Kelola
+// (1 di grup asli + 1 di KARYAWAN TAMBAHAN) dan baris gandanya ikut menyalin
+// id_golongan sumber — jadi kalau sumbernya Borongan, baris gandanya juga jadi
+// Borongan, walau di master grup Borongannya baru saja di-uncheck (ngawur).
+// - Baris TANPA GRUP milik anggota tetap dipakai ulang (diisi grup ini, bukan duplikat).
+// - Kalau anggota sudah punya baris bergrup di dokumen itu (grup lain), LEWATI —
+//   jangan digandakan ke grup ini. Tambah manual ke grup lain tetap lewat
+//   Tambah Karyawan (dengan guard anti-rangkapnya sendiri), bukan lewat sync ini.
 // - Dokumen approve/ACC tidak disentuh. Return ['rkk' => n, 'realisasi' => n].
 function grup_sync_drafts($koneksi, $gid, $kids) {
     $gid = (int)$gid;
@@ -85,6 +89,10 @@ function grup_sync_drafts($koneksi, $gid, $kids) {
                 if ($koneksi->query("UPDATE tb_rkk_detail SET id_grup = '$gid' WHERE id_rkk_detail = '" . (int)$rn['id_rkk_detail'] . "'") && (int)$koneksi->affected_rows > 0) $out['rkk']++;
                 continue;
             }
+            // Jangan gandakan: kalau sudah ada baris bergrup di RKK ini (grup lain),
+            // lewati — baris itu sudah mewakili orang ini di dokumen ini.
+            $q_any_rkk = $koneksi->query("SELECT id_rkk_detail FROM tb_rkk_detail WHERE id_rkk = '$rid' AND id_karyawan = '$kid' AND id_grup IS NOT NULL LIMIT 1");
+            if ($q_any_rkk && $q_any_rkk->num_rows > 0) continue;
             if ($koneksi->query("INSERT INTO tb_rkk_detail (id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, id_grup, potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt) SELECT id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, upah, status_rkk, id_jadwal, '$gid', potongan_telat, potongan_istirahat, potongan_lainnya, tgl_updt FROM tb_rkk_detail WHERE id_rkk = '$rid' AND id_karyawan = '$kid' ORDER BY id_rkk_detail ASC LIMIT 1") && (int)$koneksi->affected_rows > 0) $out['rkk']++;
         }
         // ===== Realisasi belum ACC =====
@@ -98,6 +106,11 @@ function grup_sync_drafts($koneksi, $gid, $kids) {
                 if ($koneksi->query("UPDATE tb_realisasi_detail SET id_grup = '$gid' WHERE id_realisasi_detail = '" . (int)$rn['id_realisasi_detail'] . "'") && (int)$koneksi->affected_rows > 0) $out['realisasi']++;
                 continue;
             }
+            // Jangan gandakan: kalau sudah ada baris bergrup di Realisasi ini
+            // (misal sudah ada di KARYAWAN TAMBAHAN), lewati — jangan buat baris
+            // kedua di grup ini, apalagi dengan menyalin id_golongan Borongan sumber.
+            $q_any_real = $koneksi->query("SELECT id_realisasi_detail FROM tb_realisasi_detail WHERE id_realisasi = '$rid' AND id_karyawan = '$kid' AND id_grup IS NOT NULL LIMIT 1");
+            if ($q_any_real && $q_any_real->num_rows > 0) continue;
             if ($koneksi->query("INSERT INTO tb_realisasi_detail (id_realisasi, id_rkk_detail, id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, id_os_dhk, id_golongan, r_upah, r_potongan_telat, r_potongan_istirahat_awal, r_potongan_istirahat_telat, r_potongan_lainnya, r_jam_masuk, r_jam_keluar, r_istirahat_masuk, r_istirahat_keluar, r_status, r_update, ra_masuk, ra_keluar, ra_istirahat_masuk, ra_istirahat_keluar, id_jadwal, status_realisasi_detail, hasil_kerja, lembur, tgl_realisasi_detail, r_potongan_pulang, r_potongan_tidak_lengkap, lembur_jam, id_grup, id_pengganti) SELECT id_realisasi, id_rkk_detail, id_rkk, id_karyawan, nama_karyawan_manual, id_departmen, id_sub_department, id_os_dhk, id_golongan, r_upah, r_potongan_telat, r_potongan_istirahat_awal, r_potongan_istirahat_telat, r_potongan_lainnya, r_jam_masuk, r_jam_keluar, r_istirahat_masuk, r_istirahat_keluar, r_status, r_update, ra_masuk, ra_keluar, ra_istirahat_masuk, ra_istirahat_keluar, id_jadwal, status_realisasi_detail, hasil_kerja, lembur, tgl_realisasi_detail, r_potongan_pulang, r_potongan_tidak_lengkap, lembur_jam, '$gid', id_pengganti FROM tb_realisasi_detail WHERE id_realisasi = '$rid' AND id_karyawan = '$kid' ORDER BY id_realisasi_detail ASC LIMIT 1") && (int)$koneksi->affected_rows > 0) $out['realisasi']++;
         }
     }

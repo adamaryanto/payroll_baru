@@ -116,6 +116,7 @@ if (!function_exists('rupiah')) {
                         LEFT JOIN tb_rkk_detail rd ON r.id_rkk_detail = rd.id_rkk_detail
                         WHERE r.id_karyawan = '$id'
                         AND r.tgl_realisasi_detail BETWEEN '$ttgl11' AND '$ttgl22'
+                        AND r.id_realisasi_detail = (SELECT MIN(r2.id_realisasi_detail) FROM tb_realisasi_detail r2 WHERE r2.id_karyawan = r.id_karyawan AND r2.tgl_realisasi_detail = r.tgl_realisasi_detail)
                         ORDER BY r.tgl_realisasi_detail ASC";
                 $result = $koneksi->query($sql);
             ?>
@@ -182,10 +183,10 @@ if (!function_exists('rupiah')) {
                                         $potPulangValue = 0;
                                         $potTidakLengkapValue = 0;
                                     } else {
-                                        $potTelatValue = $isLate ? $globalDendaMasuk : 0;
-                                        $potIstirahatValue = ($isEarlyBreak ? $globalDendaIstirahatKeluar : 0) + ($isLateBreak ? $globalDendaIstirahatMasuk : 0);
-                                        $potPulangValue = $isEarlyOut ? $globalDendaPulang : 0;
-                                        $potTidakLengkapValue = ($hasIncompleteMain || $hasIncompleteBreak) ? $globalDendaTidakLengkap : 0;
+                                        $potTelatValue = (float)($row['r_potongan_telat'] ?? 0);
+                                        $potIstirahatValue = (float)($row['r_potongan_istirahat_awal'] ?? 0) + (float)($row['r_potongan_istirahat_telat'] ?? 0);
+                                        $potPulangValue = (float)($row['r_potongan_pulang'] ?? 0);
+                                        $potTidakLengkapValue = (float)($row['r_potongan_tidak_lengkap'] ?? 0);
                                     }
 
                                     $total = ($row['r_upah'] + $row['lembur']) - ($potTelatValue + $potIstirahatValue + $potPulangValue + $potTidakLengkapValue + $row['r_potongan_lainnya']);

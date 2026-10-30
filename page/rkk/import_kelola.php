@@ -270,12 +270,12 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                             <tr style="white-space:nowrap;">
                                 <th class="py-2 px-3 w-10"><input type="checkbox" id="rk_all" checked style="width:16px;height:16px;"></th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Nama (Excel)</th>
+                                <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase text-right">Upah</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Grup</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Karyawan</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Shift</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Posisi</th>
                                 <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase">Department</th>
-                                <th class="py-2 px-3 text-xs font-bold text-gray-700 uppercase text-right">Upah</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -288,6 +288,7 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                         <?php if (!empty($r['golongan_baru'])): ?><span class="font-bold text-purple-700">Gol baru</span><?php endif; ?>
                                     </div>
                                 </td>
+                                <td class="py-2 px-3"><input type="number" name="up_<?= $i; ?>" value="<?= (int)$r['upah']; ?>" min="0" class="w-28 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-right"></td>
                                 <td class="py-2 px-3 text-sm">
                                     <?= $r['section'] !== '' ? htmlspecialchars($r['section']) : '<span class="text-gray-400 italic">Tanpa Grup</span>'; ?>
                                     <?php if ($r['grup_baru']): ?><div><span class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-purple-100 text-purple-800">Grup baru</span></div><?php endif; ?>
@@ -331,7 +332,6 @@ while ($qs_prev && ($ss = $qs_prev->fetch_assoc())) $sub_opts[] = $ss;
                                     </select>
                                     <?php if (!empty($r['dept_baru'])): ?><div class="text-[11px] font-bold text-purple-700 mt-1">“<?= htmlspecialchars($r['dept_baru']); ?>” baru → otomatis dibuat</div><?php endif; ?>
                                 </td>
-                                <td class="py-2 px-3"><input type="number" name="up_<?= $i; ?>" value="<?= (int)$r['upah']; ?>" min="0" class="w-28 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-right"></td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>

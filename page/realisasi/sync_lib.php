@@ -9,11 +9,26 @@ if (!function_exists('is_flexible_shift')) {
     }
 }
 if (!function_exists('late_minutes')) {
-    // Menit keterlambatan (negatif = lebih awal), normalisasi lintas-midnight persis tarik-data.
+    // Menit keterlambatan (negatif = lebih awal).
+    // 2026-10-26: Batas balik diubah dari 12 jam (43200 detik) ke 18 jam (64800 detik).
+    // Alasannya kasus EFAUDIN: Jam Kerja 04:00, Masuk 20:07 = telat 16 jam 7 menit.
+    // Dengan batas 12 jam, selisih 16 jam itu dibalik jadi -7 jam 53 menit (dianggap
+    // datang lebih awal), jadi tidak merah dan tidak kena denda telat — padahal
+    // harusnya telat. Dengan batas 18 jam, telat sampai 18 jam tetap kehitung telat,
+    // sementara datang lebih awal sampai 6 jam tetap kehitung lebih awal (bukan telat).
+    // Trade-off yang disadari: datang lebih awal >6 jam akan kehitung telat, tapi itu
+    // jauh lebih jarang daripada telat >12 jam, dan shift malam yang masuk lewat tengah
+    // malam (misal 19:00 -> 00:30 = telat 5,5 jam) tetap kehitung benar.
     function late_minutes($actual, $expected) {
         if (empty($actual) || empty($expected) || $actual == '00:00:00' || $expected == '00:00:00' || $expected == 'Bebas') return 0;
         $diff = (strtotime($actual) - strtotime($expected) + 86400) % 86400;
-        if ($diff > 43200) $diff -= 86400;
+        if ($diff > 64800) $diff -= 86400;
+        // Shift sore/malam (mulai >=12:00): tap pagi yang jauh lebih awal (6-18 jam)
+        // jangan dihitung telat. Kasus: shift 19:00 tap 06:43 -> dulu telat 11j43m.
+        // Batas 6 jam dipilih supaya tap lewat tengah malam (mis. 00:30 = telat 5,5j)
+        // tetap telat. Ceiling: telat >6 jam di shift malam ikut dianggap lebih awal.
+        $eHour = (int)substr((string)$expected, 0, 2);
+        if ($eHour >= 12 && $diff > 21600) $diff -= 86400;
         return (int)($diff / 60);
     }
     // Menit kepulangan-awal (positif = pulang lebih cepat), normalisasi sama.
@@ -21,6 +36,10 @@ if (!function_exists('late_minutes')) {
         if (empty($actual) || empty($expected) || $actual == '00:00:00' || $expected == '00:00:00' || $expected == 'Bebas') return 0;
         $diff = (strtotime($expected) - strtotime($actual) + 86400) % 86400;
         if ($diff > 43200) $diff -= 86400;
+        // Shift malam (pulang <=12:00): tap sore/hari sebelumnya yang >8 jam "lebih awal"
+        // biasanya tap masuk shift, bukan pulang cepat. Kasus: pulang 19:06 vs 07:00.
+        $eHour = (int)substr((string)$expected, 0, 2);
+        if ($eHour <= 12 && $diff > 28800) $diff -= 86400;
         return (int)($diff / 60);
     }
 }
@@ -100,7 +119,7 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
     if ($qg0 && ($gg0 = $qg0->fetch_assoc())) $gid_tdr = (int)$gg0['id_grup'];
 
     // 2. Get all employees in this realization (using LEFT JOIN to include manual employees and RKK fallback)
-    $query_details = $koneksi->query("SELECT RD.id_realisasi_detail, RD.id_karyawan, RD.id_grup AS grup_id, K.no_absen, K.upah as upah_master, RD.id_jadwal as detail_jadwal, RKKD.id_jadwal as rkk_jadwal, RD.status_realisasi_detail, 
+    $query_details = $koneksi->query("SELECT RD.id_realisasi_detail, RD.id_karyawan, RD.id_pengganti, RD.id_grup AS grup_id, RD.r_upah as r_upah_lama, K.no_absen, K.upah as upah_master, RKKD.upah as upah_rkk, RKKD.status_rkk as status_rkk, RD.id_jadwal as detail_jadwal, RKKD.id_jadwal as rkk_jadwal, RD.status_realisasi_detail, 
                                       COALESCE(J.keterangan, JR.keterangan) as shift_ket,
                                       COALESCE(J.jam_masuk, JR.jam_masuk) as s_masuk, 
                                       COALESCE(J.jam_keluar, JR.jam_keluar) as s_keluar, 
@@ -118,6 +137,13 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
         $id_rd = $row['id_realisasi_detail'];
         // Baris TIDAK DALAM RENCANA dilewati (datanya dari tap langsung, jangan ditimpa jadi kosong)
         if ($gid_tdr > 0 && (int)($row['grup_id'] ?? -1) === $gid_tdr) continue;
+        // Baris yang digantikan lewat Detail (id_pengganti > 0) juga dilewati sync:
+        // tap mesin di sini dicari pakai PIN/no_absen karyawan ASLI, bukan pengganti,
+        // jadi Tarik Data akan selalu menganggapnya total tidak hadir dan me-nol-kan
+        // upah — padahal penggantinya sudah dikonfirmasi manual di Detail. Baris ini
+        // dikelola manual sampai penggantinya dibatalkan (id_pengganti jadi NULL),
+        // baru setelah itu sync jalan lagi untuk baris tersebut.
+        if ((int)($row['id_pengganti'] ?? 0) > 0) continue;
         $no_absen = $row['no_absen'];
         $idk_row = (int)($row['id_karyawan'] ?? 0);
         $status_rd = $row['status_realisasi_detail'];
@@ -355,14 +381,37 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
         }
 
         // Determine Wage adjustment for total absence
-        $upah_master = $row['upah_master'] ?? 0;
+        // PATOKAN UPAH = RENCANA (tb_rkk_detail.upah), bukan lagi master karyawan.
+        // Urutan: Digantikan = 0 (jangan dibayar) > upah RKK (>0) > upah master (>0) > r_upah lama
+        // (r_upah lama dipakai untuk baris tanpa RKK & tanpa master, misal karyawan manual
+        // tambahan — supaya upah yang diinput manual tidak jadi 0).
+        // Baris yang sudah diedit manual (status_realisasi_detail = 1) TIDAK ditimpa upahnya
+        // oleh sync, kecuali kalau total tidak hadir (aturan tidak hadir tetap menang).
+        $upah_rkk = (float)($row['upah_rkk'] ?? 0);
+        $status_rkk = $row['status_rkk'] ?? '';
+        $upah_master = (float)($row['upah_master'] ?? 0);
+        $r_upah_lama = (float)($row['r_upah_lama'] ?? 0);
+        if ($status_rkk === 'Digantikan') {
+            $upah_pakai = 0;
+        } elseif ($upah_rkk > 0) {
+            $upah_pakai = $upah_rkk;
+        } elseif ($upah_master > 0) {
+            $upah_pakai = $upah_master;
+        } else {
+            $upah_pakai = $r_upah_lama;
+        }
         $wage_update_sql = "";
+        $status_update_sql = "status_realisasi_detail = 2";
         $status_enum = "Hadir";
         if ($is_total_missing) {
             $wage_update_sql = "r_upah = 0,";
             $status_enum = "Tidak Hadir";
+        } elseif ((int)($status_rd ?? 0) === 1) {
+            // Manual: upah dipertahankan, status tetap 1 supaya sync berikutnya juga tidak menimpa.
+            $wage_update_sql = "";
+            $status_update_sql = "status_realisasi_detail = 1";
         } else {
-            $wage_update_sql = "r_upah = '$upah_master',";
+            $wage_update_sql = "r_upah = '$upah_pakai',";
         }
 
         // 5. Update the detail record and SET STATUS TO 2 (Synced)
@@ -382,7 +431,7 @@ function syncRealisasiData($koneksi, $id_realisasi, $prelogs = null, $prelogs_ok
             r_potongan_tidak_lengkap = '$p_tidak_lengkap',
             $wage_update_sql
             r_status = '$status_enum',
-            status_realisasi_detail = 2
+            $status_update_sql
             WHERE id_realisasi_detail = '$id_rd'");
 
         if ($update) $count++;

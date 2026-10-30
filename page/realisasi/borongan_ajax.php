@@ -1,5 +1,6 @@
 <?php
 // Endpoint popup Detail Borongan: GET = ambil baris, POST = simpan baris
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 include "../../koneksi.php";
 
 $koneksi->query("CREATE TABLE IF NOT EXISTS tb_realisasi_borongan (

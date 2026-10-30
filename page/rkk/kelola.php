@@ -132,7 +132,7 @@ if ($datastatusrkk == 3) {
         <a href="?page=rkk" class="inline-flex items-center bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 text-[14px] md:text-base font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto justify-center">
           <i class="fas fa-arrow-left mr-1.5"></i> Kembali
         </a>
-        <?php if ($_SESSION['role'] == "Owner") : ?>
+        <?php if (in_array(strtolower($_SESSION['role'] ?? ''), ["owner", "admin master", "admin hr"], true)) : ?>
           <?php if ($datastatusrkk == 1 || $datastatusrkk == 0) : ?>
             <button type="button"
               class="inline-flex items-center border-0 bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] md:text-base font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto justify-center btn-header-action"
@@ -200,7 +200,8 @@ if ($datastatusrkk == 3) {
             $no = 1;
             $last_dept = null;
             $show_bulk = ($datastatusrkk < 2);
-            $ncol = $show_bulk ? 12 : 11;
+            // +1 kolom Upah (di antara Jam Pulang dan Aksi); kalau tidak diubah, baris pemisah grup jadi tidak selebar tabel.
+            $ncol = $show_bulk ? 13 : 12;
             function rkk_grp_th($t, $bg, $extra = '') {
               return "<th class=\"py-3 px-2 text-sm font-bold text-gray-700 uppercase$extra\" style=\"background:$bg;\">$t</th>";
             }
@@ -236,6 +237,7 @@ if ($datastatusrkk == 3) {
                 <?= rkk_grp_th('Jam Masuk', '#D9D9D9') ?>
                 <?= rkk_grp_th('Istirahat<br>Masuk', '#D9D9D9') ?>
                 <?= rkk_grp_th('Jam Pulang', '#D9D9D9') ?>
+                <?= rkk_grp_th('Upah', '#D9D9D9') ?>
                 <?= rkk_grp_th('Aksi', '#FFFFFF', ' text-center') ?>
               </tr>
             <?php endif; ?>
@@ -283,6 +285,7 @@ if ($datastatusrkk == 3) {
                 <td data-label="Jam Masuk" align="center"></td>
                 <td data-label="Istirahat Masuk" align="center"></td>
                 <td data-label="Jam Pulang" align="center"></td>
+                <td data-label="Upah" align="right"><span class="text-sm font-bold text-gray-900">Rp <?= number_format((float)($data['upahkaryawan'] ?? 0), 0, ',', '.') ?></span></td>
                 <td data-label="Aksi">
                   <div class="flex flex-row flex-nowrap gap-1 justify-center items-center">
                     <?php if ($data['status_rkk'] != 'Digantikan' && $datastatusrkk < 2) : ?>

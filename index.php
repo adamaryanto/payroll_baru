@@ -213,9 +213,10 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
               </li>
 
               <?php if (strtolower($role) != 'owner') { ?>
-              <li class="nav-item">
+              <!-- Menu Tarik Data disembunyikan dari sidebar (file & route ?page=generate&aksi=tarik tetap aktif, hapus komentar ini untuk mengembalikan) -->
+              <!-- <li class="nav-item">
                 <a href="?page=generate&aksi=tarik" class="nav-link"><i class="nav-icon fas fa-download"></i><p>Tarik Data</p></a>
-              </li>
+              </li> -->
 
               <li class="nav-item">
                 <a href="javascript:void(0)" class="nav-link" onclick="var li=this.parentElement; var sub=li.querySelector('.nav-treeview'); if(sub){ var open=li.classList.toggle('menu-open'); sub.style.display=open?'block':'none'; var ic=this.querySelector('.right'); if(ic){ ic.classList.toggle('fa-angle-left',!open); ic.classList.toggle('fa-angle-down',open);} } return false;">
@@ -235,9 +236,9 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
               <li class="nav-item">
               <a href="?page=mesin" class="nav-link"><i class="nav-icon fas fa-cog"></i><p>Setting Device</p></a>
               </li>
-              <li class="nav-item">
+              <!-- <li class="nav-item">
               <a href="?page=telegram" class="nav-link"><i class="nav-icon fab fa-telegram"></i><p>Setting Telegram</p></a>
-              </li>
+              </li> -->
               <?php } ?>
               <?php } ?>
 
@@ -364,9 +365,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                   } elseif ($page == "") {
                     include "home.php";
                   } else if ($page == 'realisasi') {
-                    if (strtolower($role) == 'admin hr' && $aksi == 'detail') {
-                        echo "<script>alert('Anda tidak memiliki akses ke halaman ini!'); window.location.href='index.php';</script>";
-                    } else {
+                    // Detail Realisasi untuk SEMUA role (2026-10-24): gate lama di sini memblokir Admin HR dari ?page=realisasi&aksi=detail dengan alert akses ditolak - gate itu dihapus.
                         if ($aksi == "") { include "page/realisasi/realisasi.php"; } 
                         elseif ($aksi == "rkk") { include "page/realisasi/rkk.php"; } 
                         elseif ($aksi == "tambah") { include "page/realisasi/tambah.php"; } 
@@ -379,8 +378,7 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
                         elseif ($aksi == "slipk") { include "page/realisasi/slipk.php"; }
                         elseif ($aksi == "slip_simple") { include "page/realisasi/slip_simple.php"; }
                         elseif ($aksi == "slipk_simple") { include "page/realisasi/slipk_simple.php"; }
-                        elseif ($aksi == "hapus_massal") { include "page/realisasi/hapus_massal.php"; }
-                    }
+                    elseif ($aksi == "hapus_massal") { include "page/realisasi/hapus_massal.php"; }
                   } else if ($page == 'boneless') {
                     if ($aksi == "") { include "page/boneless/boneless.php"; } 
                     elseif ($aksi == "hapus") { include "page/boneless/hapus.php"; } 
@@ -499,8 +497,8 @@ if ($_SESSION['iduser'] != "" && $_SESSION['nama'] != "") {
       $__gswc = sweep_get_config($koneksi);
       $__gsw['enabled'] = !empty($__gswc['enabled']);
       if ($__gsw['enabled']) {
-          $__gdue = !empty($__gswc['last_run']) ? (strtotime($__gswc['last_run']) + sweep_interval_seconds($__gswc['interval_jam'])) : 0;
-          $__gsw['due'] = ($__gdue === 0 || time() >= $__gdue);
+$__gdue = sweep_due_ts($__gswc);
+$__gsw['due'] = ($__gdue === 0 || time() >= $__gdue);
       }
   }
   ?>

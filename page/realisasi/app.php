@@ -1,4 +1,13 @@
 <?php
+// Gate server Approve/Unapprove Realisasi (2026-10-26, dibalik atas permintaan user):
+// hanya Owner + Admin Master + Kepala Pabrik. Admin HR TIDAK bisa Approve.
+$role_app = strtolower($_SESSION['role'] ?? '');
+if ($role_app !== "owner" && $role_app !== "admin master" && $role_app !== "kepala pabrik") {
+    echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+        Swal.fire({ icon: "error", title: "Akses Ditolak", text: "Hanya Owner, Admin Master, dan Kepala Pabrik yang bisa Approve/Unapprove Realisasi.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.location.href = "?page=realisasi"; });
+    </script></body></html>';
+    exit;
+}
 $id = $_GET['id'];
 $status = $_GET['iddetail'] ?? '';
 $tgl = date("Y-m-d H:i:s");

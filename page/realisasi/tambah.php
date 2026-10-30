@@ -3,7 +3,43 @@
 <?php
 include_once __DIR__ . '/../grup_borongan/_setup.php';
 
+ // 2026-10-26: Admin HR tetap bisa Tambah Realisasi, TAPI hanya dari RKK yang
+ // sudah di-Approve (tb_rkk.status_rkk = 2, sama seperti daftar di rkk.php).
+ // Dari RKK yang belum di-Approve (atau sudah dibuat Realisasinya, status jadi 3)
+ // tetap ditolak di server, walau diakses lewat URL langsung.
+ if (strtolower($_SESSION['role'] ?? '') === 'admin hr') {
+    $id_cek = mysqli_real_escape_string($koneksi, $_GET['id'] ?? '');
+    $cek_rkk = $koneksi->query("SELECT status_rkk FROM tb_rkk WHERE id_rkk = '$id_cek' LIMIT 1");
+    $st_rkk = ($cek_rkk && ($r_cek = $cek_rkk->fetch_assoc())) ? (int)$r_cek['status_rkk'] : -1;
+    if ($st_rkk !== 2) {
+        echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+            Swal.fire({ icon: "error", title: "Akses Ditolak", text: "Admin HR hanya bisa membuat Realisasi dari RKK yang sudah di-Approve.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.location.href = "?page=realisasi"; });
+        </script></body></html>';
+        exit;
+    }
+ }
  $id = $_GET ['id'];
+ // 2026-10-26: Anti-double — satu RKK hanya boleh punya SATU Realisasi.
+ // Cek dulu sebelum INSERT (berlaku untuk semua role, bukan cuma Admin HR).
+ // Kalau sudah ada, jangan INSERT lagi: tampilkan peringatan dan arahkan ke
+ // Kelola Realisasi yang sudah ada itu. Ini menutup celah klik ganda, refresh,
+ // back-forward, 2 tab, dan 2 user yang mengeksekusi URL tambah yang sama.
+ $id_e = mysqli_real_escape_string($koneksi, $id);
+ // 2026-10-26 (koreksi): guard juga cek TANGGAL, bukan cuma id_rkk. Kalau Realisasi
+ // dengan tanggal yang sama sudah ada (walau dari RKK lain dengan id berbeda),
+ // jangan buat lagi — arahkan ke Kelola Realisasi tanggal itu (yang APPROVED dulu,
+ // kalau imbang yang tertua, sama seperti filter tampil di List Realisasi).
+ $cek_tgl_rkk = $koneksi->query("SELECT tgl_rkk FROM tb_rkk WHERE id_rkk = '$id_e' LIMIT 1");
+ $tgl_rkk_cek = ($cek_tgl_rkk && ($r_tgl_cek = $cek_tgl_rkk->fetch_assoc())) ? $r_tgl_cek['tgl_rkk'] : '';
+ $tgl_e = mysqli_real_escape_string($koneksi, (string)$tgl_rkk_cek);
+ $cek_dobel = $koneksi->query("SELECT id_realisasi FROM tb_realisasi WHERE id_rkk = '$id_e' OR (tgl_realisasi = '$tgl_e' AND '$tgl_e' <> '') ORDER BY status_realisasi DESC, id_realisasi ASC LIMIT 1");
+ if ($cek_dobel && ($r_dobel = $cek_dobel->fetch_assoc())) {
+    $id_real_ada = (int)$r_dobel['id_realisasi'];
+    echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+        Swal.fire({ icon: "warning", title: "Sudah Ada", text: "Realisasi untuk RKK/tanggal ini sudah pernah dibuat, jadi tidak dibuat lagi supaya tidak double.", confirmButtonColor: "#2563eb", confirmButtonText: "Lihat Realisasi" }).then(() => { window.location.href = "?page=realisasi&aksi=kelola&id=' . $id_real_ada . '"; });
+    </script></body></html>';
+    exit;
+ }
 $ttgl1 = date("Y-m-d");
 $ttgl2 = date("Y-m-d H:i:s");
 

@@ -845,8 +845,100 @@ function sync_karyawan_to_devices($koneksi, $karyawan_id) {
             ];
         }
     }
-    
+
+    // 2026-10-24: kasus MA'MUN JAWAWI PIN 68 — sync lapor BERHASIL 3/3 di
+    // semua mesin, tapi badge Mesin tetap 2/4. SetUserInfo saja ternyata
+    // belum tentu langsung terlihat di GetAllUserInfo kalau mesin belum
+    // me-reload datanya (copy sidik selalu kirim RefreshData setelah tulis,
+    // sync karyawan tidak). Jadi setelah SetUserInfo berhasil, kirim
+    // RefreshData sekali per mesin SOAP yang sukses, supaya user baru itu
+    // langsung terbaca di daftar user mesin berikutnya. Best effort saja:
+    // gagal RefreshData tidak mengubah status sync yang sudah sukses.
+    foreach ($devices as $device) {
+        $did = $device['id_mesin'];
+        if (empty($results[$did]) || ($results[$did]['status'] ?? '') !== 'success') continue;
+        if (($device['protocol'] ?? 'soap') === 'zkudp') continue;
+        if (empty($device['ip_mesin'])) continue;
+        $comm_key = $device['comm_key'] ?? 0;
+        send_soap_request($device['ip_mesin'], $device['port'], "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></RefreshData>");
+    }
+
     return $results;
+}
+
+/**
+ * Sync satu karyawan ke SATU mesin saja (SetUserInfo, save-only).
+ * Dipakai sync dari dialog daftar kurang: yang kurang di mesin X hanya
+ * di-push ke mesin X, bukan ke semua mesin (permintaan Reza 2026-10-24:
+ * yang kurang-kurang aja di-push ke mesin yang kurang).
+ * Return ['device'=>..,'status'=>'success'|'error'|'skipped','message'=>..,
+ * 'pin'=>..,'name'=>..] dengan format yang sama seperti satu entri
+ * sync_karyawan_to_devices(), supaya handler bisa mengagregasinya sama.
+ */
+function sync_karyawan_to_device($koneksi, $karyawan_id, $device_id) {
+    $result = $koneksi->query("SELECT * FROM ms_karyawan WHERE id_karyawan = '" . (int)$karyawan_id . "' LIMIT 1");
+    if (!$result || $result->num_rows == 0) {
+        return ['device' => 'Mesin '.$device_id, 'status' => 'error', 'message' => 'Karyawan tidak ditemukan'];
+    }
+    $karyawan = $result->fetch_assoc();
+    $no_absen = trim($karyawan['no_absen'] ?? '');
+    if ($no_absen === '') {
+        return ['device' => 'Mesin '.$device_id, 'status' => 'error', 'message' => 'Nomor absen tidak dikonfigurasi'];
+    }
+    $devRes = $koneksi->query("SELECT * FROM tb_mesin WHERE id_mesin = '" . (int)$device_id . "' LIMIT 1");
+    if (!$devRes || $devRes->num_rows == 0) {
+        return ['device' => 'Mesin '.$device_id, 'status' => 'error', 'message' => 'Mesin tidak ditemukan'];
+    }
+    $device = $devRes->fetch_assoc();
+    if (empty($device['ip_mesin'])) {
+        return ['device' => $device['nama_mesin'], 'status' => 'skipped', 'message' => 'IP tidak dikonfigurasi'];
+    }
+    if (!test_device_connection($device['ip_mesin'], $device['port'])) {
+        return ['device' => $device['nama_mesin'], 'status' => 'error', 'message' => 'Device offline atau tidak dapat dihubungi'];
+    }
+    if (($device['protocol'] ?? 'soap') === 'zkudp') {
+        if (!function_exists('zkb_push_user')) {
+            return ['device' => $device['nama_mesin'], 'status' => 'error', 'message' => 'Helper biner (zk_protocol_helper.php) tidak ada di server ini'];
+        }
+        $zr = zkb_push_user($device['ip_mesin'], $device['port'] ?? 4370, intval($device['comm_key'] ?? 0), $no_absen, $karyawan['nama_karyawan']);
+        return ['device' => $device['nama_mesin'], 'status' => $zr['success'] ? 'success' : 'error', 'message' => $zr['success'] ? 'Karyawan berhasil disinkronisasi (biner)' : ('Gagal: '.$zr['message']), 'pin' => $no_absen, 'name' => $karyawan['nama_karyawan']];
+    }
+    $comm_key = $device['comm_key'] ?? 0;
+    $safeNama = htmlspecialchars($karyawan['nama_karyawan'], ENT_XML1 | ENT_COMPAT, 'UTF-8');
+    $soap = "<SetUserInfo><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey><Arg><PIN xsi:type=\"xsd:integer\">{$no_absen}</PIN><Name xsi:type=\"xsd:string\">{$safeNama}</Name><Password xsi:type=\"xsd:string\"></Password><Group xsi:type=\"xsd:integer\">1</Group><Privilege xsi:type=\"xsd:integer\">0</Privilege></Arg></SetUserInfo>";
+    $response = send_soap_request($device['ip_mesin'], $device['port'], $soap);
+    $isSuccess = $response && (strpos($response, '<Information>Success') !== false || strpos($response, '<Result>0</Result>') !== false || strpos($response, 'Successfully') !== false || strpos($response, '<SetUserInfoResponse>') !== false);
+    if (!$isSuccess && $response && strpos($response, '200 OK') !== false && strpos($response, '<SetUserInfoResponse>') !== false) $isSuccess = true;
+    if (!$isSuccess && $response) log_sync_activity($koneksi, 'sync_debug', $device['id_mesin'], $no_absen, 'debug', substr($response, 0, 500));
+    if ($isSuccess) {
+        // Sama seperti sync_karyawan_to_devices: reload daftar user mesin
+        // supaya PIN baru langsung terbaca di GetAllUserInfo berikutnya.
+        send_soap_request($device['ip_mesin'], $device['port'], "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></RefreshData>");
+        // 2026-10-24: kasus PIN 68 — sync selalu lapor BERHASIL tapi badge
+        // tetap 2/4. Balasan SetUserInfo saja ternyata belum bukti mesin
+        // benar-benar nyimpen (firmware bisa balas <SetUserInfoResponse>
+        // kosong walau tulis ditolak). Jadi, seperti copy sidik, verifikasi
+        // dengan baca balik: kalau daftar user mesin sudah lengkap
+        // (ada penutup </GetAllUserInfoResponse>) TAPI PIN ini tidak ada
+        // di dalamnya, jangan klaim sukses — laporkan sebagai gagal
+        // "terkirim tapi tidak terbaca balik", supaya user tidak dikira
+        // sync-nya jalan padahal mesin tidak nyimpen. Kalau daftarnya
+        // terpotong / tidak bisa dibaca lengkap, pertahankan sukses
+        // (tidak bisa dibuktikan gagal, dan cek badge juga akan terpotong).
+        $soapU = "<GetAllUserInfo><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></GetAllUserInfo>";
+        $respU = send_soap_request($device['ip_mesin'], $device['port'], $soapU, 15);
+        $completeU = is_string($respU) && strpos($respU, '</GetAllUserInfoResponse>') !== false;
+        if (is_string($respU) && trim($respU) !== '' && !$completeU) {
+            $respU = send_soap_request($device['ip_mesin'], $device['port'], $soapU, 30);
+            $completeU = is_string($respU) && strpos($respU, '</GetAllUserInfoResponse>') !== false;
+        }
+        if ($completeU && function_exists('soap_pin_exists') && !soap_pin_exists($respU, $no_absen)) {
+            log_sync_activity($koneksi, 'sync_debug', $device['id_mesin'], $no_absen, 'debug', 'SetUserInfo OK tapi PIN tidak terbaca balik di GetAllUserInfo lengkap');
+            return ['device' => $device['nama_mesin'], 'status' => 'error', 'message' => 'Terkirim tapi PIN tidak terbaca balik di mesin — mesin kemungkinan menolak tulis (cek Comm Key / layar mesin / kapasitas user)', 'pin' => $no_absen, 'name' => $karyawan['nama_karyawan']];
+        }
+        return ['device' => $device['nama_mesin'], 'status' => 'success', 'message' => 'Karyawan berhasil disinkronisasi', 'pin' => $no_absen, 'name' => $karyawan['nama_karyawan']];
+    }
+    return ['device' => $device['nama_mesin'], 'status' => 'error', 'message' => $response ? 'Gagal: '.substr(strip_tags($response), 0, 80) : 'Gagal mengirim data ke mesin'];
 }
 
 /**
@@ -991,7 +1083,13 @@ function sync_all_karyawan_to_device($koneksi, $device_id) {
             'prevented' => $prevented
         ];
     }
-    
+    // 2026-10-24: sama seperti sync_karyawan_to_devices di atas — setelah
+    // tulis massal, kirim RefreshData sekali supaya user baru langsung
+    // terbaca di GetAllUserInfo / badge Mesin berikutnya.
+    if ($synced > 0 && ($device['protocol'] ?? 'soap') !== 'zkudp' && !empty($device['ip_mesin'])) {
+        $comm_key = $device['comm_key'] ?? 0;
+        send_soap_request($device['ip_mesin'], $device['port'], "<RefreshData><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey></RefreshData>");
+    }
     return [
         'device' => $device['nama_mesin'],
         'device_ip' => $device['ip_mesin'],
@@ -1576,6 +1674,8 @@ function build_delete_user_soap($comm_key, $pin, $pin2 = '') {
  * Sebagian firmware X606S menolak DeleteUser (Result 1) selama user masih punya template.
  */
 function delete_user_templates($ip, $port, $comm_key, $pin) {
+    $pin = trim((string)$pin);
+    if ($pin === '' || !is_numeric($pin)) return; // wajib PIN spesifik, cegah hapus massal
     for($fid = 0; $fid < 10; $fid++){
         $soapT = "<DeleteTemplate><ArgComKey xsi:type=\"xsd:integer\">{$comm_key}</ArgComKey><Arg><PIN xsi:type=\"xsd:integer\">{$pin}</PIN><FingerID xsi:type=\"xsd:integer\">{$fid}</FingerID></Arg></DeleteTemplate>";
         send_soap_request($ip, $port, $soapT);

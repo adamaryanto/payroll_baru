@@ -21,7 +21,14 @@ $query = "SELECT A.*,
             (SELECT COUNT(id_rkk_detail) FROM tb_rkk_detail WHERE id_rkk = A.id_rkk AND status_rkk != 'Digantikan') as jml, 
             (SELECT SUM(upah) FROM tb_rkk_detail WHERE id_rkk = A.id_rkk AND status_rkk != 'Digantikan') as ttl 
           FROM tb_rkk A 
-          WHERE status_rkk = 2";
+          WHERE status_rkk = 2
+          -- 2026-10-26: RKK yang sudah punya Realisasi JANGAN muncul lagi di Tambah,
+          -- walau statusnya balik jadi 2 (misal di-Approve ulang di modul RKK).
+          -- 2026-10-26 (koreksi): sembunyikan JUGA kalau tanggalnya sudah ada di Realisasi,
+          -- walau id_rkk-nya beda (misal RKK di-import 2x dengan tanggal/isi sama, seperti
+          -- 2026-10-16 yang masih muncul padahal Realisasi tanggal itu sudah ada).
+          -- tambah.php membuat tgl_realisasi = tgl_rkk, jadi perbandingan tanggal ini tepat.
+          AND NOT EXISTS (SELECT 1 FROM tb_realisasi R WHERE R.id_rkk = A.id_rkk OR R.tgl_realisasi = A.tgl_rkk)";
 $tampil = $koneksi->query($query);
 ?>
 
@@ -222,6 +229,9 @@ $(document).ready(function() {
 
     // SweetAlert Realize Confirmation
     $(document).on('click', '.btn-realize-rkk', function() {
+        const $btn = $(this);
+        if ($btn.data('busy')) return; // klik ganda: abaikan klik kedua dan seterusnya
+        $btn.data('busy', true);
         const id = $(this).data('id');
         const text = $(this).data('text');
         const jml = $(this).data('jml');
@@ -249,6 +259,8 @@ $(document).ready(function() {
         }).then((result) => {
             if (result.isConfirmed) {
                 window.location.href = '?page=realisasi&aksi=tambah&id=' + id;
+            } else {
+                $btn.data('busy', false); // batal: tombol boleh diklik lagi
             }
         });
     });

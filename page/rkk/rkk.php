@@ -1,10 +1,33 @@
 <?php
 
-// 1. hak Approve/Un-Approve
-$is_authorized = (strtolower($_SESSION['role']) == "owner" || strtolower($_SESSION['role']) == "admin master");
+// 1. hak Approve/Un-Approve (2026-10-26, dibalik atas permintaan user):
+// Owner + Admin Master + Kepala Pabrik. Admin HR TIDAK bisa Approve lagi.
+$is_authorized = in_array(strtolower($_SESSION['role'] ?? ''), ["owner", "admin master", "kepala pabrik"], true);
+$is_hapus_checklist = in_array(strtolower($_SESSION['role'] ?? ''), ["kepala pabrik", "admin master"], true);
 
 // 2.hak Propose/Un-Propose (HRD & Admin Master)
 $can_propose = (strtolower($_SESSION['role']) == "admin hr" || strtolower($_SESSION['role']) == "kepala pabrik" || strtolower($_SESSION['role']) == "admin master");
+
+// 2026-10-26 (koreksi): Hapus by checklist INLINE di List ini, bukan halaman terpisah.
+// Checkbox ada di samping kolom No (hanya untuk Kepala Pabrik + Admin Master).
+// POST ini diproses SEBELUM query list, jadi baris yang dihapus langsung hilang dari list.
+$hapus_hasil_rkk = '';
+if (isset($_POST['hapus_terpilih'])) {
+    if (!in_array(strtolower($_SESSION['role'] ?? ''), ["kepala pabrik", "admin master"], true)) {
+        $hapus_hasil_rkk = 'error';
+    } elseif (empty($_POST['pilih_id']) || !is_array($_POST['pilih_id'])) {
+        $hapus_hasil_rkk = 'kosong';
+    } else {
+        $hapus_cnt_rkk = 0;
+        foreach ($_POST['pilih_id'] as $hid) {
+            $hid = (int)$hid;
+            if ($hid <= 0) continue;
+            $koneksi->query("DELETE FROM tb_rkk_detail WHERE id_rkk = $hid");
+            if ($koneksi->query("DELETE FROM tb_rkk WHERE id_rkk = $hid")) $hapus_cnt_rkk++;
+        }
+        $hapus_hasil_rkk = 'ok:' . $hapus_cnt_rkk;
+    }
+}
 
 $where_rkk = (strtolower($_SESSION['role']) == 'owner') ? " WHERE A.status_rkk > 0 " : "";
 $tampil = $koneksi->query("SELECT A.*, 
@@ -42,9 +65,14 @@ if (strtolower($_SESSION['role']) == "owner") {
                 <a href="?page=rkk&aksi=import" class="flex-1 md:flex-none justify-center inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white text-[15px] font-medium py-2.5 px-5 rounded shadow-sm transition-colors">
                     <i class="fas fa-file-excel mr-1.5"></i> Import Excel
                 </a>
-                <a href="?page=rkk&aksi=hapus_massal" class="flex-1 md:flex-none justify-center inline-flex items-center bg-rose-600 hover:bg-rose-700 text-white text-[15px] font-medium py-2.5 px-5 rounded shadow-sm transition-colors">
-                    <i class="fas fa-trash mr-1.5"></i> Hapus Masal
-                </a>
+                <!-- Tombol Hapus Masal DIHAPUS untuk semua role. Penggantinya: Hapus by
+                     checklist INLINE di list ini (checkbox di samping kolom No) hanya
+                     untuk Kepala Pabrik + Admin Master. -->
+                <?php if ($is_hapus_checklist): ?>
+                <button type="button" id="btnHapusTerpilihRKK" onclick="hapusTerpilihRKK()" class="flex-1 md:flex-none justify-center inline-flex items-center bg-rose-600 hover:bg-rose-700 text-white text-[15px] font-medium py-2.5 px-5 rounded shadow-sm transition-colors border-0">
+                    <i class="fas fa-check-square mr-1.5"></i> Hapus Terpilih
+                </button>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -53,6 +81,7 @@ if (strtolower($_SESSION['role']) == "owner") {
                 <table class="w-full text-left border-collapse table-modern" id="dataTables-example">
                     <thead class="bg-gray-100 border-b border-gray-300">
                         <tr>
+                            <?php if ($is_hapus_checklist): ?><th class="py-3 px-2 text-center w-10"><input type="checkbox" id="select_all_hapus_rkk" class="w-4 h-4 cursor-pointer" title="Pilih semua"></th><?php endif; ?>
                             <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">No</th>
                             <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">Tanggal</th>
                             <th class="py-3 px-2 text-sm font-bold text-gray-700 uppercase">Keterangan</th>
@@ -69,6 +98,7 @@ if (strtolower($_SESSION['role']) == "owner") {
                             $status_color = ($data['status_rkk'] == "3") ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800";
                         ?>
                             <tr class="hover:bg-gray-50 transition-colors">
+                                <?php if ($is_hapus_checklist): ?><td class="py-3 px-2 text-center"><input type="checkbox" class="check_item_hapus_rkk w-4 h-4 cursor-pointer" name="pilih_id[]" value="<?= (int)$data['id_rkk'] ?>"></td><?php endif; ?>
                                 <td data-label="No" class="py-3 px-2 text-center text-base md:text-[15px] font-bold md:font-normal"><?= $no++ ?></td>
                                 <td data-label="Tanggal" class="py-3 px-2 text-base md:text-[15px] font-bold text-gray-900"><?= date('d/m/Y', strtotime($data['tgl_rkk'])) ?></td>
                                 <td data-label="Keterangan" class="py-3 px-2 text-base md:text-[14px] text-gray-700"><?= $data['keterangan'] ?></td>
@@ -93,15 +123,6 @@ if (strtolower($_SESSION['role']) == "owner") {
                                                 class="flex items-center px-3 py-2 text-[13px] md:text-[12px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-600 hover:text-white rounded border border-blue-300 transition-colors">
                                                 <i class="fas fa-user-plus mr-1.5"></i> Tetapkan
                                             </a>
-                                        <?php endif; ?>
-                                        <?php if ($data['status_rkk'] == '2') : ?>
-                                            <button type="button"
-                                                class="flex items-center px-3 py-2 text-[13px] md:text-[12px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded border border-indigo-300 transition-colors btn-action-rkk"
-                                                data-id="<?= $data['id_rkk']; ?>"
-                                                data-action="realisasi"
-                                                data-text="Buat Realisasi untuk data ini?">
-                                                <i class="fas fa-check-circle mr-1"></i> Realisasi
-                                            </button>
                                         <?php endif; ?>
                                     </div>
                                 </td>
@@ -463,6 +484,33 @@ if (strtolower($_SESSION['role']) == "owner") {
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<?php if (!empty($hapus_hasil_rkk)): ?>
+<script>
+(function() {
+    var h = <?= json_encode($hapus_hasil_rkk) ?>;
+    if (h === 'error') Swal.fire({ icon: 'error', title: 'Akses Ditolak', text: 'Hapus Checklist hanya untuk Kepala Pabrik dan Admin Master.', confirmButtonColor: '#2563eb' });
+    else if (h === 'kosong') Swal.fire({ icon: 'warning', title: 'Belum Dipilih', text: 'Centang dulu data yang ingin dihapus.', confirmButtonColor: '#2563eb' });
+    else if (h.indexOf('ok:') === 0) Swal.fire({ icon: 'success', title: 'Berhasil', text: h.split(':')[1] + ' data Rencana berhasil dihapus.', confirmButtonColor: '#2563eb' });
+})();
+</script>
+<?php endif; ?>
+<script>
+function hapusTerpilihRKK() {
+    var checked = document.querySelectorAll('.check_item_hapus_rkk:checked');
+    if (checked.length === 0) { Swal.fire({ icon: 'warning', title: 'Belum Dipilih', text: 'Centang dulu data yang ingin dihapus (checkbox di samping kolom No).', confirmButtonColor: '#2563eb' }); return; }
+    Swal.fire({ title: 'Hapus Data Terpilih?', text: checked.length + ' data Rencana yang dicentang akan dihapus permanen!', icon: 'warning', showCancelButton: true, confirmButtonColor: '#e11d48', cancelButtonColor: '#64748b', confirmButtonText: 'Ya, Hapus', cancelButtonText: 'Batal' }).then(function(r) {
+        if (!r.isConfirmed) return;
+        var f = document.createElement('form'); f.method = 'POST'; f.action = window.location.href;
+        var h = document.createElement('input'); h.type = 'hidden'; h.name = 'hapus_terpilih'; h.value = '1'; f.appendChild(h);
+        checked.forEach(function(c) { var i = document.createElement('input'); i.type = 'hidden'; i.name = 'pilih_id[]'; i.value = c.value; f.appendChild(i); });
+        document.body.appendChild(f); f.submit();
+    });
+}
+document.addEventListener('DOMContentLoaded', function() {
+    var sa = document.getElementById('select_all_hapus_rkk');
+    if (sa) sa.addEventListener('change', function() { document.querySelectorAll('.check_item_hapus_rkk').forEach(function(c) { c.checked = sa.checked; }); });
+});
+</script>
 <script>
     $(document).ready(function() {
         $('#dataTables-example').DataTable({
@@ -545,20 +593,8 @@ if (strtolower($_SESSION['role']) == "owner") {
         $('.dataTables_length').addClass('mb-3');
     });
 
-    // Validasi khusus tombol Cetak
-    $(document).on('click', '.btn-cetak-rkk', function(e) {
-        const boneless = $(this).data('boneless');
-
-        if (boneless == 0) {
-            e.preventDefault(); // Menghentikan link agar tidak mendownload excel
-            Swal.fire({
-                icon: 'warning',
-                title: 'Boneless Belum Diinput',
-                text: 'Anda tidak dapat mencetak RKK karena data Boneless untuk tanggal ini belum diinput. Silakan input Boneless terlebih dahulu.',
-                confirmButtonColor: '#2563eb'
-            });
-        }
-    });
+    // Cetak Rencana: semua role boleh download, tanpa menunggu Boneless diinput.
+    // excelrkk.php sudah aman kalau Boneless kosong (biaya boneless jadi 0).
 </script>
 
 <?php

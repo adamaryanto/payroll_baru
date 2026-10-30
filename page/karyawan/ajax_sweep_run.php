@@ -18,7 +18,7 @@ $force = !empty($_POST['force']);
 $cfg = sweep_get_config($koneksi);
 if (empty($cfg['enabled'])) { swdone(['ran' => false, 'reason' => 'nonaktif']); }
 if (!$force) {
-    $due = !empty($cfg['last_run']) ? (strtotime($cfg['last_run']) + sweep_interval_seconds($cfg['interval_jam'])) : 0;
+    $due = sweep_due_ts($cfg);
     if ($due !== 0 && time() < $due) { swdone(['ran' => false, 'reason' => 'belum waktunya']); }
     if (!sweep_cooldown_ok()) { swdone(['ran' => false, 'reason' => 'baru saja jalan']); }
 }
@@ -33,9 +33,9 @@ $res = sweep_execute($koneksi, $cfg['master_id'], false, 0, true, function($line
 $next_in = 0; $ivlabel = '';
 if (!empty($res['ran'])) {
     $cfg2 = sweep_get_config($koneksi);
-    $iv = (int)$cfg2['interval_jam'];
-    $ivlabel = $iv === -1 ? '1 menit' : ($iv === 0 ? '5 menit' : $iv . ' jam');
-    if (!empty($cfg2['last_run'])) $next_in = max(0, strtotime($cfg2['last_run']) + sweep_interval_seconds($iv) - time());
+    $ivlabel = sweep_schedule_label($cfg2);
+    $due_ts = sweep_due_ts($cfg2);
+    $next_in = $due_ts > 0 ? max(0, $due_ts - time()) : 0;
 }
 swdone([
     'ran' => !empty($res['ran']),

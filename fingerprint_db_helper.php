@@ -14,28 +14,104 @@ include_once __DIR__ . '/device_sync_helper.php';
  * Tabel: tb_sweep_config (1 baris, id=1).
  */
 function sweep_ensure_config($koneksi) {
+    static $ensured = false;
+    if ($ensured) return true;
     $koneksi->query("CREATE TABLE IF NOT EXISTS tb_sweep_config (
         id INT PRIMARY KEY,
         enabled TINYINT(1) NOT NULL DEFAULT 0,
         interval_jam INT NOT NULL DEFAULT 4,
+        schedule_mode VARCHAR(10) NOT NULL DEFAULT 'interval',
+        fixed_times VARCHAR(100) NOT NULL DEFAULT '',
         master_id VARCHAR(20) NOT NULL DEFAULT 'auto',
         last_run DATETIME NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $koneksi->query("INSERT IGNORE INTO tb_sweep_config (id, enabled, interval_jam, master_id, last_run) VALUES (1, 0, 4, 'auto', NULL)");
+    // Migrasi aman untuk tabel lama (tanpa ALTER IF NOT EXISTS, biar kompatibel MySQL/MariaDB).
+    $cols = [];
+    $rc = $koneksi->query("SHOW COLUMNS FROM tb_sweep_config");
+    if ($rc) while ($row = $rc->fetch_assoc()) $cols[strtolower($row['Field'])] = true;
+    if (!isset($cols['schedule_mode'])) {
+        $koneksi->query("ALTER TABLE tb_sweep_config ADD COLUMN schedule_mode VARCHAR(10) NOT NULL DEFAULT 'interval' AFTER interval_jam");
+    }
+    if (!isset($cols['fixed_times'])) {
+        $koneksi->query("ALTER TABLE tb_sweep_config ADD COLUMN fixed_times VARCHAR(100) NOT NULL DEFAULT '' AFTER schedule_mode");
+    }
+    $koneksi->query("INSERT IGNORE INTO tb_sweep_config (id, enabled, interval_jam, schedule_mode, fixed_times, master_id, last_run) VALUES (1, 0, 4, 'interval', '', 'auto', NULL)");
+    $ensured = true;
+    return true;
+}
+
+/** Normalisasi daftar jam "22:00,01:00" -> ['01:00','22:00'] (valid, unik, urut). */
+function sweep_parse_fixed_times($raw) {
+    $out = [];
+    foreach (preg_split('/[,\s;]+/', (string)$raw) as $t) {
+        $t = trim($t);
+        if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $t, $m)) {
+            $out[] = sprintf('%02d:%02d', (int)$m[1], (int)$m[2]);
+        }
+    }
+    $out = array_values(array_unique($out));
+    sort($out);
+    return $out;
 }
 
 function sweep_get_config($koneksi) {
     sweep_ensure_config($koneksi);
-    $r = $koneksi->query("SELECT enabled, interval_jam, master_id, last_run FROM tb_sweep_config WHERE id=1 LIMIT 1");
+    $r = $koneksi->query("SELECT enabled, interval_jam, schedule_mode, fixed_times, master_id, last_run FROM tb_sweep_config WHERE id=1 LIMIT 1");
     $c = $r ? $r->fetch_assoc() : null;
     $iv = (int)($c['interval_jam'] ?? 4);
     if ($iv < -1 || $iv > 168) $iv = 4;
+    $mode = ($c['schedule_mode'] ?? 'interval') === 'fixed' ? 'fixed' : 'interval';
+    $times = sweep_parse_fixed_times($c['fixed_times'] ?? '');
+    if ($mode === 'fixed' && empty($times)) $mode = 'interval';
     return [
         'enabled' => !empty($c['enabled']),
         'interval_jam' => $iv,
+        'schedule_mode' => $mode,
+        'fixed_times' => implode(',', $times),
+        'fixed_times_arr' => $times,
         'master_id' => ($c['master_id'] ?? 'auto') === '' ? 'auto' : $c['master_id'],
         'last_run' => $c['last_run'] ?? null,
     ];
+}
+
+/** Timestamp jadwal tetap berikutnya setelah $after_ts (jam lokal PHP). */
+function sweep_next_fixed_ts($times, $after_ts) {
+    if (empty($times)) return 0;
+    $today = strtotime(date('Y-m-d', $after_ts));
+    for ($i = 0; $i <= 2; $i++) {
+        $day = date('Y-m-d', $today + $i * 86400);
+        foreach ($times as $t) {
+            $ts = strtotime($day . ' ' . $t);
+            if ($ts !== false && $ts > $after_ts) return $ts;
+        }
+    }
+    return 0;
+}
+
+/** Jadwal berikutnya setelah $from_ts (default sekarang). */
+function sweep_next_ts($cfg, $from_ts = null) {
+    $from_ts = $from_ts === null ? time() : (int)$from_ts;
+    if (($cfg['schedule_mode'] ?? 'interval') === 'fixed') {
+        return sweep_next_fixed_ts($cfg['fixed_times_arr'] ?? [], $from_ts);
+    }
+    return $from_ts + sweep_interval_seconds($cfg['interval_jam'] ?? 4);
+}
+
+/** Waktu due berdasarkan last_run. 0 = belum pernah jalan / langsung due. */
+function sweep_due_ts($cfg) {
+    if (empty($cfg['last_run'])) return 0;
+    return sweep_next_ts($cfg, strtotime($cfg['last_run']));
+}
+
+function sweep_schedule_label($cfg) {
+    if (($cfg['schedule_mode'] ?? 'interval') === 'fixed') {
+        $t = $cfg['fixed_times_arr'] ?? [];
+        if (!empty($t)) return implode(' & ', $t);
+    }
+    $iv = (int)($cfg['interval_jam'] ?? 4);
+    if ($iv === -1) return '1 menit';
+    if ($iv === 0) return '5 menit';
+    return $iv . ' jam';
 }
 
 /**
@@ -49,13 +125,20 @@ function sweep_interval_seconds($interval_jam) {
     return $interval_jam * 3600;
 }
 
-function sweep_save_config($koneksi, $enabled, $interval_jam, $master_id) {
+function sweep_save_config($koneksi, $enabled, $interval_jam, $master_id, $schedule_mode = 'interval', $fixed_times = '') {
     sweep_ensure_config($koneksi);
     $interval_jam = (int)$interval_jam;
     if ($interval_jam < -1) $interval_jam = -1;
     if ($interval_jam > 168) $interval_jam = 168;
+    $mode = $schedule_mode === 'fixed' ? 'fixed' : 'interval';
+    $times = sweep_parse_fixed_times($fixed_times);
+    if ($mode === 'fixed' && empty($times)) $mode = 'interval';
+    $times_sql = implode(',', $times);
     $master_id = trim((string)$master_id) === '' ? 'auto' : trim((string)$master_id);
-    $sql = "UPDATE tb_sweep_config SET enabled=" . ($enabled ? 1 : 0) . ", interval_jam=$interval_jam, master_id='" . $koneksi->real_escape_string($master_id) . "' WHERE id=1";
+    $sql = "UPDATE tb_sweep_config SET enabled=" . ($enabled ? 1 : 0) . ", interval_jam=$interval_jam,
+        schedule_mode='" . $koneksi->real_escape_string($mode) . "',
+        fixed_times='" . $koneksi->real_escape_string($times_sql) . "',
+        master_id='" . $koneksi->real_escape_string($master_id) . "' WHERE id=1";
     return $koneksi->query($sql);
 }
 
@@ -157,8 +240,8 @@ function sweep_execute($koneksi, $master_opt = null, $dry = false, $limit = 0, $
     if (!$force && !$dry) {
         if (!$cfg['enabled']) { $log("Auto-sweep nonaktif (aktifkan di halaman Backup Sidik Jari)."); return ['ran'=>false,'code'=>0,'lines'=>$lines]; }
         if (!empty($cfg['last_run'])) {
-            $next = strtotime($cfg['last_run']) + sweep_interval_seconds($cfg['interval_jam']);
-            if (time() < $next) { $log("Belum waktunya (jalan lagi " . date('Y-m-d H:i:s', $next) . ")."); return ['ran'=>false,'code'=>0,'lines'=>$lines]; }
+            $next = sweep_due_ts($cfg);
+            if ($next > 0 && time() < $next) { $log("Belum waktunya (jalan lagi " . date('Y-m-d H:i:s', $next) . ")."); return ['ran'=>false,'code'=>0,'lines'=>$lines]; }
         }
     }
 
@@ -365,7 +448,9 @@ function fp_summary($koneksi) {
 
 function fp_delete_pin($koneksi, $pin) {
     fp_ensure_table($koneksi);
-    $pin_esc = $koneksi->real_escape_string(trim((string)$pin));
+    $pin = trim((string)$pin);
+    if ($pin === '') return false; // jangan pernah hapus tanpa PIN spesifik
+    $pin_esc = $koneksi->real_escape_string($pin);
     return $koneksi->query("DELETE FROM tb_fingerprint WHERE pin='$pin_esc'");
 }
 

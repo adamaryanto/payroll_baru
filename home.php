@@ -12,7 +12,37 @@ include_once __DIR__ . '/device_sync_helper.php';
 $devices = get_all_devices($koneksi);
 for($i=count($devices); $i<4; $i++) $devices[]=['id_mesin'=>'','no_mesin'=>$i+1,'nama_mesin'=>'Mesin '.($i+1),'ip_mesin'=>'','comm_key'=>'0','port'=>'4370'];
 $devices=array_values($devices);
-$today=$_GET['tgl_absen'] ?? date('Y-m-d');
+// EDIT DARI FILE home__2.php MILIK REZA, 2026-10-24.
+// Tanggal dashboard HANYA dari tanggal yang ada Realisasinya di tb_realisasi.
+// Tanggal tanpa Realisasi tidak ditawarkan sama sekali (tidak ada lagi input kalender bebas).
+// Tombol "Lihat Realisasi" langsung ke Kelola kalau tanggal itu cuma punya 1 realisasi.
+$daftar_realisasi = [];
+$peta_realisasi = [];
+$q_real_tgl = $koneksi->query("SELECT tgl_realisasi, COUNT(*) AS jml, MAX(id_realisasi) AS id_terbaru FROM tb_realisasi WHERE tgl_realisasi IS NOT NULL GROUP BY tgl_realisasi ORDER BY tgl_realisasi DESC");
+if ($q_real_tgl) {
+    while ($r_real_tgl = $q_real_tgl->fetch_assoc()) {
+        if (!empty($r_real_tgl['tgl_realisasi'])) {
+            $daftar_realisasi[] = $r_real_tgl['tgl_realisasi'];
+            $peta_realisasi[$r_real_tgl['tgl_realisasi']] = ['id' => (int)$r_real_tgl['id_terbaru'], 'jml' => (int)$r_real_tgl['jml']];
+        }
+    }
+}
+$req_tgl = $_GET['tgl_absen'] ?? '';
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $req_tgl)) $req_tgl = '';
+if ($req_tgl !== '' && in_array($req_tgl, $daftar_realisasi, true)) {
+    $today = $req_tgl;
+} elseif (!empty($daftar_realisasi)) {
+    $today = in_array(date('Y-m-d'), $daftar_realisasi, true) ? date('Y-m-d') : $daftar_realisasi[0];
+} else {
+    $today = date('Y-m-d');
+}
+// Link tombol: 1 realisasi = langsung ke Kelola, >1 realisasi = ke list tanggal itu (pilih barisnya).
+$link_realisasi = '?page=realisasi';
+if ($today !== '' && isset($peta_realisasi[$today])) {
+    $link_realisasi = ($peta_realisasi[$today]['jml'] == 1)
+        ? '?page=realisasi&aksi=kelola&id=' . $peta_realisasi[$today]['id']
+        : '?page=realisasi&tgl=' . urlencode($today);
+}
 $stats=['masuk'=>0,'pulang'=>0,'lembur'=>0,'tidak_lengkap'=>0];
 $qToday=$koneksi->query("SELECT * FROM tb_record WHERE tgl='$today'");
 $groupedToday=[];
@@ -94,9 +124,13 @@ foreach($groupedToday as $k=>$row){
                     </div>
                     <?php endforeach; ?>
                 </div>
+                <?php if (!in_array(strtolower($_SESSION['role'] ?? ''), ["admin hr", "kepala pabrik", "owner"], true)): ?>
                 <div class="mt-auto">
                     <a href="?page=mesin" class="flex items-center justify-center w-full px-4 py-3 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-sm font-bold"><i class="fas fa-cogs mr-2"></i> Kelola Mesin</a>
                 </div>
+                <?php endif; ?>
+                <!-- 2026-10-26: Tombol Kelola Mesin disembunyikan untuk Admin HR, Kepala Pabrik,
+                     dan Owner; grid Status Mesin (ONLINE/OFFLINE) di atas tetap tampil untuk semua role. -->
             </div>
 
             <!-- Card 3: Absen Hari Ini -->
@@ -108,7 +142,14 @@ foreach($groupedToday as $k=>$row){
                     <h3 class="text-sm font-bold text-slate-500 uppercase tracking-widest">Absen Hari Ini</h3>
                     <p class="text-xs text-slate-400 mt-1"><?= tgl_indo($today) ?> (<?= $today ?>)</p>
                     <form method="GET" class="mt-2 flex items-center gap-2">
-                        <input type="date" name="tgl_absen" value="<?= $today ?>" class="text-xs px-2 py-1 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500">
+                        <select id="tgl-absen" name="tgl_absen" class="text-xs px-2 py-1 border border-gray-200 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500 bg-white">
+                            <?php foreach ($daftar_realisasi as $tgl_opt) : ?>
+                                <option value="<?= htmlspecialchars($tgl_opt) ?>" <?= ($tgl_opt === $today) ? 'selected' : '' ?>><?= date('d/m/Y', strtotime($tgl_opt)) ?><?= (isset($peta_realisasi[$tgl_opt]) && $peta_realisasi[$tgl_opt]['jml'] > 1) ? ' (' . $peta_realisasi[$tgl_opt]['jml'] . ' realisasi)' : '' ?></option>
+                            <?php endforeach; ?>
+                            <?php if (empty($daftar_realisasi)) : ?>
+                                <option value="" disabled>Belum ada Realisasi</option>
+                            <?php endif; ?>
+                        </select>
                         <button type="submit" class="text-xs px-3 py-1 bg-emerald-600 text-white rounded-lg font-bold">Filter</button>
                     </form>
                 </div>
@@ -127,7 +168,28 @@ foreach($groupedToday as $k=>$row){
                     </div>
                 </div>
                 <div class="mt-auto">
-                    <a href="?page=generate&aksi=tarik" class="flex items-center justify-center w-full px-4 py-3 bg-slate-800 text-white hover:bg-slate-700 rounded-xl text-sm font-bold"><i class="fas fa-download mr-2"></i> Tarik Data Hari Ini</a>
+                    <a id="btn-lihat-realisasi" href="<?= htmlspecialchars($link_realisasi) ?>" class="flex items-center justify-center w-full px-4 py-3 bg-slate-800 text-white hover:bg-slate-700 rounded-xl text-sm font-bold"><i class="fas fa-check-circle mr-2"></i> Lihat Realisasi</a>
+                    <script>
+                        // Tombol ikut tanggal yang dipilih di dropdown, tanpa harus klik Filter dulu.
+                        // Tanggal dengan 1 realisasi = langsung ke Kelola, >1 realisasi = ke list tanggal itu.
+                        (function () {
+                            var sel = document.getElementById('tgl-absen');
+                            var btn = document.getElementById('btn-lihat-realisasi');
+                            if (!sel || !btn) return;
+                            var peta = <?= json_encode($peta_realisasi) ?>;
+                            function updateBtn() {
+                                var info = peta[sel.value];
+                                if (info && info.jml == 1) {
+                                    btn.href = '?page=realisasi&aksi=kelola&id=' + info.id;
+                                } else if (sel.value) {
+                                    btn.href = '?page=realisasi&tgl=' + encodeURIComponent(sel.value);
+                                } else {
+                                    btn.href = '?page=realisasi';
+                                }
+                            }
+                            sel.addEventListener('change', updateBtn);
+                        })();
+                    </script>
                 </div>
             </div>
 

@@ -18,6 +18,13 @@ $ckG = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_pengganti
 if ($ckG && $ckG->num_rows == 0) {
     $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_pengganti INT NULL DEFAULT NULL");
 }
+// Self-heal kolom Posisi per baris (dipakai Detail; 0 = ikut master).
+// Dipakai query di bawah supaya kolom POSISI di Excel tidak kosong padahal
+// Posisi sudah diedit per baris di Detail.
+$ckJ = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_jabatan'");
+if ($ckJ && $ckJ->num_rows == 0) {
+    $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_jabatan INT NOT NULL DEFAULT 0");
+}
 
 $id = isset($_GET['id']) ? $_GET['id'] : '';
 $only_tdr = (strtolower(trim($_GET['jenis'] ?? '')) === 'tdr');
@@ -99,7 +106,7 @@ if ($tanggal_sql !== '') {
 }
 $tampil = $koneksi->query("SELECT A.*, IF(A.id_karyawan = 0, A.nama_karyawan_manual, B.nama_karyawan) as nama_karyawan,
     TRIM(B.no_absen) as pin_kar,
-    O.OS_DHK as label_os, G.golongan as label_gol, S.jabatan as posisi, J.jam_masuk as j_masuk, J.keterangan as shift_ket,
+    O.OS_DHK as label_os, G.golongan as label_gol, COALESCE(NULLIF(S2.jabatan, ''), S.jabatan) as posisi, J.jam_masuk as j_masuk, J.keterangan as shift_ket,
     GB.nama_grup as grup,
     PG.nama_karyawan as pengganti_nama
     FROM tb_realisasi_detail A
@@ -109,6 +116,7 @@ $tampil = $koneksi->query("SELECT A.*, IF(A.id_karyawan = 0, A.nama_karyawan_man
     LEFT JOIN ms_os_dhk O ON COALESCE(NULLIF(A.id_os_dhk, 0), B.id_os_dhk) = O.id_os_dhk
     LEFT JOIN ms_golongan G ON COALESCE(NULLIF(A.id_golongan, 0), B.id_golongan) = G.id_golongan
     LEFT JOIN ms_jabatan S ON B.id_jabatan = S.id_jabatan
+    LEFT JOIN ms_jabatan S2 ON A.id_jabatan = S2.id_jabatan
     LEFT JOIN tb_jadwal J ON A.id_jadwal = J.id_jadwal
     LEFT JOIN ms_grup_borongan GB ON A.id_grup = GB.id_grup
     LEFT JOIN (SELECT id_grup, MIN(id_realisasi_detail) AS g_ord FROM tb_realisasi_detail WHERE id_realisasi = '$id' AND id_grup IS NOT NULL GROUP BY id_grup) GO ON GO.id_grup = A.id_grup
@@ -152,6 +160,10 @@ $gDendaIstMasuk = $dd_ex['denda_istirahat_masuk'] ?? 0;
 $gDendaPulang = $dd_ex['denda_pulang'] ?? 0;
 $gDendaTdkLengkap = $dd_ex['denda_tidak_lengkap'] ?? 0;
 while ($tampil && ($r = $tampil->fetch_assoc())) {
+    // 2026-10-27: Baris tanpa nama dilewati (sama seperti Kelola) — mis. sisa
+    // baris yang namanya hilang setelah hapus — supaya tidak jadi baris kosong
+    // di Excel; baris bawah naik dan nomor urut tetap rapat.
+    if (trim((string)($r['nama_karyawan'] ?? '')) === '') continue;
     // Sheet REALISASI tampil semua baris persis halaman kelola (tidak difilter);
     // baris rangkap tetap tampil, yang dijumlah cuma baris pertama per orang.
     // Flag hadir/telat/cepat dihitung live (toleransi SAMA kayak tarik data) agar
@@ -296,7 +308,9 @@ if (empty($rows_per_grup)) {
     $x->cell($s1, $r, 1, 'Belum ada karyawan yang tap mesin / tarik data pada tanggal ini â€” lihat sheet KARYAWAN TIDAK MASUK. Setelah tap + Tarik Data, export ulang untuk memunculkan data.', $stCB); $x->merge($s1, $r, 1, $r, 16); $r++;
 }
 foreach ($rows_per_grup as $nama_grup => $rows) {
-    $x->cell($s1, $r, 1, $nama_grup, $stSEC); $x->merge($s1, $r, 1, $r, 16); $r++;
+    if (empty($rows)) continue; // grup yang sudah tidak punya baris (mis. semua barisnya dihapus) tidak ditulis headernya
+    $nama_grup_tampil = trim((string)$nama_grup) !== '' ? $nama_grup : 'TANPA GRUP';
+    $x->cell($s1, $r, 1, $nama_grup_tampil, $stSEC); $x->merge($s1, $r, 1, $r, 16); $r++;
     foreach ($hdrL as $i => $h) $x->cell($s1, $r, $i + 1, $h, $stTH);
     $x->cell($s1, $r, 11, 'Detail Borongan', $stTH);
     foreach ($hdrR as $i => $h) $x->cell($s1, $r, 12 + $i, $h, $stTHG);
@@ -595,7 +609,7 @@ if ($only_tdr) {
     $x->width($s1, 2, 335); // NAMA SESUAI KTP (juga lebar label kotak kiri)
     $x->width($s1, 3, 225); // PARAF PEKERJA / kolom nilai kotak kiri
     $x->width($s1, 6, 222); // POSISI
-    $x->width($s1, 7, 95);  // JAM KERJA
+    $x->width($s1, 7, 140);  // JAM KERJA (dilebarkan 2026-10-27: 95px bikin header kepotong jadi 'AM KERJA' di font 18 bold)
     $x->width($s1, 8, 190); // JAM MASUK / PENGURANGAN (kanan)
     $x->width($s1, 9, 250); // ISTIRAHAT / NAMA TIM (kanan)
     $x->width($s1, 10, 200); // JAM PULANG / QTY / TOTAL (kanan)

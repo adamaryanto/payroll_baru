@@ -6,11 +6,19 @@ if (isset($_POST['sync_all_karyawan'])) {
     $devices = get_all_devices($koneksi);
     $bulk_sync_results = [];
     // SYNC HANYA YANG BELUM: daftar PIN dari konfirmasi (hasil cek isi mesin).
-    // Push per karyawan, save-only (SetUserInfo saja, tanpa baca mesin).
+    // 2026-10-24: push-nya hanya ke mesin yang kurang untuk PIN itu
+    // (sync_map dari dialog: pin => [id_mesin yang kurang]), bukan ke
+    // semua mesin. Tombol "Sync Paksa Semua" dihapus di hari yang sama
+    // atas permintaan Reza — sync sekarang selalu tertarget seperti ini.
     $only_pins = [];
     if(!empty($_POST['sync_pins'])){
         $decPins = json_decode($_POST['sync_pins'], true);
         if(is_array($decPins)) foreach($decPins as $p){ $p=trim((string)$p); if($p!=='') $only_pins[$p]=true; }
+    }
+    $sync_map = [];
+    if(!empty($_POST['sync_map'])){
+        $decMap = json_decode($_POST['sync_map'], true);
+        if(is_array($decMap)) foreach($decMap as $mp=>$mids){ $mp=trim((string)$mp); if($mp==='' || !is_array($mids)) continue; $sync_map[$mp]=array_values(array_unique(array_map('intval',$mids))); }
     }
     if(!empty($only_pins)){
         $perDev = [];
@@ -19,7 +27,15 @@ if (isset($_POST['sync_all_karyawan'])) {
             $qr = $koneksi->query("SELECT id_karyawan FROM ms_karyawan WHERE no_absen='$pinEsc' AND status_karyawan='Aktif' LIMIT 1");
             $erow = $qr ? $qr->fetch_assoc() : null;
             if(!$erow) continue;
-            $pr = sync_karyawan_to_devices($koneksi, (int)$erow['id_karyawan']);
+            // Kalau ada peta mesin-kurang untuk PIN ini, push hanya ke
+            // mesin-mesin itu. Kalau tidak ada (mis. form lama), fallback
+            // ke perilaku lama: push ke semua mesin.
+            if(isset($sync_map[$pin]) && !empty($sync_map[$pin])){
+                $pr = [];
+                foreach($sync_map[$pin] as $tdid){ $pr[$tdid] = sync_karyawan_to_device($koneksi, (int)$erow['id_karyawan'], (int)$tdid); }
+            } else {
+                $pr = sync_karyawan_to_devices($koneksi, (int)$erow['id_karyawan']);
+            }
             foreach($pr as $did=>$r){
                 if(!isset($perDev[$did])) $perDev[$did] = ['device_name'=>($r['device'] ?? ('Mesin '.$did)),'synced'=>0,'failed'=>0,'skipped'=>0,'total'=>0];
                 $perDev[$did]['total']++;
@@ -329,20 +345,22 @@ if (isset($_POST['bulk_copy_selected'])) {
                             var unver = (res.unverified||[]).map(function(d){ return '• ' + esc(d); }).join('<br>');
                             if(!res.missing || res.missing.length===0){
                                 if(unver !== ''){
-                                    Swal.fire({title:'Info', html:'<div style="text-align:left;font-size:14px;">Karyawan sudah ada di semua mesin SOAP yang dicek.<br><br><span style="color:#6b7280;">Belum bisa dicek:<br>' + unver + '</span></div>', icon:'success', confirmButtonColor:'#16a34a'});
+                                    Swal.fire({title:'Info', html:'<div style="text-align:left;font-size:14px;">Karyawan sudah ada di semua mesin yang dicek.<br><br><span style="color:#6b7280;">Belum bisa dicek:<br>' + unver + '</span></div>', icon:'success', confirmButtonColor:'#16a34a'});
                                 } else {
                                     Swal.fire({title:'Info', text:'Karyawan sudah ada di mesin semua.', icon:'success', confirmButtonColor:'#16a34a'});
                                 }
                                 return;
                             }
                             var pins = res.missing.map(function(m){ return m.pin; });
+                            var syncMap = {};
+                            res.missing.forEach(function(m){ syncMap[m.pin] = m.kurang_di_ids || []; });
                             var nm = res.missing.map(function(m){ return '• ' + esc(m.pin) + ' - ' + esc(m.nama) + ((m.kurang_di && m.kurang_di.length) ? ' <span style="color:#6b7280;">(kurang di: ' + esc(m.kurang_di.join(', ')) + ')</span>' : ''); }).join('<br>');
                             var on = (res.online||[]).map(function(d){ return '• ' + esc(d); }).join('<br>') || '-';
                             var off = (res.offline||[]).map(function(d){ return '• ' + esc(d); }).join('<br>');
                             Swal.fire({
                                 title: 'Sync ke Mesin?',
                                 html: '<div style="text-align:left;font-size:14px;">' +
-                                       'Belum lengkap di mesin (kurang di sebagian/seluruh mesin online) (' + res.missing.length + '):<br>' +
+                                       'Belum lengkap di mesin (belum 4/4 — kurang di sebagian/seluruh mesin, termasuk yang sedang offline/belum bisa dicek) (' + res.missing.length + '):<br>' +
                                       '<div style="max-height:180px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;">' + nm + '</div>' +
                                       '<br>Mesin online:<br>' + on +
                                       (off !== '-' ? '<br><br><span style="color:#6b7280;">Tidak dicek (offline/IP kosong):<br>' + off + '</span>' : '') +
@@ -363,6 +381,9 @@ if (isset($_POST['bulk_copy_selected'])) {
                                     var h2 = document.createElement('input');
                                     h2.type = 'hidden'; h2.name = 'sync_pins'; h2.value = JSON.stringify(pins);
                                     f.appendChild(h2);
+                                    var h3 = document.createElement('input');
+                                    h3.type = 'hidden'; h3.name = 'sync_map'; h3.value = JSON.stringify(syncMap);
+                                    f.appendChild(h3);
                                     f.submit();
                                 }
                             });
@@ -387,9 +408,8 @@ if (isset($_POST['bulk_copy_selected'])) {
                     <i class="fas fa-search mr-1.5"></i> Cek PIN Mesin
                 </a>
                 <?php endif; ?>
-                <a href="?page=karyawan&aksi=jadwal_excel" class="flex md:inline-flex justify-center items-center bg-amber-600 hover:bg-amber-700 text-white text-[15px] font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto">
-                    <i class="fas fa-calendar-alt mr-1.5"></i> Ubah Jadwal Excel
-                </a>
+                <!-- 2026-10-26: Tombol Ubah Jadwal Excel DIHAPUS untuk semua role (halaman
+                     jadwal_excel via URL langsung tetap ada, hanya tombolnya yang hilang). -->
                 <?php if (strtolower($role ?? '') == 'admin master'): ?>
                 <a href="?page=karyawan&aksi=fingerprint_backup" class="flex md:inline-flex justify-center items-center bg-cyan-600 hover:bg-cyan-700 text-white text-[15px] font-medium py-2 px-4 rounded shadow-sm transition-colors w-full md:w-auto">
                     <i class="fas fa-database mr-1.5"></i> Backup Sidik Jari
@@ -569,6 +589,11 @@ if (isset($_POST['bulk_copy_selected'])) {
                 <span class="text-xs text-gray-500">Centang untuk aksi massal</span>
             </div>
             <div class="flex gap-2">
+                <!-- 2026-10-24: status Sidik/Mesin TIDAK lagi dicek otomatis saat halaman
+                     dibuka / pindah halaman DataTables (itu sumber lambatnya: 50x AJAX
+                     per halaman, masing-masing menembak SOAP ke mesin). Klik tombol ini
+                     untuk cek baris yang tampil di halaman ini saja, saat dibutuhkan. -->
+                <button type="button" id="btnCekStatusHalaman" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium py-2 px-4 rounded shadow-sm"><i class="fas fa-fingerprint mr-1.5"></i> Cek Sidik &amp; Mesin (halaman ini)</button>
                 <button type="button" id="btnBulkCopy" class="hidden bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-4 rounded shadow-sm"><i class="fas fa-copy mr-1.5"></i> Copy Sidik Terpilih</button>
                 <button type="button" id="btnBulkDelete" class="bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium py-2 px-4 rounded shadow-sm"><i class="fas fa-trash mr-1.5"></i> Hapus Terpilih</button>
                 <span id="swMini" class="text-xs text-gray-500 self-center" title="Jadwal auto-sweep sidik jari">Sweep: …</span>
@@ -1057,12 +1082,31 @@ if (isset($_POST['bulk_copy_selected'])) {
                     next: "Next"
                 }
             },
-            columnDefs: [{targets: 0, orderable: false}],
-            drawCallback: function(){
-                // auto-render 25 yang tampil tanpa klik manual (100ms staggered)
-                const nodes=this.api().rows({page:'current'}).nodes();
-                $(nodes).find('.btn-cek-finger, .btn-cek-mesin').each(function(i){ const b=$(this); setTimeout(()=>b.trigger('click'), i*100); });
-            }
+            columnDefs: [{targets: 0, orderable: false}]
+            // 2026-10-24: drawCallback auto-cek DIHAPUS. Dulu setiap halaman dibuka
+            // langsung menembak 50x AJAX (sidik + mesin x 25 baris), masing-masing
+            // SOAP ke mesin — halaman terasa lama, dan request lain ikut antre.
+            // Status sekarang dicek on-demand lewat tombol #btnCekStatusHalaman.
+        });
+
+        // Cek Sidik & Mesin untuk baris yang tampil di halaman ini saja.
+        // Hanya baris yang belum dicek (sel masih "-"/"Gagal") yang ditembak;
+        // baris yang sudah ada badge-nya dilewati, dan baris yang sedang
+        // dicek ("...") tidak ditembak ulang kalau tombol diklik lagi.
+        $(document).on('click', '#btnCekStatusHalaman', function(){
+            const btn = $(this);
+            if (btn.prop('disabled')) return;
+            const nodes = table.rows({page:'current'}).nodes();
+            const targets = [];
+            $(nodes).find('.btn-cek-finger, .btn-cek-mesin').each(function(){
+                const cell = $(this).closest('td');
+                const txt = $.trim(cell.find('span').first().text());
+                if (txt === '-' || txt === 'Gagal') targets.push($(this));
+            });
+            if (targets.length === 0) return;
+            btn.prop('disabled', true).text('Mengecek...');
+            targets.forEach(function(b, i){ setTimeout(function(){ b.trigger('click'); }, i * 100); });
+            setTimeout(function(){ btn.prop('disabled', false).html('<i class="fas fa-fingerprint mr-1.5"></i> Cek Sidik &amp; Mesin (halaman ini)'); }, targets.length * 100 + 1000);
         });
 
         // SweetAlert Delete Confirmation - Using delegation for better reliability with DataTables
@@ -1194,6 +1238,7 @@ if (isset($_POST['bulk_copy_selected'])) {
                     $.post('page/karyawan/ajax_copy.php', {id:id}, function(res){
                         if(res.success){
                             let html='<div class="text-left text-sm">';
+                            if(res.source_name){ html+=`<div class="p-2 border rounded mb-1 border-blue-200 bg-blue-50"><b>Sumber: ${res.source_name}</b> — sidik sudah ada di sini, jadi tidak perlu di-copy (makanya mesin ini tidak muncul di daftar target di bawah).</div>`; }
                             for(const did in res.results){
                                 const rr=res.results[did];
                                 html+=`<div class="p-2 border rounded mb-1 ${rr.status=='success'?'border-green-200 bg-green-50':'border-red-200 bg-red-50'}"><b>${rr.device}</b>: ${rr.message}</div>`;

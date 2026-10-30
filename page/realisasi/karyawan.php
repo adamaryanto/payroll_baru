@@ -47,6 +47,53 @@ if (isset($_POST['simpan_karyawan'])) {
     }
 
     if (!empty($nama_manual) && !empty($id_jadwal) && $id_real_fix > 0) {
+        // 2026-10-28 (koreksi): Filter Tambah Karyawan Manual — TOLAK HANYA kalau
+        // orangnya MASIH ADA di Realisasi ini di grup SELAIN TIDAK DALAM RENCANA.
+        // RKK saja TIDAK lagi memblokir: kalau barisnya sudah dihapus dari Realisasi
+        // (tombol Hapus di Kelola), dia BOLEH ditambah lagi manual, walau masih ada
+        // di RKK — karena yang dicegah itu rangkap di dalam Realisasi ini, bukan
+        // sekadar masih ada di Rencana. Yang HANYA ada sebagai baris TIDAK DALAM
+        // RENCANA tetap BOLEH ditambah manual. Cek by id kalau dipilih dari master,
+        // by nama kalau input manual (id=0) supaya tidak bisa lolos lewat ketik
+        // nama yang sama dengan id 0.
+        $blokir_alasan = '';
+        $id_real_g = (int)$id_real_fix;
+        $idrkk_g = (int)$idrkk_ref;
+        // Daftar nama yang sudah ada di Realisasi ini (non-TDR) — dipakai untuk
+        // cek nama manual, termasuk nama pendek vs nama lengkap (lihat bawah).
+        $nama_ada_k = [];
+        $q_nm_ada = $koneksi->query("SELECT RD.id_karyawan, COALESCE(NULLIF(TRIM(K.nama_karyawan), ''), TRIM(RD.nama_karyawan_manual)) AS disp FROM tb_realisasi_detail RD LEFT JOIN ms_karyawan K ON K.id_karyawan = RD.id_karyawan LEFT JOIN ms_grup_borongan G ON G.id_grup = RD.id_grup WHERE RD.id_realisasi = $id_real_g AND (G.id_grup IS NULL OR UPPER(TRIM(G.nama_grup)) <> 'TIDAK DALAM RENCANA')");
+        if ($q_nm_ada) while ($rn_ada = $q_nm_ada->fetch_assoc()) {
+            $dsp = strtoupper(trim((string)($rn_ada['disp'] ?? '')));
+            if ($dsp !== '') $nama_ada_k[] = $dsp;
+        }
+        $nama_manual_u = strtoupper(trim((string)($_POST['nama_karyawan_manual'] ?? '')));
+        $nama_mirip_k = function($nm_u) use ($nama_ada_k) {
+            if ($nm_u === '') return false;
+            foreach ($nama_ada_k as $ada_u) {
+                if ($ada_u === $nm_u) return true;
+                // Nama pendek vs nama lengkap, dengan batas spasi (kata pertama sama).
+                if (strpos($ada_u, $nm_u . ' ') === 0) return true;
+                if (strpos($nm_u, $ada_u . ' ') === 0) return true;
+            }
+            return false;
+        };
+        if ($id_karyawan_pick > 0) {
+            $q_bl = $koneksi->query("SELECT 1 FROM tb_realisasi_detail RD LEFT JOIN ms_grup_borongan G ON G.id_grup = RD.id_grup WHERE RD.id_realisasi = $id_real_g AND RD.id_karyawan = $id_karyawan_pick AND (G.id_grup IS NULL OR UPPER(TRIM(G.nama_grup)) <> 'TIDAK DALAM RENCANA') LIMIT 1");
+            if ($q_bl && $q_bl->num_rows > 0) $blokir_alasan = 'realisasi';
+        } else {
+            $q_bl = $koneksi->query("SELECT 1 FROM tb_realisasi_detail RD LEFT JOIN ms_karyawan K ON K.id_karyawan = RD.id_karyawan LEFT JOIN ms_grup_borongan G ON G.id_grup = RD.id_grup WHERE RD.id_realisasi = $id_real_g AND UPPER(TRIM(COALESCE(NULLIF(TRIM(K.nama_karyawan), ''), TRIM(RD.nama_karyawan_manual)))) = UPPER(TRIM('$nama_manual')) AND (G.id_grup IS NULL OR UPPER(TRIM(G.nama_grup)) <> 'TIDAK DALAM RENCANA') LIMIT 1");
+            if ($q_bl && $q_bl->num_rows > 0) $blokir_alasan = 'realisasi';
+            // Nama pendek ("DEDI") vs nama lengkap ("DEDI SUPRIADI") di grup asli:
+            // cocok persis gagal, tapi ini orang yang sama — tolak juga supaya tidak
+            // jadi 2 baris (1 di grup asli, 1 di KARYAWAN TAMBAHAN).
+            if ($blokir_alasan === '' && $nama_mirip_k($nama_manual_u)) $blokir_alasan = 'realisasi';
+        }
+        if ($blokir_alasan !== '') {
+            $teks_blokir = 'Karyawan ini sudah ada di Realisasi ini, jadi tidak bisa ditambah manual lagi.';
+            echo "<script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script><script>Swal.fire({ icon: 'warning', title: 'Sudah Ada', text: '" . $teks_blokir . "', confirmButtonColor: '#2563eb', confirmButtonText: 'Lihat Kelola' }).then(() => { window.location.href = '?page=realisasi&aksi=kelola&id=$id_real_fix'; });</script>";
+            exit;
+        }
         $tgl_ref = $data_real['tgl_realisasi'] ?? date('Y-m-d');
 
         // Pastikan kolom relasi ada (DB lama)
@@ -102,7 +149,7 @@ if (isset($_POST['simpan_karyawan'])) {
                     showConfirmButton: false,
                     timer: 1500
                 }).then(() => {
-                    window.location.href = '?page=realisasi&aksi=karyawan&id=$id_real_fix';
+                    window.location.href = '?page=realisasi&aksi=kelola&id=$id_real_fix';
                 });
             </script>";
             exit;
@@ -117,6 +164,15 @@ $list_dept   = $koneksi->query("SELECT * FROM ms_departmen ORDER BY nama_departm
 $list_sub    = $koneksi->query("SELECT * FROM ms_sub_department ORDER BY nama_sub_department ASC");
 $list_jadwal = $koneksi->query("SELECT * FROM tb_jadwal ORDER BY id_jadwal ASC");
 $list_os     = $koneksi->query("SELECT * FROM ms_os_dhk ORDER BY OS_DHK ASC");
+// 2026-10-28: Pastikan Golongan 'Borongan' ada di ms_golongan, supaya di form Tambah
+// Karyawan bisa dipilih sebagai golongan tanpa input ganda. Kalau belum ada, buat
+// dengan id = MAX+1 (ms_golongan tidak auto-increment di dump 2026-10-03).
+// Karyawan tetap masuk grup KARYAWAN TAMBAHAN (1 baris saja), golongan Borongan
+// hanya menandai baris itu sebagai borongan (tombol Borongan muncul di Kelola).
+$ckBor = $koneksi->query("SELECT id_golongan FROM ms_golongan WHERE UPPER(TRIM(golongan)) = 'BORONGAN' LIMIT 1");
+if ($ckBor && $ckBor->num_rows == 0) {
+    $koneksi->query("INSERT INTO ms_golongan (id_golongan, golongan) SELECT COALESCE(MAX(id_golongan), 0) + 1, 'Borongan' FROM ms_golongan");
+}
 $list_gol    = $koneksi->query("SELECT * FROM ms_golongan ORDER BY golongan ASC");
 // Master grup (boleh tidak ada di DB lama)
 $has_grup = false;
@@ -126,11 +182,21 @@ $list_grup = $has_grup ? $koneksi->query("SELECT * FROM ms_grup_borongan ORDER B
 $has_anggota = false;
 $ckA = $koneksi->query("SHOW TABLES LIKE 'ms_grup_borongan_anggota'");
 if ($ckA && $ckA->num_rows > 0) $has_anggota = true;
+// 2026-10-28 (koreksi): Dropdown Tambah Karyawan — yang diblokir (DISABLED) HANYA
+// yang MASIH ADA di Realisasi non-TDR. RKK saja tidak lagi memblokir, jadi karyawan
+// yang sudah dihapus dari Realisasi (tombol Hapus di Kelola) muncul lagi sebagai
+// BISA DIPILIH, walau masih ada di RKK. Yang hanya ada di TDR tetap bisa dipilih.
+// Server guard di atas sudah diubah sama, jadi yang tampil bisa dipilih tidak akan
+// ditolak 'Sudah Ada' saat Simpan.
+$blokir_flag = "EXISTS (SELECT 1 FROM tb_realisasi_detail RD LEFT JOIN ms_grup_borongan G ON G.id_grup = RD.id_grup WHERE RD.id_realisasi = $idrealisasi AND RD.id_karyawan = k.id_karyawan AND RD.id_karyawan <> 0 AND (G.id_grup IS NULL OR UPPER(TRIM(G.nama_grup)) <> 'TIDAK DALAM RENCANA'))";
+$blokir_grup = "(SELECT GB.nama_grup FROM tb_realisasi_detail RD LEFT JOIN ms_grup_borongan GB ON GB.id_grup = RD.id_grup WHERE RD.id_realisasi = $idrealisasi AND RD.id_karyawan = k.id_karyawan AND (GB.id_grup IS NULL OR UPPER(TRIM(GB.nama_grup)) <> 'TIDAK DALAM RENCANA') ORDER BY RD.id_realisasi_detail ASC LIMIT 1)";
 // Karyawan aktif + grupnya (nama grup digabung, grup utama = id terkecil)
 if ($has_grup && $has_anggota) {
 $list_kar = $koneksi->query("SELECT k.*, d.nama_departmen, sd.nama_sub_department, j.keterangan AS shift_ket,
     (SELECT GROUP_CONCAT(gb.nama_grup SEPARATOR ', ') FROM ms_grup_borongan_anggota ga JOIN ms_grup_borongan gb ON gb.id_grup = ga.id_grup WHERE ga.id_karyawan = k.id_karyawan) AS grps,
-    (SELECT ga.id_grup FROM ms_grup_borongan_anggota ga WHERE ga.id_karyawan = k.id_karyawan ORDER BY ga.id_grup ASC LIMIT 1) AS id_grup_utama
+    (SELECT ga.id_grup FROM ms_grup_borongan_anggota ga WHERE ga.id_karyawan = k.id_karyawan ORDER BY ga.id_grup ASC LIMIT 1) AS id_grup_utama,
+    ($blokir_flag) AS is_blokir,
+    ($blokir_grup) AS blokir_grup
     FROM ms_karyawan k
     LEFT JOIN ms_departmen d ON d.id_departmen = k.id_departmen
     LEFT JOIN ms_sub_department sd ON sd.id_sub_department = k.id_sub_department
@@ -138,7 +204,9 @@ $list_kar = $koneksi->query("SELECT k.*, d.nama_departmen, sd.nama_sub_departmen
     WHERE k.status_karyawan = 'Aktif' AND k.nama_karyawan NOT LIKE 'User PIN%' ORDER BY k.nama_karyawan ASC");
 } else {
 $list_kar = $koneksi->query("SELECT k.*, d.nama_departmen, sd.nama_sub_department, j.keterangan AS shift_ket,
-    NULL AS grps, NULL AS id_grup_utama
+    NULL AS grps, NULL AS id_grup_utama,
+    ($blokir_flag) AS is_blokir,
+    ($blokir_grup) AS blokir_grup
     FROM ms_karyawan k
     LEFT JOIN ms_departmen d ON d.id_departmen = k.id_departmen
     LEFT JOIN ms_sub_department sd ON sd.id_sub_department = k.id_sub_department
@@ -172,13 +240,18 @@ $default_upah = 115000;
                     
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                         <div>
-                            <label class="block text-sm font-bold text-gray-700 mb-2">Karyawan (ketik untuk cari) <span class="text-rose-500">*</span></label>
-                            <select name="id_karyawan" id="id_karyawan_select" required class="select2-karyawan block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Karyawan (ketik untuk cari)</label>
+                            <select name="id_karyawan" id="id_karyawan_select" class="select2-karyawan block w-full px-4 py-3 border border-gray-300 rounded-2xl outline-none">
                                 <option value="">- Pilih Karyawan -</option>
                                 <?php while ($k = $list_kar->fetch_assoc()) :
+                                    $is_blokir_dd = !empty($k['is_blokir']);
+                                    // Grup keterangan: grup blokir dulu, kalau kosong pakai grup master pertama, kalau tetap kosong tanpa nama grup.
+                                    $grup_ket = trim($k['blokir_grup'] ?? '');
+                                    if ($grup_ket === '' && !empty($k['grps'])) $grup_ket = trim(explode(',', $k['grps'])[0]);
                                     $lbl = $k['nama_karyawan'] . (!empty($k['grps']) ? '  [' . $k['grps'] . ']' : '');
+                                    if ($is_blokir_dd) $lbl .= ($grup_ket !== '' ? ' - Sudah ada di grup ' . $grup_ket : ' - Sudah ada di Realisasi ini');
                                 ?>
-                                    <option value="<?= $k['id_karyawan']; ?>"
+                                    <option value="<?= $k['id_karyawan']; ?>"<?= $is_blokir_dd ? ' disabled' : ''; ?>
                                         data-nama="<?= htmlspecialchars($k['nama_karyawan']); ?>"
                                         data-upah="<?= (float)($k['upah'] ?? 0); ?>"
                                         data-jadwal="<?= (int)($k['id_jadwal'] ?? 0); ?>"
@@ -189,6 +262,7 @@ $default_upah = 115000;
                                         data-grup="<?= (int)($k['id_grup_utama'] ?? 0); ?>"><?= htmlspecialchars($lbl); ?></option>
                                 <?php endwhile; ?>
                             </select>
+                            <p class="text-xs text-gray-500 mt-1">Boleh dikosongkan kalau nama diketik manual di kolom sebelah — yang wajib diisi itu Nama Lengkapnya.</p>
                         </div>
                         <div>
                             <label class="block text-sm font-bold text-gray-700 mb-2">Nama Lengkap Karyawan <span class="text-rose-500">*</span></label>
@@ -543,7 +617,11 @@ $default_upah = 115000;
             karSetSel('#id_dept_sel', opt.data('dept'));
             karSetSel('#id_sub_sel', opt.data('sub'));
             karSetSel('select[name="id_os_dhk"]', opt.data('os'));
-            karSetSel('select[name="id_golongan"]', opt.data('gol'));
+            // 2026-10-28: Golongan JANGAN ditimpa kalau user sudah pilih manual
+            // (misal Borongan) — kalau tidak, pilih karyawan setelah pilih Borongan
+            // akan mengembalikan Golongan ke golongan master (Harian), baris tersimpan
+            // jadi Harian, dan tombol Borongan di Kelola tidak muncul.
+            if (!$('select[name="id_golongan"]').val()) karSetSel('select[name="id_golongan"]', opt.data('gol'));
             karSetSel('#id_grup_sel', opt.data('grup'));
         });
 

@@ -136,10 +136,79 @@ if (!function_exists('tg_ensure_tables')) {
         @$koneksi->query("INSERT INTO tb_telegram_log (tgl, aksi, id_ref, oleh, ket) VALUES (NOW(), '$a', " . (int)$id_ref . ", '$o', '$k')");
     }
 
+    // Fallback HTTP POST tanpa ekstensi cURL (pakai file_get_contents).
+    // Dipakai HANYA kalau curl_init() tidak ada, mis. Apache Laragon yang
+    // gagal load php_curl.dll padahal CLI-nya bisa. Mendukung form biasa
+    // dan multipart file (CURLFile maupun marker __tg_file).
+    function tg_http_post($url, $params = [], $timeout = 20) {
+        $hasFile = false;
+        foreach ($params as $v) {
+            if ($v instanceof CURLFile) { $hasFile = true; break; }
+            if (is_array($v) && isset($v['__tg_file'])) { $hasFile = true; break; }
+        }
+        $headers = [];
+        if ($hasFile) {
+            $boundary = '----tg' . md5(uniqid('', true));
+            $headers[] = 'Content-Type: multipart/form-data; boundary=' . $boundary;
+            $body = '';
+            foreach ($params as $k => $v) {
+                if ($v instanceof CURLFile) {
+                    $path = $v->getFilename(); $name = $v->getPostFilename() ?: basename($path);
+                    $mime = $v->getMimeType() ?: 'application/octet-stream';
+                    $data = @file_get_contents($path);
+                    if ($data === false) return ['body' => false, 'code' => 0, 'error' => 'File tidak bisa dibaca: ' . $path];
+                    $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$k\"; filename=\"$name\"\r\nContent-Type: $mime\r\n\r\n$data\r\n";
+                } elseif (is_array($v) && isset($v['__tg_file'])) {
+                    $path = $v['__tg_file']; $name = $v['name'] ?? basename($path);
+                    $mime = $v['mime'] ?? 'application/octet-stream';
+                    $data = @file_get_contents($path);
+                    if ($data === false) return ['body' => false, 'code' => 0, 'error' => 'File tidak bisa dibaca: ' . $path];
+                    $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$k\"; filename=\"$name\"\r\nContent-Type: $mime\r\n\r\n$data\r\n";
+                } else {
+                    $body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n";
+                }
+            }
+            $body .= "--$boundary--\r\n";
+        } elseif (!empty($params)) {
+            $headers[] = 'Content-Type: application/x-www-form-urlencoded';
+            $body = http_build_query($params);
+        } else {
+            $body = null;
+        }
+        $do = function ($verify) use ($url, $body, $timeout, $headers) {
+            $opts = ['http' => ['method' => $body === null ? 'GET' : 'POST', 'timeout' => $timeout, 'ignore_errors' => true]];
+            if ($body !== null) { $opts['http']['header'] = implode("\r\n", $headers); $opts['http']['content'] = $body; }
+            $opts['ssl'] = ['verify_peer' => $verify, 'verify_peer_name' => $verify, 'allow_self_signed' => false];
+            $res = @file_get_contents($url, false, stream_context_create($opts));
+            $code = 0;
+            if (isset($http_response_header) && is_array($http_response_header)) {
+                foreach ($http_response_header as $h) { if (preg_match('#^HTTP/\S+\s+(\d+)#', $h, $m)) $code = (int)$m[1]; }
+            }
+            return ['body' => $res, 'code' => $code, 'error' => $res === false ? (string)(error_get_last()['message'] ?? 'HTTP gagal') : ''];
+        };
+        $r = $do(true);
+        if ($r['body'] === false && stripos($r['error'], 'ssl') !== false) {
+            // CA bundle tidak ketemu di instalasi ini: coba tanpa verifikasi
+            // daripada gagal total. Token tetap dikirim lewat HTTPS.
+            $r = $do(false);
+        }
+        return $r;
+    }
+
     function tg_api($cfg, $method, $params = [], $timeout = 20) {
         $token = trim((string)($cfg['bot_token'] ?? ''));
         if ($token === '') return ['ok' => false, 'description' => 'Bot token belum diisi'];
         $url = 'https://api.telegram.org/bot' . $token . '/' . $method;
+
+        if (!function_exists('curl_init')) {
+            $r = tg_http_post($url, $params, $timeout);
+            if ($r['body'] === false) return ['ok' => false, 'description' => 'HTTP: ' . $r['error']];
+            $body = $r['body']; $code = $r['code'];
+            $j = json_decode($body, true);
+            if (!is_array($j)) return ['ok' => false, 'description' => 'Response tidak valid (HTTP ' . $code . ')'];
+            if (empty($j['ok'])) return ['ok' => false, 'description' => (string)($j['description'] ?? 'Gagal'), 'raw' => $j];
+            return ['ok' => true, 'result' => $j['result'] ?? null];
+        }
 
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -186,9 +255,17 @@ if (!function_exists('tg_ensure_tables')) {
 
     function tg_send_document($cfg, $chat_id, $file_path, $caption = '', $reply_markup = null) {
         if (!is_file($file_path)) return ['ok' => false, 'description' => 'File tidak ditemukan'];
+        // CURLFile hanya ada kalau ekstensi cURL aktif; tanpa cURL pakai
+        // marker yang dimengerti tg_http_post() supaya tidak fatal duluan.
+        if (function_exists('curl_init')) {
+            $doc = new CURLFile($file_path);
+        } else {
+            $mime = @mime_content_type($file_path);
+            $doc = ['__tg_file' => $file_path, 'name' => basename($file_path), 'mime' => $mime ?: 'application/octet-stream'];
+        }
         $params = [
             'chat_id' => $chat_id,
-            'document' => new CURLFile($file_path),
+            'document' => $doc,
             'caption' => mb_substr($caption, 0, 1000),
         ];
         if ($reply_markup !== null) $params['reply_markup'] = json_encode($reply_markup);
@@ -241,7 +318,7 @@ if (!function_exists('tg_ensure_tables')) {
         $q = $koneksi->query("SELECT tgl_realisasi, status_realisasi FROM tb_realisasi WHERE id_realisasi = $id LIMIT 1");
         $r = $q ? $q->fetch_assoc() : null;
         if (!$r) return null;
-        $qs = $koneksi->query("SELECT COUNT(*) jml, SUM(r_upah) ttl FROM tb_realisasi_detail WHERE id_realisasi = $id");
+        $qs = $koneksi->query("SELECT COUNT(*) jml, SUM(r_upah) ttl FROM (SELECT d.r_upah FROM tb_realisasi_detail d WHERE d.id_realisasi = " . (int)$id . " AND d.id_realisasi_detail = (SELECT MIN(d2.id_realisasi_detail) FROM tb_realisasi_detail d2 WHERE d2.id_realisasi = d.id_realisasi AND IF(d2.id_karyawan = 0, CONCAT('M:', IFNULL(d2.nama_karyawan_manual, '')), CONCAT('K:', d2.id_karyawan)) = IF(d.id_karyawan = 0, CONCAT('M:', IFNULL(d.nama_karyawan_manual, '')), CONCAT('K:', d.id_karyawan)))) x");
         $s = $qs ? $qs->fetch_assoc() : ['jml' => 0, 'ttl' => 0];
         $st = (int)$r['status_realisasi'];
         $label = $st >= 2 ? 'Approved' : ($st == 1 ? 'Diajukan (menunggu approval)' : 'Draft');
@@ -267,6 +344,21 @@ if (!function_exists('tg_ensure_tables')) {
 
     function tg_fetch_export($cfg, $jenis, $id) {
         $url = tg_export_url($cfg, $jenis, $id);
+        if (!function_exists('curl_init')) {
+            $ctx = stream_context_create(['http' => ['method' => 'GET', 'timeout' => 120, 'ignore_errors' => true]]);
+            $body = @file_get_contents($url, false, $ctx);
+            $code = 0;
+            if (isset($http_response_header) && is_array($http_response_header)) {
+                foreach ($http_response_header as $h) { if (preg_match('#^HTTP/\S+\s+(\d+)#', $h, $m)) $code = (int)$m[1]; }
+            }
+            if ($body === false) return ['ok' => false, 'error' => 'Gagal ambil Excel: ' . (string)(error_get_last()['message'] ?? '')];
+            if ($code < 200 || $code >= 400) return ['ok' => false, 'error' => 'HTTP ' . $code . ' saat ambil Excel'];
+            if (strlen($body) < 50) return ['ok' => false, 'error' => 'File Excel kosong/terlalu kecil'];
+            $ext = $jenis === 'rencana' ? 'xls' : 'xlsx';
+            $path = rtrim(sys_get_temp_dir(), '\\/') . DIRECTORY_SEPARATOR . 'tg_' . $jenis . '_' . (int)$id . '_' . date('Ymd_His') . '.' . $ext;
+            if (file_put_contents($path, $body) === false) return ['ok' => false, 'error' => 'Gagal simpan file sementara'];
+            return ['ok' => true, 'path' => $path, 'size' => strlen($body)];
+        }
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 120);

@@ -14,7 +14,23 @@ if ($qr) while ($r = $qr->fetch_assoc()) $karyawan_list[] = $r;
 
 $notice = null;
 if (isset($_POST['sweep_save'])) {
-    $ok = sweep_save_config($koneksi, !empty($_POST['sweep_enabled']), intval($_POST['sweep_interval'] ?? 4), $_POST['sweep_master'] ?? 'auto');
+    $enabled = !empty($_POST['sweep_enabled']);
+    $master = $_POST['sweep_master'] ?? 'auto';
+    $interval_jam = 4; $mode = 'interval'; $times = '';
+    if (isset($_POST['sweep_schedule'])) {
+        $sched = $_POST['sweep_schedule'];
+        if (strpos($sched, 'fixed:') === 0) {
+            $mode = 'fixed';
+            $times = substr($sched, 6);
+        } elseif (strpos($sched, 'interval:') === 0) {
+            $interval_jam = (int)substr($sched, 9);
+        } else {
+            $interval_jam = (int)$sched;
+        }
+    } else {
+        $interval_jam = intval($_POST['sweep_interval'] ?? 4);
+    }
+    $ok = sweep_save_config($koneksi, $enabled, $interval_jam, $master, $mode, $times);
     $notice = $ok ? ['success' => true, 'message' => 'Jadwal auto-sweep disimpan.'] : ['success' => false, 'message' => 'Gagal simpan jadwal.'];
 }
 if (isset($_POST['fp_pull'])) {
@@ -28,13 +44,21 @@ if (isset($_POST['fp_delete'])) {
     if ($pin !== '' && fp_delete_pin($koneksi, $pin)) $notice = ['success' => true, 'message' => "Backup PIN $pin dihapus dari database"];
     else $notice = ['success' => false, 'message' => 'Gagal hapus / PIN kosong'];
 }
-// Bulk: tarik semua karyawan aktif dari 1 mesin sumber
+// Bulk: tarik karyawan aktif yang belum punya backup di DB (yang sudah ada dilewati)
 $bulk = null;
 if (isset($_POST['fp_bulk_pull'])) {
     $src = $_POST['bulk_device_id'] ?? '';
-    $bulk = ['total' => count($karyawan_list), 'sukses' => 0, 'kosong' => 0, 'gagal' => 0, 'detail' => []];
-    set_time_limit(0);
+    $sudah = [];
+    $qh = $koneksi->query("SELECT DISTINCT pin FROM tb_fingerprint");
+    if ($qh) while ($rh = $qh->fetch_assoc()) { $p = trim((string)$rh['pin']); if ($p !== '') $sudah[$p] = true; }
+    $belum = [];
     foreach ($karyawan_list as $k) {
+        $p = trim((string)$k['no_absen']);
+        if ($p !== '' && !isset($sudah[$p])) $belum[] = $k;
+    }
+    $bulk = ['total' => count($karyawan_list), 'dicek' => count($belum), 'dilewati' => count($karyawan_list) - count($belum), 'sukses' => 0, 'kosong' => 0, 'gagal' => 0, 'detail' => []];
+    set_time_limit(0);
+    foreach ($belum as $k) {
         $r = fp_pull_and_save($koneksi, $src, $k['no_absen']);
         $bulk['detail'][] = ['pin' => $k['no_absen'], 'nama' => $k['nama_karyawan'], 'res' => $r];
         if (!empty($r['success'])) $bulk['sukses']++;
@@ -45,11 +69,15 @@ if (isset($_POST['fp_bulk_pull'])) {
 
 $summary = fp_summary($koneksi);
 $sweep_cfg = sweep_get_config($koneksi);
+$current_sched = $sweep_cfg['schedule_mode'] === 'fixed' ? 'fixed:' . $sweep_cfg['fixed_times'] : 'interval:' . $sweep_cfg['interval_jam'];
 $next_run = '-';
 $next_ts = 0;
 if (!empty($sweep_cfg['last_run'])) {
-    $next_ts = strtotime($sweep_cfg['last_run']) + sweep_interval_seconds($sweep_cfg['interval_jam']);
-    $next_run = date('d/m/Y H:i', $next_ts);
+    $next_ts = sweep_due_ts($sweep_cfg);
+    $next_run = $next_ts > 0 ? date('d/m/Y H:i', $next_ts) : 'menunggu jalan';
+} elseif ($sweep_cfg['enabled']) {
+    $next_ts = sweep_next_ts($sweep_cfg);
+    $next_run = $next_ts > 0 ? date('d/m/Y H:i', $next_ts) : 'tidak ada jadwal';
 }
 // Ekor sweep.log buat diagnosa (kapan script terakhir dieksekusi scheduler)
 $sweep_log_lines = [];
@@ -111,13 +139,22 @@ Kalau mesin rusak/hilang, pilih PIN yang sudah ada backup → <strong>Restore ke
 </select>
 </div>
 <div>
-<label class="block text-sm font-semibold text-gray-700 mb-1.5">Interval</label>
-<select name="sweep_interval" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm">
-<option value="-1" <?= (int)$sweep_cfg['interval_jam'] === -1 ? 'selected' : '' ?>>1 menit (testing)</option>
-<option value="0" <?= (int)$sweep_cfg['interval_jam'] === 0 ? 'selected' : '' ?>>5 menit (testing)</option>
+<label class="block text-sm font-semibold text-gray-700 mb-1.5">Jadwal</label>
+<select name="sweep_schedule" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm">
+<optgroup label="Interval (berjalan otomatis saat halaman dibuka)">
+<option value="interval:-1" <?= $current_sched === 'interval:-1' ? 'selected' : '' ?>>1 menit (testing)</option>
+<option value="interval:0" <?= $current_sched === 'interval:0' ? 'selected' : '' ?>>5 menit (testing)</option>
 <?php foreach ([1,2,4,6,12,24] as $h): ?>
-<option value="<?= $h ?>" <?= (int)$sweep_cfg['interval_jam'] === $h ? 'selected' : '' ?>><?= $h ?> jam</option>
+<option value="interval:<?= $h ?>" <?= $current_sched === 'interval:' . $h ? 'selected' : '' ?>><?= $h ?> jam</option>
 <?php endforeach; ?>
+</optgroup>
+<optgroup label="Jadwal tetap (jalan jika halaman dibuka pada jam tersebut)">
+<option value="fixed:01:00" <?= $current_sched === 'fixed:01:00' ? 'selected' : '' ?>>Tiap hari 01:00</option>
+<option value="fixed:22:00" <?= $current_sched === 'fixed:22:00' ? 'selected' : '' ?>>Tiap hari 22:00</option>
+<option value="fixed:22:00,01:00" <?= $current_sched === 'fixed:22:00,01:00' ? 'selected' : '' ?>>Tiap hari 22:00 & 01:00</option>
+<option value="fixed:08:00,20:00" <?= $current_sched === 'fixed:08:00,20:00' ? 'selected' : '' ?>>Tiap hari 08:00 & 20:00</option>
+<option value="fixed:12:00,18:00" <?= $current_sched === 'fixed:12:00,18:00' ? 'selected' : '' ?>>Tiap hari 12:00 & 18:00</option>
+</optgroup>
 </select>
 </div>
 <div>
@@ -294,9 +331,9 @@ endif;
 <!-- Bulk -->
 <div class="mb-8 p-6 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl border border-purple-100">
 <h4 class="text-lg font-semibold text-purple-800 mb-1"><i class="fas fa-layer-group mr-2"></i>Backup Massal — semua karyawan dari 1 mesin</h4>
-<p class="text-sm text-gray-500 mb-4">Loop semua karyawan aktif, yang belum enroll akan tercatat “kosong”. Bisa lama untuk ratusan karyawan.</p>
+<p class="text-sm text-gray-500 mb-4">Hanya mengecek karyawan yang belum punya backup di database; yang sudah ada langsung dilewati agar cepat. Yang belum enroll akan tercatat "kosong".</p>
 <?php if ($bulk): ?>
-<div class="mb-4 p-3 bg-white rounded-lg border text-sm">Total: <?= $bulk['total'] ?> | <span class="text-green-600 font-bold">Sukses: <?= $bulk['sukses'] ?></span> | <span class="text-amber-600">Kosong: <?= $bulk['kosong'] ?></span> | <span class="text-red-600">Gagal: <?= $bulk['gagal'] ?></span></div>
+<div class="mb-4 p-3 bg-white rounded-lg border text-sm">Total: <?= $bulk['total'] ?> | Dicek: <?= $bulk['dicek'] ?> | <span class="text-slate-500">Dilewati (sudah ada): <?= $bulk['dilewati'] ?></span> | <span class="text-green-600 font-bold">Sukses: <?= $bulk['sukses'] ?></span> | <span class="text-amber-600">Kosong: <?= $bulk['kosong'] ?></span> | <span class="text-red-600">Gagal: <?= $bulk['gagal'] ?></span></div>
 <?php endif; ?>
 <form method="POST" onsubmit="return confirm('Backup semua karyawan aktif dari mesin ini? Lanjutkan?')">
 <div class="flex flex-col md:flex-row gap-3">

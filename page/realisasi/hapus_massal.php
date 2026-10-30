@@ -1,6 +1,8 @@
 <?php
 $role_user = strtolower($_SESSION['role'] ?? '');
-$is_authorized_delete = ($role_user == "admin master" || $role_user == "kepala pabrik" || $role_user == "owner");
+// 2026-10-26: Hapus Checklist hanya untuk Kepala Pabrik + Admin Master.
+// Owner dan Admin HR tidak bisa lagi (tombol Hapus Masal lama sudah dihapus untuk semua role).
+$is_authorized_delete = ($role_user == "admin master" || $role_user == "kepala pabrik");
 
 if (!$is_authorized_delete) {
     echo "<!DOCTYPE html><html><head>
@@ -10,7 +12,7 @@ if (!$is_authorized_delete) {
             document.addEventListener('DOMContentLoaded', function() {
                 Swal.fire({
                     title: 'Akses Ditolak!',
-                    text: 'Anda tidak memiliki izin untuk mengakses halaman Hapus Massal.',
+                    text: 'Hapus Checklist hanya untuk Kepala Pabrik dan Admin Master.',
                     icon: 'error',
                     confirmButtonColor: '#3b82f6'
                 }).then(() => {

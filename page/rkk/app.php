@@ -1,5 +1,17 @@
 <?php
 
+// Gate server Approve/Unapprove RKK (2026-10-26, dibalik atas permintaan user):
+// Owner, Admin Master, dan Kepala Pabrik saja. Admin HR TIDAK bisa Approve lagi.
+// Gate ini HANYA untuk app/unapp; propose/unpropose (pro/unpro) tidak diubah di sini.
+if (in_array($_GET['iddetail'] ?? '', ["app", "unapp"], true)) {
+    $role_rkk = strtolower($_SESSION['role'] ?? '');
+    if ($role_rkk !== "owner" && $role_rkk !== "admin master" && $role_rkk !== "kepala pabrik") {
+        echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+            Swal.fire({ icon: "error", title: "Akses Ditolak", text: "Hanya Owner, Admin Master, dan Kepala Pabrik yang bisa Approve/Unapprove RKK.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.location.href = "?page=rkk"; });
+        </script></body></html>';
+        exit;
+    }
+}
 $id = $_GET['id'];
 $status = $_GET['iddetail'];
 

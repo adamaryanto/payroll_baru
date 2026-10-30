@@ -1,10 +1,19 @@
 <?php
+// 2026-10-26: Admin HR view-only di Realisasi (lihat boleh, ubah tidak).
+$is_admin_hr_ro = (strtolower($_SESSION['role'] ?? '') === 'admin hr');
 // Self-heal master grup + kolom id_grup (penting di DB lama sebelum query utama jalan)
 include_once __DIR__ . '/../grup_borongan/_setup.php';
 // Kolom pengganti (tukar karyawan: nama tetap, tercatat "Digantikan oleh ...")
 $checkGantiColK = $koneksi->query("SHOW COLUMNS FROM tb_realisasi_detail LIKE 'id_pengganti'");
 if ($checkGantiColK->num_rows == 0) {
     $koneksi->query("ALTER TABLE tb_realisasi_detail ADD COLUMN id_pengganti INT NULL DEFAULT NULL");
+}
+// 2026-10-24: index yang sama seperti di list Realisasi (dibuat sekali saja,
+// kalau sudah ada tidak diulang) — mempercepat semua query Kelola yang memfilter
+// tb_realisasi_detail per id_realisasi.
+$__idx_real_k = $koneksi->query("SHOW INDEX FROM tb_realisasi_detail WHERE Key_name = 'idx_realisasi'");
+if ($__idx_real_k && $__idx_real_k->num_rows == 0) {
+    @$koneksi->query("ALTER TABLE tb_realisasi_detail ADD INDEX idx_realisasi (id_realisasi)");
 }
 // Helpers for cross-midnight time comparisons
 include_once __DIR__ . '/sync_lib.php';
@@ -44,6 +53,10 @@ if (isset($_GET['id'])) {
     $datajamkerja        = $datadetail['jam_kerja'];
     $datastatusrealisasi = (int)$datadetail['status_realisasi'];
     $idrkk               = $datadetail['id_rkk'];
+
+    // UBAH UPAH TIDAK LAGI DI KELOLA (dihapus 2026-10-24 atas permintaan Reza):
+    // kolom Upah di tabel Kelola kembali jadi teks saja. Ubah upah hanya lewat
+    // halaman Detail (kolom UPAH (POKOK) di sana sudah bisa diedit).
 
     // OTOMATIS: semua karyawan yang tap tapi TIDAK ADA di rencana tanggal ini
     // dimasukkan ke grup "TIDAK DALAM RENCANA" (satu tabel, tanpa panel terpisah).
@@ -86,7 +99,8 @@ if (isset($_GET['id'])) {
         COALESCE(JB.jabatan, JB_PG.jabatan) as nama_sub_department,
         C.tgl_realisasi, 
         COALESCE(O.OS_DHK, O_M.OS_DHK) as label_os,
-        COALESCE(G.golongan, G_M.golongan) as label_gol,
+        COALESCE(G_M.golongan, G.golongan) as label_gol,
+        (UPPER(TRIM(COALESCE(G.golongan, ''))) = 'BORONGAN' OR UPPER(TRIM(COALESCE(G_M.golongan, ''))) = 'BORONGAN') as is_golongan_borongan,
         RD.status_rkk,
         GB.nama_grup as label_grup,
         GA.is_borongan as is_borongan_orang,
@@ -157,17 +171,24 @@ if (isset($_GET['id'])) {
     $datastatusrealisasi = 0;
 }
 
+// 2026-10-26: Tarik Data saat Realisasi sudah Approved: boleh untuk Owner + Admin Master
+// (dulu Owner saja). Role lain (Admin HR, Kepala Pabrik) tetap disembunyikan saat Approved;
+// saat belum Approved, Tarik Data tetap tampil untuk semua role seperti sebelumnya.
 if ($datastatusrealisasi >= 2) {
-    if ($_SESSION['role'] != "owner") {
-        $status = "hidden";
-    } else {
-        $status = "";
-    }
+    $status = in_array(strtolower($_SESSION['role'] ?? ''), ["owner", "admin master"], true) ? "" : "hidden";
 } else {
     $status = "";
 }
 
 $simpan = @$_POST['simpan'];
+// Server gate Admin HR view-only: tolak Simpan Keterangan saja.
+// Tarik Data (cleanup) SENGAJA tidak diblokir — Admin HR tetap boleh Tarik Data.
+if ($is_admin_hr_ro && !empty($simpan)) {
+    echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>
+        Swal.fire({ icon: "error", title: "Akses Ditolak", text: "Admin HR tidak bisa menyimpan Keterangan Realisasi.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.history.back(); });
+    </script></body></html>';
+    exit;
+}
 if ($simpan) {
     $tketerangan = @$_POST['tketerangan'];
 
@@ -199,6 +220,40 @@ if ($simpan) {
         </html>';
         exit;
     }
+}
+
+// 2026-10-27: Hapus 1 baris karyawan di Kelola (tombol Hapus di kolom Aksi).
+// Menghapus detail + rincian borongannya (urutan sama seperti hapus_massal).
+// 2026-10-27 (koreksi terakhir): Hapus per baris di Kelola HANYA untuk
+// Admin Master + Kepala Pabrik (sama seperti Hapus Terpilih di List), dan
+// Realisasi yang sudah Approved (>=2) TIDAK BISA dihapus barisnya.
+// Admin HR dan Owner tidak bisa hapus. Baris harus milik Realisasi ini
+// (id_realisasi dicocokkan) supaya POST yang diutak-atik tidak bisa menghapus
+// baris Realisasi lain.
+$hapus_detail = @$_POST['hapus_detail'];
+if (!empty($hapus_detail)) {
+    $id_detail_hapus = (int)@$_POST['id_detail'];
+    $id_real_hapus = (int)($idrealisasi ?? 0);
+    $err_hapus = '';
+    if (!in_array(strtolower($_SESSION['role'] ?? ''), ["admin master", "kepala pabrik"], true)) $err_hapus = 'Hapus karyawan hanya untuk Admin Master dan Kepala Pabrik.';
+    elseif ($datastatusrealisasi >= 2) $err_hapus = 'Realisasi sudah Approved, tidak bisa menghapus karyawan.';
+    elseif ($id_detail_hapus <= 0 || $id_real_hapus <= 0) $err_hapus = 'Baris yang mau dihapus tidak valid.';
+    else {
+        $cek_hapus = $koneksi->query("SELECT id_realisasi_detail FROM tb_realisasi_detail WHERE id_realisasi_detail = $id_detail_hapus AND id_realisasi = $id_real_hapus LIMIT 1");
+        if (!$cek_hapus || $cek_hapus->num_rows == 0) $err_hapus = 'Baris tidak ditemukan di Realisasi ini.';
+    }
+    if ($err_hapus !== '') {
+        echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>Swal.fire({ icon: "error", title: "Gagal", text: "' . $err_hapus . '", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.location.href = "?page=realisasi&aksi=kelola&id=' . $id_real_hapus . '"; });</script></body></html>';
+        exit;
+    }
+    $koneksi->query("DELETE FROM tb_realisasi_borongan WHERE id_realisasi_detail = $id_detail_hapus");
+    $ok_hapus = $koneksi->query("DELETE FROM tb_realisasi_detail WHERE id_realisasi_detail = $id_detail_hapus AND id_realisasi = $id_real_hapus");
+    if ($ok_hapus) {
+        echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>Swal.fire({ icon: "success", title: "Berhasil", text: "Karyawan berhasil dihapus dari Realisasi ini.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.location.href = "?page=realisasi&aksi=kelola&id=' . $id_real_hapus . '"; });</script></body></html>';
+    } else {
+        echo '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script></head><body><script>Swal.fire({ icon: "error", title: "Gagal", text: "Gagal menghapus karyawan.", confirmButtonColor: "#2563eb", confirmButtonText: "OK" }).then(() => { window.location.href = "?page=realisasi&aksi=kelola&id=' . $id_real_hapus . '"; });</script></body></html>';
+    }
+    exit;
 }
 
 $cleanup = @$_POST['cleanup'];
@@ -468,7 +523,7 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                 </div>
                                 <div class="col-md-8 mb-3 md:mb-0">
                                     <label class="font-bold text-gray-700 text-sm">Keterangan</label>
-                                    <input type="text" name="tketerangan" value="<?php echo $dataketerangan; ?>" placeholder="Masukkan keterangan..." class="form-control text-base py-2" autocomplete="off" />
+                                    <input type="text" name="tketerangan" value="<?php echo $dataketerangan; ?>" placeholder="Masukkan keterangan..." class="form-control text-base py-2" autocomplete="off"<?= $is_admin_hr_ro ? ' disabled' : '' ?> />
                                 </div>
                             </div>
                         </div>
@@ -580,8 +635,13 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                 while ($qk && ($rkk = $qk->fetch_assoc())) { $keep_ids[(int)$rkk['k']] = true; $cnt_person[$rkk['pk']] = (int)$rkk['c']; }
                                 $jml_active = 0;
                                 $last_dept = null;
-                                $ncol = (strtolower($_SESSION['role']) != 'admin hr') ? 17 : 16;
-                                $aksi_th = (strtolower($_SESSION['role']) != 'admin hr') ? '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center">Aksi</th>' : '';
+                                // Kolom Aksi (tombol Detail) untuk SEMUA role (2026-10-24):
+                                // sebelumnya kolom ini disembunyikan untuk Admin HR, jadi
+                                // Detail + ubah gaji di Detail praktis cuma bisa dijangkau
+                                // role lain. Approve/Unapprove diatur di list Realisasi
+                                // (realisasi.php + app.php), bukan di sini.
+                                $ncol = 17;
+                                $aksi_th = '<th class="py-2 px-2 text-[12px] font-bold text-gray-700 uppercase align-middle text-center" style="white-space:nowrap;">Aksi</th>';
 
                                 // Kumpulkan baris + hitung grupnya dulu (fallback master), lalu
                                 // kelompokkan per grup (urutan kemunculan pertama) agar 1 grup = 1 section.
@@ -864,25 +924,28 @@ function bulkSavePenalties($koneksi, $id_realisasi)
                                         </td>
                                         <?php if (empty($data['_rangkap'])) $total += $upah_setelah_potongan; ?>
 
-                                        <?php if (strtolower($_SESSION['role']) != 'admin hr') { ?>
                                             <td data-label="Aksi">
-                                                <div class="flex-action" style="display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center;">
-                                                    <?php if (strtolower($_SESSION['role']) != 'admin hr') { ?>
+                                                <div class="flex-action" style="display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; justify-content:center; gap:4px;">
                                                         <a href="?page=realisasi&aksi=detail&id=<?php echo $data['id_realisasi_detail']; ?>"
-                                                            class="btn btn-xs btn-info" style="background-color: #3498DB; border:none; border-radius:4px; padding:4px 10px;">
+                                                            class="btn btn-xs btn-info" style="background-color: #3498DB; border:none; border-radius:4px; padding:5px 9px; font-size:12px; flex:0 0 auto; white-space:nowrap; text-align:center; box-sizing:border-box;">
                                                             <i class="fa fa-eye"></i> Detail
                                                         </a>
-                                                        <?php if (!empty($data['is_borongan_orang']) || !empty($data['is_borongan_pengganti'])) { ?>
+                                                        <?php if (!empty($data['is_borongan_orang']) || !empty($data['is_borongan_pengganti']) || !empty($data['is_golongan_borongan'])) { ?>
                                                         <button type="button"
-                                                            class="btn btn-xs btn-borongan" style="background-color: #8b5cf6; color: #fff; border:none; border-radius:4px; padding:4px 10px; margin-left:4px;"
+                                                            class="btn btn-xs btn-borongan" style="background-color: #8b5cf6; color: #fff; border:none; border-radius:4px; padding:5px 9px; font-size:12px; flex:0 0 auto; white-space:nowrap; text-align:center; box-sizing:border-box;"
                                                             data-id="<?php echo $data['id_realisasi_detail']; ?>">
                                                             <i class="fa fa-list"></i> Borongan
                                                         </button>
                                                         <?php } ?>
-                                                    <?php } ?>
+                                                        <?php if (in_array(strtolower($_SESSION['role'] ?? ''), ["admin master", "kepala pabrik"], true) && $datastatusrealisasi < 2) { ?>
+                                                        <button type="button"
+                                                            class="btn btn-xs btn-hapus-detail" style="background-color: #e11d48; color: #fff; border:none; border-radius:4px; padding:5px 9px; font-size:12px; flex:0 0 auto; white-space:nowrap; text-align:center; box-sizing:border-box;"
+                                                            onclick="hapusDetailReal(<?php echo (int)$data['id_realisasi_detail']; ?>)">
+                                                            <i class="fa fa-trash"></i> Hapus
+                                                        </button>
+                                                        <?php } ?>
                                                 </div>
                                             </td>
-                                        <?php } ?>
                                     </tr>
                                 <?php
                                     $no++;
@@ -984,6 +1047,21 @@ function bulkSavePenalties($koneksi, $id_realisasi)
         </div>
     </div>
 </div>
+
+<script>
+// 2026-10-27: Hapus 1 baris karyawan di Kelola — konfirmasi dulu, lalu POST ke
+// halaman Kelola yang sama (GET id ikut terbawa lewat URL) dengan hapus_detail.
+function hapusDetailReal(idDetail) {
+    function doSubmit() {
+        var f = document.createElement('form'); f.method = 'POST'; f.action = window.location.href;
+        var h1 = document.createElement('input'); h1.type = 'hidden'; h1.name = 'hapus_detail'; h1.value = '1'; f.appendChild(h1);
+        var h2 = document.createElement('input'); h2.type = 'hidden'; h2.name = 'id_detail'; h2.value = idDetail; f.appendChild(h2);
+        document.body.appendChild(f); f.submit();
+    }
+    if (typeof Swal === 'undefined') { if (confirm('Hapus karyawan ini dari Realisasi ini?')) doSubmit(); return; }
+    Swal.fire({ title: 'Hapus Karyawan?', text: 'Baris ini akan dihapus permanen dari Realisasi ini, beserta rincian borongannya.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#e11d48', cancelButtonColor: '#64748b', confirmButtonText: 'Ya, Hapus', cancelButtonText: 'Batal' }).then(function(r) { if (r.isConfirmed) doSubmit(); });
+}
+</script>
 
 <style>
     /* 1. Reset wrapper agar tidak menggunakan float bawaan DataTables */
